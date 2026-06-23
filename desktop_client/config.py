@@ -1,0 +1,3 @@
+API_BASE_URL = "http://127.0.0.1:8000"
+POLL_INTERVAL_MS = 2000
+DEFAULT_USER_ID = "demo_user"

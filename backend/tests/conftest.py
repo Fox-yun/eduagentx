@@ -28,7 +28,7 @@ def anyio_backend():
 async def client():
     """Create an async test client with mocked database and Redis."""
     with (
-        patch("app.core.database.check_database_connection", new_callable=AsyncMock, return_value=True),
+        patch("app.main.check_database_connection", new_callable=AsyncMock, return_value=True),
         patch("app.core.redis.check_redis_connection", new_callable=AsyncMock, return_value=True),
     ):
         transport = ASGITransport(app=app)

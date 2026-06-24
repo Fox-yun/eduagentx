@@ -109,7 +109,7 @@ async def submit_diagnostic(
     if answers.get("diag-2") == "b":
         correct_count += 1
 
-    (correct_count / total_objective) * 100 if total_objective > 0 else 0
+    score = (correct_count / total_objective) * 100 if total_objective > 0 else 0
 
     # Create a path generation task
     task_service = TaskService(db)
@@ -130,4 +130,5 @@ async def submit_diagnostic(
     return {
         "next_step": "generating",
         "active_task_id": task.id,
+        "score": score,
     }

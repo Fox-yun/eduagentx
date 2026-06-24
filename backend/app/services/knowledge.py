@@ -275,7 +275,7 @@ class KnowledgeService:
             select(KnowledgeChunk)
             .where(
                 KnowledgeChunk.document_id.in_(doc_ids),
-                KnowledgeChunk.content.ilike(f"%{query}%"),
+                KnowledgeChunk.content.ilike(f"%{query.replace('%', '\\%').replace('_', '\\_')}%"),
             )
             .limit(limit)
         )

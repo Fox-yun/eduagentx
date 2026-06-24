@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.datetime import utc_now
 from app.core.errors import ApiError
-from app.models.path import LearningEdge
+from app.models.path import LearningEdge, LearningPath
 from app.models.progress import LearningProgress, MasterySnapshot
 from app.models.unit import (
     Assessment,
@@ -269,6 +269,10 @@ class UnitService:
         old_mastery = progress.mastery if progress else 0.0
         new_mastery = min(100.0, old_mastery + (score - 50) * 0.5) if passed else old_mastery
 
+        # Update progress record
+        if progress:
+            progress.mastery = new_mastery
+
         # Create mastery snapshot
         snapshot = MasterySnapshot(
             id=str(uuid.uuid4()),
@@ -326,9 +330,21 @@ class UnitService:
         completed_node_id: str,
     ) -> None:
         """Unlock nodes whose prerequisites are all completed."""
-        # Get edges where completed node is source
+        # Get active version for this path
+        path_result = await self.db.execute(
+            select(LearningPath).where(LearningPath.id == path_id)
+        )
+        path = path_result.scalar_one_or_none()
+        if not path or not path.active_version_id:
+            return
+        version_id = path.active_version_id
+
+        # Get edges where completed node is source, filtered by version
         edges_result = await self.db.execute(
-            select(LearningEdge).where(LearningEdge.source_node_id == completed_node_id)
+            select(LearningEdge).where(
+                LearningEdge.source_node_id == completed_node_id,
+                LearningEdge.version_id == version_id,
+            )
         )
         outgoing_edges = list(edges_result.scalars().all())
 
@@ -337,7 +353,10 @@ class UnitService:
 
             # Check all prerequisites of target node
             prereq_result = await self.db.execute(
-                select(LearningEdge).where(LearningEdge.target_node_id == target_node_id)
+                select(LearningEdge).where(
+                    LearningEdge.target_node_id == target_node_id,
+                    LearningEdge.version_id == version_id,
+                )
             )
             prereq_edges = list(prereq_result.scalars().all())
 

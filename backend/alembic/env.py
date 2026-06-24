@@ -13,6 +13,15 @@ from app.config import get_settings
 from app.core.database import Base
 
 # Import all models so they are registered with Base.metadata
+from app.models import *  # noqa: F401, F403
+from app.models.clarification import *  # noqa: F401, F403
+from app.models.goal import *  # noqa: F401, F403
+from app.models.knowledge import *  # noqa: F401, F403
+from app.models.path import *  # noqa: F401, F403
+from app.models.progress import *  # noqa: F401, F403
+from app.models.task import *  # noqa: F401, F403
+from app.models.unit import *  # noqa: F401, F403
+from app.models.user import *  # noqa: F401, F403
 
 config = context.config
 if config.config_file_name is not None:

@@ -53,6 +53,9 @@ def verify_password(password: str, hash_value: str) -> bool:
         return _ph.verify(hash_value, password)
     except VerifyMismatchError:
         return False
+    except Exception:
+        # Malformed hash or other argon2 errors — treat as non-match
+        return False
 
 
 def needs_rehash(hash_value: str) -> bool:

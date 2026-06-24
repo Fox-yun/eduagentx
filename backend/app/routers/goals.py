@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.schemas import CursorPage
@@ -39,6 +39,8 @@ class UpdateGoalRequest(BaseModel):
 
 
 class GoalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     goal_id: str
     raw_goal: str
     normalized_goal: str | None
@@ -54,9 +56,6 @@ class GoalResponse(BaseModel):
     active_task_id: str | None
     created_at: str
     updated_at: str
-
-    class Config:
-        from_attributes = True
 
 
 def _goal_to_response(goal: Any) -> GoalResponse:

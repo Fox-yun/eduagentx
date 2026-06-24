@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_session, get_current_user
@@ -46,22 +46,16 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
-class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str
-
-
 # Response schemas
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     user_id: str
     email: str
     display_name: str
     email_verified: bool
     onboarding_completed: bool
     status: str
-
-    class Config:
-        from_attributes = True
 
 
 class RegisterResponse(BaseModel):

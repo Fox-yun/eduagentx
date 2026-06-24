@@ -14,7 +14,8 @@ def setup_logging() -> None:
     settings = get_settings()
 
     # Set log level
-    getattr(logging, settings.log_level.upper(), logging.INFO)
+    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.getLogger().setLevel(log_level)
 
     structlog.configure(
         processors=[

@@ -15,12 +15,24 @@ logger = structlog.get_logger()
 
 
 def run_async(coro: Any) -> Any:
-    """Run an async function in a sync context."""
-    loop = asyncio.new_event_loop()
+    """Run an async function in a sync context.
+
+    Reuses the current event loop if one exists, otherwise creates a new one.
+    """
     try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # Already inside an event loop (e.g. Jupyter) — use nest_asyncio or fallback
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+
+    return asyncio.run(coro)
 
 
 @celery_app.task(bind=True, name="tasks.execute_background_task")  # type: ignore[untyped-decorator]

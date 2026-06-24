@@ -86,22 +86,6 @@ async def complete_onboarding(
     )
 
 
-@router.put("/me/profile")
-async def update_profile(
-    body: UpdateProfileRequest,
-    user: User = Depends(require_active_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Update user profile (PUT endpoint)."""
-    service = UserService(db)
-    return await service.update_profile(
-        user_id=user.id,
-        display_name=body.display_name,
-        preferred_language=body.preferred_language,
-        timezone=body.timezone,
-    )
-
-
 @router.put("/me/password")
 async def change_password(
     body: ChangePasswordRequest,

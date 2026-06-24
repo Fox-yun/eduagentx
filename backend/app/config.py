@@ -92,5 +92,13 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached application settings."""
+    """Get cached application settings.
+
+    Call get_settings.cache_clear() in tests to reset.
+    """
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    """Clear the settings cache. Useful in tests."""
+    get_settings.cache_clear()

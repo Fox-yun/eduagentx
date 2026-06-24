@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.datetime import to_iso_string
@@ -15,6 +16,7 @@ from app.common.enums import TERMINAL_TASK_STATUSES
 from app.common.schemas import CursorPage
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
+from app.models.task import BackgroundTask
 from app.models.user import User
 from app.services.task import TaskService
 
@@ -117,11 +119,21 @@ async def stream_task_events(
     - Real-time updates via polling (Redis Pub/Sub in production)
     - Heartbeat every 15 seconds
     - Auto-close on terminal state
+
+    Note: The initial DB session (from get_db) is used only for ownership
+    verification. The event generator creates short-lived sessions for each
+    query to avoid holding a connection from the pool for the entire stream.
     """
+    from app.core.database import get_session_factory
+
     service = TaskService(db)
 
-    # Verify ownership
+    # Verify ownership (uses the request-scoped session)
     task = await service.get_task(task_id, user.id)
+    task_status = task.status
+    task_progress = task.progress
+    task_stage = task.current_stage
+    task_created_at = task.created_at
 
     # Check for Last-Event-ID
     last_event_id = request.headers.get("last-event-id")
@@ -135,10 +147,18 @@ async def stream_task_events(
         except (ValueError, IndexError):
             pass
 
+    # Release the request-scoped session before entering the generator
+    await db.close()
+
+    session_factory = get_session_factory()
+
     async def event_generator() -> AsyncGenerator[str, None]:
-        """Generate SSE events."""
+        """Generate SSE events using short-lived DB sessions."""
         # Send any missed events first
-        events = await service.get_task_events(task_id, after_sequence)
+        async with session_factory() as gen_db:
+            gen_service = TaskService(gen_db)
+            events = await gen_service.get_task_events(task_id, after_sequence)
+
         for event in events:
             sse_data = _event_to_sse(event)
             yield f"id: {sse_data['event_id']}\n"
@@ -168,19 +188,37 @@ async def stream_task_events(
                     "event_id": f"{task_id}:heartbeat",
                     "task_id": task_id,
                     "type": "heartbeat",
-                    "status": task.status,
-                    "progress": task.progress,
-                    "stage": task.current_stage,
+                    "status": task_status,
+                    "progress": task_progress,
+                    "stage": task_stage,
                     "message": None,
                     "result": None,
-                    "timestamp": to_iso_string(task.created_at),
+                    "timestamp": to_iso_string(task_created_at),
                 }
                 yield "event: heartbeat\n"
                 yield f"data: {json.dumps(heartbeat_data)}\n\n"
                 heartbeat_count = 0
 
-            # Check for new events
-            new_events = await service.get_task_events(task_id, last_seq)
+            # Check for new events with a fresh session
+            async with session_factory() as gen_db:
+                gen_service = TaskService(gen_db)
+                new_events = await gen_service.get_task_events(task_id, last_seq)
+
+                if new_events:
+                    # Refresh task state
+                    task_result = await gen_db.execute(
+                        select(BackgroundTask).where(
+                            BackgroundTask.id == task_id,
+                            BackgroundTask.user_id == user.id,
+                        )
+                    )
+                    updated_task = task_result.scalar_one_or_none()
+                    if updated_task:
+                        nonlocal task_status, task_progress, task_stage
+                        task_status = updated_task.status
+                        task_progress = updated_task.progress
+                        task_stage = updated_task.current_stage
+
             if new_events:
                 for event in new_events:
                     sse_data = _event_to_sse(event)

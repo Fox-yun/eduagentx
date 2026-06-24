@@ -45,12 +45,22 @@ async def upload_document(
     if not file.filename:
         raise ApiError(code="MISSING_FILENAME", message="Filename is required", status_code=400)
 
-    # Read file content
+    # Determine MIME type
+    mime_type = file.content_type or "application/octet-stream"
+
+    # Read file content and check size
     content = await file.read()
     size_bytes = len(content)
 
-    # Determine MIME type
-    mime_type = file.content_type or "application/octet-stream"
+    # Validate file size early
+    from app.services.knowledge import MAX_FILE_SIZE
+
+    if size_bytes > MAX_FILE_SIZE:
+        raise ApiError(
+            code="FILE_TOO_LARGE",
+            message=f"File size exceeds maximum of {MAX_FILE_SIZE // (1024 * 1024)}MB",
+            status_code=400,
+        )
 
     # In production, would upload to object storage
     storage_key = f"knowledge/{user.id}/{file.filename}"

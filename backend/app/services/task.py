@@ -252,7 +252,7 @@ class TaskService:
             redis = get_redis()
             await redis.lpush("task:pending", task.id)
         except Exception:
-            pass  # Redis not available in tests
+            logger.warning("outbox_publish_failed", task_id=task.id, exc_info=True)
 
     def _status_to_event_type(self, status: str) -> str:
         """Map task status to event type."""

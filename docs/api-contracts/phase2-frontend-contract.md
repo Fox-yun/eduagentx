@@ -4,6 +4,22 @@ This document contains the frozen snake_case DTO schemas for all Phase 2 endpoin
 
 All date-time fields must use the ISO 8601 string format (e.g., `2026-06-23T12:30:00Z`).
 
+## List Response Format
+
+All list endpoints use a cursor-based paginated wrapper:
+```json
+{
+  "items": [],
+  "next_cursor": null,
+  "total": 0
+}
+```
+- `items`: Array of DTO objects
+- `next_cursor`: Opaque cursor for the next page, `null` when no more pages
+- `total`: Optional total count of items
+
+Applicable endpoints: `GET /api/tasks`, `GET /api/knowledge/documents`, `GET /api/learning-goals`, `GET /api/learning-paths/:pathId/versions`
+
 ## 1. Learning Goal DTO
 * **Endpoint:** `GET /api/learning-goals/:goalId` and `POST /api/learning-goals`
 ```ts
@@ -163,7 +179,7 @@ export const ResumeDataDtoSchema = z.discriminatedUnion("type", [
 ```
 
 ## 8. Task DTO
-* **Endpoint:** `GET /api/tasks/:taskId` and `GET /api/tasks`
+* **Endpoint:** `GET /api/tasks/:taskId`
 ```ts
 export const TaskDtoSchema = z.object({
   task_id: z.string(),
@@ -179,6 +195,24 @@ export const TaskDtoSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
+```
+
+## 8a. Task List DTO (Paginated)
+* **Endpoint:** `GET /api/tasks?cursor=&limit=`
+```ts
+export const TaskListDtoSchema = z.object({
+  items: z.array(TaskDtoSchema),
+  next_cursor: z.string().nullable(),
+  total: z.number().int().nonnegative().optional(),
+});
+```
+Response:
+```json
+{
+  "items": [],
+  "next_cursor": null,
+  "total": 0
+}
 ```
 
 ## 9. Task Event DTO (SSE)
@@ -397,4 +431,18 @@ export const KnowledgeDocumentDtoSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
+
+export const KnowledgeDocumentsResponseSchema = z.object({
+  items: z.array(KnowledgeDocumentDtoSchema),
+  next_cursor: z.string().nullable(),
+  total: z.number().int().nonnegative().optional(),
+});
+```
+Response:
+```json
+{
+  "items": [],
+  "next_cursor": null,
+  "total": 0
+}
 ```

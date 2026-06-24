@@ -51,26 +51,27 @@ async function main() {
   const { LearningGoalDtoSchema, ClarificationQuestionDtoSchema } = await import("../src/schemas/goals.ts");
   const { StageDtoSchema, LearningNodeDtoSchema, LearningEdgeDtoSchema, LearningPathDtoSchema, PathVersionDtoSchema } = await import("../src/schemas/paths.ts");
   const { ResumeDataDtoSchema } = await import("../src/schemas/resume.ts");
-  const { TaskDtoSchema } = await import("../src/schemas/tasks.ts");
-  const { TaskEventDtoSchema } = await import("../src/api/taskStreamTransport.ts");
+  const { TaskDtoSchema, TaskListDtoSchema } = await import("../src/schemas/tasks.ts");
+  const { TaskEventDtoSchema } = await import("../src/schemas/taskEvents.ts");
   const { DiagnosticQuizDtoSchema } = await import("../src/schemas/diagnostic.ts");
   const { UnitContentDtoSchema, AssessmentDtoSchema } = await import("../src/schemas/units.ts");
-  const { KnowledgeDocumentDtoSchema } = await import("../src/schemas/knowledge.ts");
+  const { KnowledgeDocumentDtoSchema, KnowledgeDocumentsResponseSchema } = await import("../src/schemas/knowledge.ts");
 
   console.log("✅ Successfully imported all 14 target Zod schemas.");
 
-  // 3. Define Error Response Shell Schema
-  logSection("3. Error Response Shell validation");
-  const ErrorResponseSchema = z.object({
-    message: z.string(),
-    code: z.string().optional(),
-    details: z.unknown().optional(),
-  });
+  // 3. Validate nested error response structure (ApiErrorDtoSchema)
+  logSection("3. Nested Error Response Shell validation");
+  const { ApiErrorDtoSchema } = await import("../src/schemas/errors.ts");
 
-  assertPass(ErrorResponseSchema, { message: "Internal Server Error", code: "INTERNAL_ERROR" }, "Standard error response");
-  assertPass(ErrorResponseSchema, { message: "Unauthenticated", code: "UNAUTHENTICATED", details: { reason: "Session expired" } }, "Error with details object");
-  assertFail(ErrorResponseSchema, { code: "BAD_REQUEST" }, "Fails when message is missing");
-  assertFail(ErrorResponseSchema, { message: 123 }, "Fails when message is wrong type");
+  assertPass(ApiErrorDtoSchema, {
+    error: { code: "INTERNAL_ERROR", message: "Internal Server Error", request_id: "req-1" }
+  }, "Standard nested error response");
+  assertPass(ApiErrorDtoSchema, {
+    error: { code: "UNAUTHENTICATED", message: "Unauthenticated", details: { reason: "Session expired" }, request_id: null }
+  }, "Nested error with details and null request_id");
+  assertFail(ApiErrorDtoSchema, { message: "no wrapper" }, "Fails when missing error wrapper");
+  assertFail(ApiErrorDtoSchema, { error: { code: "X" } }, "Fails when missing message and request_id");
+  assertFail(ApiErrorDtoSchema, { error: { code: 123, message: "bad", request_id: null } }, "Fails when code is wrong type");
 
   // 4. Test TaskDtoSchema (Tasks)
   logSection("4. Task DTO Schema Validation");
@@ -353,6 +354,46 @@ async function main() {
     updated_at: "2026-06-23T12:00:00Z",
   };
   assertPass(KnowledgeDocumentDtoSchema, validDoc, "Valid Knowledge Document payload");
+
+  // 15. Test TaskListDtoSchema (Paginated Task List)
+  logSection("15. Task List Pagination Schema Validation");
+  assertPass(TaskListDtoSchema, {
+    items: [validTask],
+    next_cursor: "cursor-abc",
+    total: 42,
+  }, "Valid paginated task list with cursor and total");
+  assertPass(TaskListDtoSchema, {
+    items: [],
+    next_cursor: null,
+    total: 0,
+  }, "Valid empty paginated task list");
+  assertFail(TaskListDtoSchema, [validTask], "Rejects raw array (no pagination wrapper)");
+  assertFail(TaskListDtoSchema, {
+    items: [validTask],
+    // missing next_cursor
+  }, "Fails when next_cursor is missing");
+  assertFail(TaskListDtoSchema, {
+    items: [validTask],
+    next_cursor: null,
+    total: -1,
+  }, "Fails when total is negative");
+
+  // 16. Test KnowledgeDocumentsResponseSchema (Paginated Knowledge List)
+  logSection("16. Knowledge Documents Pagination Schema Validation");
+  assertPass(KnowledgeDocumentsResponseSchema, {
+    items: [validDoc],
+    next_cursor: null,
+    total: 1,
+  }, "Valid paginated knowledge documents list");
+  assertPass(KnowledgeDocumentsResponseSchema, {
+    items: [],
+    next_cursor: "next-page-cursor",
+  }, "Valid paginated knowledge list without total");
+  assertFail(KnowledgeDocumentsResponseSchema, [validDoc], "Rejects raw array (no pagination wrapper)");
+  assertFail(KnowledgeDocumentsResponseSchema, {
+    items: "not-an-array",
+    next_cursor: null,
+  }, "Fails when items is not an array");
 
   console.log("\n==================================================");
   console.log("🎉 ALL API CONTRACT DRIFT CHECKS PASSED!");

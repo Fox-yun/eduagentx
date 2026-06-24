@@ -1,8 +1,9 @@
-import { z } from "zod";
 import { getTask } from "./tasks";
 import { TaskEventDtoSchema, TaskEventDto } from "../schemas/taskEvents";
 import { TaskStatus } from "../schemas/tasks";
 import { isTerminalTaskStatus, mapTaskEventType } from "../features/tasks/taskEventPolicy";
+
+export type { TaskEventDto } from "../schemas/taskEvents";
 
 export interface TaskStreamHandlers {
   onMessage: (event: TaskEventDto) => void;

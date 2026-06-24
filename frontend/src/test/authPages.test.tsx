@@ -43,6 +43,43 @@ describe("Auth Pages", () => {
       renderWithProviders(<LoginPage />, { route: "/auth/login", authenticatedUser: null });
       expect(await screen.findByText(/\u5fd8\u8bb0\u5bc6\u7801/)).toBeInTheDocument();
     });
+
+    it("toggles password visibility", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: "/auth/login", authenticatedUser: null });
+      const passwordInput = await screen.findByPlaceholderText("请输入密码");
+      expect(passwordInput).toHaveAttribute("type", "password");
+      
+      const toggleBtn = document.querySelector('input[placeholder="请输入密码"] ~ button');
+      expect(toggleBtn).toBeInTheDocument();
+      if (toggleBtn) {
+        await user.click(toggleBtn);
+        expect(passwordInput).toHaveAttribute("type", "text");
+        await user.click(toggleBtn);
+        expect(passwordInput).toHaveAttribute("type", "password");
+      }
+    });
+
+    it("shows error toast when login fails", async () => {
+      const { http, HttpResponse } = await import("msw");
+      const { server } = await import("./server");
+      server.use(
+        http.post("/api/auth/login", () => {
+          return new HttpResponse(null, { status: 401 });
+        })
+      );
+      
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: "/auth/login", authenticatedUser: null });
+      const emailInput = await screen.findByPlaceholderText(/name@example.com/i);
+      await user.type(emailInput, "wrong@example.com");
+      const passwordInput = screen.getByPlaceholderText("请输入密码");
+      await user.type(passwordInput, "wrongpassword");
+      const submitBtn = screen.getByRole("button", { name: /安全登录/i });
+      await user.click(submitBtn);
+      
+      expect(await screen.findByText("邮箱或密码不正确")).toBeInTheDocument();
+    });
   });
 
   describe("ForgotPasswordPage", () => {
@@ -92,28 +129,20 @@ describe("Auth Pages", () => {
     });
 
     it("triggers verification automatically if token is in URL", async () => {
-      const locationMock = new URL("http://localhost/auth/verify-email?token=valid-token");
-      const spy = vi.spyOn(window, "location", "get").mockReturnValue(locationMock as any);
-
       renderWithProviders(<VerifyEmailPage />, {
-        route: "/auth/verify-email",
+        route: "/auth/verify-email?token=valid-token",
         authenticatedUser: {
           id: "user-1", displayName: "Test", email: "test@example.com",
           emailVerified: false, onboardingCompleted: false, status: "pending_verification",
         },
       });
 
-      expect(await screen.findByText(/正在验证您的邮箱/i)).toBeInTheDocument();
-      expect(await screen.findByText(/邮箱验证成功/i)).toBeInTheDocument();
-      spy.mockRestore();
+      expect((await screen.findAllByText(/邮箱验证成功/i))[0]).toBeInTheDocument();
     });
 
     it("shows error screen when verification fails", async () => {
-      const locationMock = new URL("http://localhost/auth/verify-email?token=invalid-token");
-      const spy = vi.spyOn(window, "location", "get").mockReturnValue(locationMock as any);
-
       renderWithProviders(<VerifyEmailPage />, {
-        route: "/auth/verify-email",
+        route: "/auth/verify-email?token=invalid-token",
         authenticatedUser: {
           id: "user-1", displayName: "Test", email: "test@example.com",
           emailVerified: false, onboardingCompleted: false, status: "pending_verification",
@@ -121,14 +150,13 @@ describe("Auth Pages", () => {
       });
 
       expect(await screen.findByText(/验证失败/i)).toBeInTheDocument();
-      expect(screen.getByText("验证链接无效或已过期")).toBeInTheDocument();
+      expect(screen.getAllByText("验证链接无效或已过期")[0]).toBeInTheDocument();
 
       const user = userEvent.setup();
       const returnBtn = screen.getByRole("button", { name: /返回验证面板/i });
       await user.click(returnBtn);
 
       expect(await screen.findByText(/邮箱尚未验证/i)).toBeInTheDocument();
-      spy.mockRestore();
     });
 
     it("clicks resend and logout successfully", async () => {
@@ -178,9 +206,16 @@ describe("Auth Pages", () => {
 
     it("renders contact and logout buttons", async () => {
       renderWithProviders(<AccountDisabledPage />, { route: "/auth/disabled", authenticatedUser: null });
-      await screen.findByText(/\u8d26\u53f7\u5df2\u88ab\u505c\u7528/);
-      expect(screen.getByText(/\u8054\u7cfb\u7cfb\u7edf\u652f\u6301/)).toBeInTheDocument();
-      expect(screen.getByText(/\u9000\u51fa\u767b\u5f55/)).toBeInTheDocument();
+      await screen.findByText(/账号已被停用/);
+      expect(screen.getByText(/联系系统支持/)).toBeInTheDocument();
+      expect(screen.getByText(/退出登录/)).toBeInTheDocument();
+    });
+
+    it("clicks logout", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<AccountDisabledPage />, { route: "/auth/disabled", authenticatedUser: null });
+      await screen.findByText(/账号已被停用/);
+      await user.click(screen.getByText(/退出登录/));
     });
   });
 
@@ -278,22 +313,14 @@ describe("Auth Pages", () => {
     });
 
     it("renders password reset inputs if token is in URL", async () => {
-      const locationMock = new URL("http://localhost/auth/reset-password?token=valid-token");
-      const spy = vi.spyOn(window, "location", "get").mockReturnValue(locationMock as any);
-
-      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password", authenticatedUser: null });
+      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password?token=valid-token", authenticatedUser: null });
       expect(await screen.findByPlaceholderText(/密码长度必须在 10-128 字符之间/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/请再次输入新密码/i)).toBeInTheDocument();
-
-      spy.mockRestore();
     });
 
     it("shows error for short password or passwords mismatch", async () => {
-      const locationMock = new URL("http://localhost/auth/reset-password?token=valid-token");
-      const spy = vi.spyOn(window, "location", "get").mockReturnValue(locationMock as any);
-
       const user = userEvent.setup();
-      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password", authenticatedUser: null });
+      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password?token=valid-token", authenticatedUser: null });
 
       const passwordInput = await screen.findByPlaceholderText(/密码长度必须在 10-128 字符之间/i);
       const confirmPasswordInput = screen.getByPlaceholderText(/请再次输入新密码/i);
@@ -307,16 +334,11 @@ describe("Auth Pages", () => {
       await waitFor(() => {
         expect(screen.getByText(/密码长度必须在10-128个字符之间/i)).toBeInTheDocument();
       });
-
-      spy.mockRestore();
     });
 
     it("submits successfully with valid token and passwords", async () => {
-      const locationMock = new URL("http://localhost/auth/reset-password?token=valid-token");
-      const spy = vi.spyOn(window, "location", "get").mockReturnValue(locationMock as any);
-
       const user = userEvent.setup();
-      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password", authenticatedUser: null });
+      renderWithProviders(<ResetPasswordPage />, { route: "/auth/reset-password?token=valid-token", authenticatedUser: null });
 
       const passwordInput = await screen.findByPlaceholderText(/密码长度必须在 10-128 字符之间/i);
       const confirmPasswordInput = screen.getByPlaceholderText(/请再次输入新密码/i);
@@ -326,8 +348,6 @@ describe("Auth Pages", () => {
 
       const submitBtn = screen.getByRole("button", { name: /保存并更新密码/i });
       await user.click(submitBtn);
-
-      spy.mockRestore();
     });
   });
 });

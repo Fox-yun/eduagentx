@@ -126,9 +126,16 @@ export const ClarificationQuestionDtoSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+export const ClarificationAnswerValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.array(z.string()),
+]);
+
 export const ClarificationQueryResponseSchema = z.object({
   questions: z.array(ClarificationQuestionDtoSchema),
-  answers_history: z.record(z.string(), z.any()).optional().nullable(),
+  answers_history: z.record(z.string(), ClarificationAnswerValueSchema).optional().nullable(),
 });
 
 export type ClarificationQuestionDto = z.infer<typeof ClarificationQuestionDtoSchema>;
@@ -139,7 +146,7 @@ export interface ClarificationQuestionModel {
   type: "single_choice" | "multiple_choice" | "text" | "number" | "boolean";
   text: string;
   required: boolean;
-  options?: string[];
+  options?: { value: string; label: string }[];
   answer: any;
 }
 

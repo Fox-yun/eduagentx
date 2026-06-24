@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "preview": "vite preview",
     "e2e:serve:mock": "cross-env VITE_ENABLE_MSW=true vite --host 127.0.0.1 --port 5173 --strictPort",
-    "e2e:serve:auth": "cross-env VITE_ENABLE_MSW=false VITE_API_PROXY_TARGET=http://127.0.0.1:8000 vite --host 127.0.0.1 --port 5174 --strictPort",
+    "e2e:serve:auth": "cross-env VITE_ENABLE_MSW=false VITE_EXPOSE_TEST_API=true VITE_API_PROXY_TARGET=http://127.0.0.1:8000 vite --host 127.0.0.1 --port 5174 --strictPort",
     "e2e:auth-server": "node e2e/auth-mock-server.js",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",

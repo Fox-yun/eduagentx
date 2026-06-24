@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -23,16 +23,15 @@ type ResetFormValues = z.infer<typeof resetFormSchema>;
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
 
   const [showPassword, setShowPassword] = useState(false);
-  const tokenRef = useRef<string | null>(null);
-  const [isTokenPresent, setIsTokenPresent] = useState(true);
+  const tokenRef = useRef<string | null>(searchParams.get("token"));
+  const [isTokenPresent, setIsTokenPresent] = useState(!!tokenRef.current);
 
   // Capture token on mount and immediately clear address bar
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get("token");
-    if (token) {
-      tokenRef.current = token;
+    if (tokenRef.current) {
       window.history.replaceState(null, "", "/auth/reset-password");
     } else {
       setIsTokenPresent(false);

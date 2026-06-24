@@ -41,7 +41,7 @@ export function mapGoalClarification(
   return {
     questions: dto.questions.map((q) => {
       const options = ("options" in q && Array.isArray((q as any).options))
-        ? (q as any).options.map((o: any) => (typeof o === "string" ? o : o.value))
+        ? (q as any).options.map((o: any) => (typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.label }))
         : undefined;
       return {
         id: q.question_id,

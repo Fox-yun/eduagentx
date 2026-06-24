@@ -1,6 +1,10 @@
 import { http, HttpResponse } from "msw";
 import { KnowledgeDocumentDto } from "../../schemas/knowledge";
 
+function mockNowIso(): string {
+  return new Date().toISOString();
+}
+
 let docs: KnowledgeDocumentDto[] = [
   {
     document_id: "doc-1",
@@ -13,8 +17,8 @@ let docs: KnowledgeDocumentDto[] = [
     operation_status: "ready",
     index_task_id: null,
     error: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: mockNowIso(),
+    updated_at: mockNowIso(),
   },
   {
     document_id: "doc-2",
@@ -27,8 +31,8 @@ let docs: KnowledgeDocumentDto[] = [
     operation_status: "ready",
     index_task_id: null,
     error: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: mockNowIso(),
+    updated_at: mockNowIso(),
   },
 ];
 
@@ -53,8 +57,8 @@ export const handlers = [
       operation_status: "ready",
       index_task_id: null,
       error: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: mockNowIso(),
+      updated_at: mockNowIso(),
     };
     docs.push(newDoc);
     return HttpResponse.json(newDoc);

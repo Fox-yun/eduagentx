@@ -15,6 +15,7 @@ export default defineConfig({
       name: "mock-learning-flow",
       testMatch: [
         /auth-learning-flow\.spec\.ts/,
+        /resume-recovery\.spec\.ts/,
       ],
       use: {
         ...devices["Desktop Chrome"],

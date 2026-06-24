@@ -169,17 +169,17 @@ export function GoalClarifyPage() {
                   {q.type === "single_choice" && (
                     <div className="flex flex-col gap-2 pl-4">
                       {(q.options || []).map((option) => (
-                        <label key={option} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
+                        <label key={option.value} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
                           <input
                             type="radio"
                             name={q.id}
-                            value={option}
-                            checked={currentAns === option}
-                            onChange={() => handleAnswerChange(q.id, option)}
+                            value={option.value}
+                            checked={currentAns === option.value}
+                            onChange={() => handleAnswerChange(q.id, option.value)}
                             disabled={isSubmitting}
                             className="w-4 h-4 text-primary focus:ring-primary border-border bg-panel"
                           />
-                          {option}
+                          {option.label}
                         </label>
                       ))}
                     </div>
@@ -189,17 +189,17 @@ export function GoalClarifyPage() {
                   {q.type === "multiple_choice" && (
                     <div className="flex flex-col gap-2 pl-4">
                       {(q.options || []).map((option) => {
-                        const isChecked = Array.isArray(currentAns) && currentAns.includes(option);
+                        const isChecked = Array.isArray(currentAns) && currentAns.includes(option.value);
                         return (
-                          <label key={option} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
+                          <label key={option.value} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
                             <input
                               type="checkbox"
                               checked={isChecked}
-                              onChange={(e) => handleCheckboxChange(q.id, option, e.target.checked)}
+                              onChange={(e) => handleCheckboxChange(q.id, option.value, e.target.checked)}
                               disabled={isSubmitting}
                               className="w-4 h-4 rounded text-primary focus:ring-primary border-border bg-panel"
                             />
-                            {option}
+                            {option.label}
                           </label>
                         );
                       })}

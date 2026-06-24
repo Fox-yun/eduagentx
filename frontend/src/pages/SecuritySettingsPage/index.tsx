@@ -109,7 +109,7 @@ export function SecuritySettingsPage() {
                   <p className="text-[10px] text-muted mt-0.5">请定期更新您的密码以保护账户安全</p>
                 </div>
 
-                <form onSubmit={handlePasswordSubmit} className="space-y-3">
+                <form onSubmit={handlePasswordSubmit} className="space-y-3" noValidate>
                   <div className="space-y-1">
                     <label className="block text-[10px] font-bold text-ink uppercase">当前密码</label>
                     <input

@@ -120,4 +120,100 @@ describe("LearningPathPage Component", () => {
 
     expect(screen.queryByText("个性化学习建议")).not.toBeInTheDocument();
   });
+
+  it("should toggle mobile left drawer recommendation panel on smaller viewports", async () => {
+    window.innerWidth = 800;
+    window.dispatchEvent(new Event("resize"));
+
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/learning-paths/:pathId" element={<LearningPathPage />} />
+      </Routes>,
+      { route: "/learning-paths/mock-path" }
+    );
+
+    // Menu toggle button should be visible
+    const openBtn = await screen.findByRole("button", { name: "打开推荐与资料" });
+    expect(openBtn).toBeInTheDocument();
+
+    // Click it to open left drawer
+    await user.click(openBtn);
+    expect(screen.getByText("推荐与资料")).toBeInTheDocument();
+
+    // Click close button inside drawer
+    const closeBtn = screen.getByRole("button", { name: "" }); // the X icon button
+    await user.click(closeBtn);
+    expect(screen.queryByText("推荐与资料")).not.toBeInTheDocument();
+  });
+
+  it("should show query error screen and allow refetching the path", async () => {
+    window.innerWidth = 1280;
+    window.dispatchEvent(new Event("resize"));
+
+    let callCount = 0;
+    const { http, HttpResponse } = await import("msw");
+    const { server } = await import("./server");
+    
+    server.use(
+      http.get("/api/learning-paths/mock-path", () => {
+        callCount++;
+        if (callCount === 1) {
+          return new HttpResponse(null, { status: 500 });
+        }
+        // Return standard path
+        return HttpResponse.json({
+          path_id: "mock-path",
+          goal_id: "goal-1",
+          title: "数据结构与图算法通关路径",
+          description: null,
+          version: 1,
+          active_version: 1,
+          status: "active",
+          current_node_id: "tree-traversal",
+          total_estimated_minutes: 120,
+          generation_summary: null,
+          stages: [],
+          nodes: [
+            {
+              node_id: "tree-traversal",
+              stage_id: null,
+              title: "二叉树的非递归遍历",
+              description: null,
+              node_order: 1,
+              level: 1,
+              difficulty: "intermediate",
+              estimated_minutes: 45,
+              status: "current",
+              mastery: 0,
+              content_status: "ready",
+              learning_outcomes: [],
+              assessment_strategy: null,
+              generation_reason: null,
+              prerequisite_ids: [],
+              next_node_ids: [],
+            }
+          ],
+          edges: [],
+          created_at: "2026-06-23T12:00:00Z",
+          updated_at: "2026-06-23T12:00:00Z",
+        });
+      })
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/learning-paths/:pathId" element={<LearningPathPage />} />
+      </Routes>,
+      { route: "/learning-paths/mock-path" }
+    );
+
+    expect(await screen.findByText("获取路径失败")).toBeInTheDocument();
+
+    const retryBtn = screen.getByRole("button", { name: "重试加载" });
+    const user = userEvent.setup();
+    await user.click(retryBtn);
+
+    expect((await screen.findAllByText("数据结构与图算法通关路径")).length).toBeGreaterThan(0);
+  });
 });

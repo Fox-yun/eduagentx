@@ -115,7 +115,7 @@ describe("Onboarding & Goals Workflows", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/goals/goal-111/clarify");
   });
 
-  it("should render GoalClarifyPage question union types and submit answers", async () => {
+  it("should render GoalClarifyPage question union types and submit answers successfully", async () => {
     const mockClarify = {
       questions: [
         {
@@ -126,7 +126,17 @@ describe("Onboarding & Goals Workflows", () => {
           options: [
             { value: "Python", label: "Python" },
             { value: "Java", label: "Java" },
-            { value: "Go", label: "Go" },
+          ],
+          answer: null,
+        },
+        {
+          question_id: "q-topics",
+          type: "multiple_choice",
+          prompt: "主要学习哪些主题？",
+          required: true,
+          options: [
+            { value: "Web", label: "Web 开发" },
+            { value: "ML", label: "机器学习" },
           ],
           answer: null,
         },
@@ -134,6 +144,22 @@ describe("Onboarding & Goals Workflows", () => {
           question_id: "q-details",
           type: "text",
           prompt: "描述一下您的最终应用场景？",
+          required: true,
+          answer: null,
+        },
+        {
+          question_id: "q-hours",
+          type: "number",
+          prompt: "每周课时？",
+          required: true,
+          min: null,
+          max: null,
+          answer: null,
+        },
+        {
+          question_id: "q-prior",
+          type: "boolean",
+          prompt: "是否有基础背景？",
           required: true,
           answer: null,
         },
@@ -163,15 +189,24 @@ describe("Onboarding & Goals Workflows", () => {
     );
 
     expect(await screen.findByText("你想学哪个语言的库？")).toBeInTheDocument();
-    
-    // Choose Python radio
-    const pythonRadio = screen.getByLabelText("Python");
-    fireEvent.click(pythonRadio);
 
-    // Fill details textarea
-    const input = screen.getByPlaceholderText("请输入您的回答");
-    fireEvent.change(input, { target: { value: "做一个自动化工具" } });
+    // 1. Single Choice Python radio
+    fireEvent.click(screen.getByLabelText("Python"));
 
+    // 2. Multiple Choice Web & ML checkboxes
+    fireEvent.click(screen.getByLabelText("Web 开发"));
+    fireEvent.click(screen.getByLabelText("机器学习"));
+
+    // 3. Text field
+    fireEvent.change(screen.getByPlaceholderText("请输入您的回答"), { target: { value: "开发内部系统" } });
+
+    // 4. Number field
+    fireEvent.change(screen.getByPlaceholderText("请输入数字"), { target: { value: "15" } });
+
+    // 5. Boolean field - Click Yes
+    fireEvent.click(screen.getByRole("button", { name: "是 (Yes)" }));
+
+    // Click submit
     fireEvent.click(screen.getByRole("button", { name: "提交回答并继续" }));
 
     await waitFor(() => {
@@ -179,11 +214,90 @@ describe("Onboarding & Goals Workflows", () => {
     });
 
     expect(submittedAnswers["q-lang"]).toBe("Python");
-    expect(submittedAnswers["q-details"]).toBe("做一个自动化工具");
+    expect(submittedAnswers["q-topics"]).toEqual(["Web", "ML"]);
+    expect(submittedAnswers["q-details"]).toBe("开发内部系统");
+    expect(submittedAnswers["q-hours"]).toBe(15);
+    expect(submittedAnswers["q-prior"]).toBe(true);
     expect(mockNavigate).toHaveBeenCalledWith("/goals/goal-111/diagnostic");
   });
 
-  it("should render DiagnosticPage questions and submit successfully", async () => {
+  it("should show validation warning when submitting incomplete clarification answers", async () => {
+    const mockClarify = {
+      questions: [
+        {
+          question_id: "q-lang",
+          type: "single_choice",
+          prompt: "你想学哪个语言的库？",
+          required: true,
+          options: [{ value: "Python", label: "Python" }],
+          answer: null,
+        },
+      ],
+      answers_history: {},
+    };
+
+    server.use(
+      http.get("/api/learning-goals/goal-111/clarifications", () => {
+        return HttpResponse.json(mockClarify);
+      })
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/goals/:goalId/clarify" element={<GoalClarifyPage />} />
+      </Routes>,
+      { route: "/goals/goal-111/clarify" }
+    );
+
+    expect(await screen.findByText("你想学哪个语言的库？")).toBeInTheDocument();
+
+    // Submit without selecting radio
+    fireEvent.click(screen.getByRole("button", { name: "提交回答并继续" }));
+
+    // Should show validation toast
+    expect(await screen.findByText(/请回答所有问题以继续/)).toBeInTheDocument();
+  });
+
+  it("should show error screen and allow refetching clarifications", async () => {
+    let callCount = 0;
+    server.use(
+      http.get("/api/learning-goals/goal-111/clarifications", () => {
+        callCount++;
+        if (callCount === 1) {
+          return new HttpResponse(null, { status: 500 });
+        }
+        return HttpResponse.json({
+          questions: [
+            {
+              question_id: "q-lang",
+              type: "single_choice",
+              prompt: "你想学哪个语言的库？",
+              required: true,
+              options: [{ value: "Python", label: "Python" }],
+              answer: null,
+            },
+          ],
+          answers_history: {},
+        });
+      })
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/goals/:goalId/clarify" element={<GoalClarifyPage />} />
+      </Routes>,
+      { route: "/goals/goal-111/clarify" }
+    );
+
+    expect(await screen.findByText("获取问题失败")).toBeInTheDocument();
+
+    // Click retry
+    fireEvent.click(screen.getByRole("button", { name: "重试加载" }));
+
+    expect(await screen.findByText("你想学哪个语言的库？")).toBeInTheDocument();
+  });
+
+  it("should render DiagnosticPage questions and submit successfully with all question types and navigation", async () => {
     const mockDiagnostic = {
       diagnostic_id: "diag-111",
       goal_id: "goal-111",
@@ -196,7 +310,116 @@ describe("Onboarding & Goals Workflows", () => {
           options: [
             { value: "根左右", label: "根左右" },
             { value: "左根右", label: "左根右" },
-            { value: "左右根", label: "左右根" },
+          ],
+          answer: null,
+        },
+        {
+          question_id: "d-q2",
+          type: "multiple_choice",
+          prompt: "哪些是常用的排序算法？",
+          options: [
+            { value: "quick", label: "快速排序" },
+            { value: "bubble", label: "冒泡排序" },
+          ],
+          answer: null,
+        },
+        {
+          question_id: "d-q3",
+          type: "short_answer",
+          prompt: "请简述什么是闭包？",
+          answer: null,
+        },
+        {
+          question_id: "d-q4",
+          type: "code_text",
+          prompt: "补全以下代码？",
+          language: "javascript",
+          code_snippet: "function add(a, b) { return a + b; }",
+          answer: null,
+        },
+      ],
+      saved_answers: {},
+      result: null,
+      next_step: "generating",
+    };
+
+    let submittedAns: any = null;
+    server.use(
+      http.get("/api/learning-goals/goal-111/diagnostic", () => {
+        return HttpResponse.json(mockDiagnostic);
+      }),
+      http.post("/api/learning-goals/goal-111/diagnostic/submit", async ({ request }) => {
+        const body = (await request.json()) as any;
+        submittedAns = body.answers;
+        return HttpResponse.json({
+          next_step: "generating",
+          active_task_id: "task-999",
+        });
+      })
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/goals/:goalId/diagnostic" element={<DiagnosticPage />} />
+      </Routes>,
+      { route: "/goals/goal-111/diagnostic" }
+    );
+
+    // Q1 Single Choice
+    expect(await screen.findByText("二叉树的前序遍历顺序是？")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("根左右"));
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+
+    // Q2 Multiple Choice
+    expect(await screen.findByText("哪些是常用的排序算法？")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("快速排序"));
+    fireEvent.click(screen.getByLabelText("冒泡排序"));
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+
+    // Q3 Short Answer
+    expect(await screen.findByText("请简述什么是闭包？")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("请输入您的简答"), { target: { value: "闭包是一个函数" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+
+    // Q4 Code Text
+    expect(await screen.findByText("补全以下代码？")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("// 在此输入代码回答（只作文本保存，不执行）..."), { target: { value: "return a + b;" } });
+
+    // Test Prev navigation
+    fireEvent.click(screen.getByRole("button", { name: "上一题" }));
+    expect(await screen.findByText("请简述什么是闭包？")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("请输入您的简答")).toHaveValue("闭包是一个函数");
+
+    // Go forward again
+    fireEvent.click(screen.getByRole("button", { name: "下一题" }));
+    expect(await screen.findByText("补全以下代码？")).toBeInTheDocument();
+
+    // Submit
+    fireEvent.click(screen.getByRole("button", { name: "提交诊断并继续" }));
+
+    await waitFor(() => {
+      expect(submittedAns).not.toBeNull();
+    });
+
+    expect(submittedAns["d-q1"]).toBe("根左右");
+    expect(submittedAns["d-q2"]).toEqual(["quick", "bubble"]);
+    expect(submittedAns["d-q3"]).toBe("闭包是一个函数");
+    expect(submittedAns["d-q4"]).toBe("return a + b;");
+  });
+
+  it("should support skipping the diagnostic quiz", async () => {
+    const mockDiagnostic = {
+      diagnostic_id: "diag-111",
+      goal_id: "goal-111",
+      status: "pending",
+      questions: [
+        {
+          question_id: "d-q1",
+          type: "single_choice",
+          prompt: "二叉树的前序遍历顺序是？",
+          options: [
+            { value: "根左右", label: "根左右" },
+            { value: "左根右", label: "左根右" },
           ],
           answer: null,
         },
@@ -229,17 +452,57 @@ describe("Onboarding & Goals Workflows", () => {
     );
 
     expect(await screen.findByText("二叉树的前序遍历顺序是？")).toBeInTheDocument();
-    
-    // Click option
-    const option = screen.getByLabelText("根左右");
-    fireEvent.click(option);
-
-    fireEvent.click(screen.getByRole("button", { name: "提交诊断并继续" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳过评估" }));
 
     await waitFor(() => {
       expect(submittedAns).not.toBeNull();
     });
+    expect(submittedAns).toEqual({});
+  });
 
-    expect(submittedAns["d-q1"]).toBe("根左右");
+  it("should show error screen and allow refetching", async () => {
+    let callCount = 0;
+    server.use(
+      http.get("/api/learning-goals/goal-111/diagnostic", () => {
+        callCount++;
+        if (callCount === 1) {
+          return new HttpResponse(null, { status: 500 });
+        }
+        return HttpResponse.json({
+          diagnostic_id: "diag-111",
+          goal_id: "goal-111",
+          status: "pending",
+          questions: [
+            {
+              question_id: "d-q1",
+              type: "single_choice",
+              prompt: "二叉树的前序遍历顺序是？",
+              options: [
+                { value: "根左右", label: "根左右" },
+                { value: "左根右", label: "左根右" },
+              ],
+              answer: null,
+            },
+          ],
+          saved_answers: {},
+          result: null,
+          next_step: "generating",
+        });
+      })
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/goals/:goalId/diagnostic" element={<DiagnosticPage />} />
+      </Routes>,
+      { route: "/goals/goal-111/diagnostic" }
+    );
+
+    expect(await screen.findByText("载入诊断失败")).toBeInTheDocument();
+    
+    // Click refetch
+    fireEvent.click(screen.getByRole("button", { name: "重试加载" }));
+
+    expect(await screen.findByText("二叉树的前序遍历顺序是？")).toBeInTheDocument();
   });
 });

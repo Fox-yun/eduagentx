@@ -350,17 +350,18 @@ export class StatefulMockDb {
           this.clarifications.clear();
           this.diagnostics.clear();
 
-          state.users.forEach(([k, v]: any) => this.users.set(k, v));
-          state.goals.forEach(([k, v]: any) => this.goals.set(k, v));
-          state.paths.forEach(([k, v]: any) => this.paths.set(k, v));
-          state.tasks.forEach(([k, v]: any) => this.tasks.set(k, v));
-          state.assessments.forEach(([k, v]: any) => this.assessments.set(k, v));
-          state.units.forEach(([k, v]: any) => this.units.set(k, v));
-          state.documents.forEach(([k, v]: any) => this.documents.set(k, v));
-          state.clarifications.forEach(([k, v]: any) => this.clarifications.set(k, v));
-          state.diagnostics.forEach(([k, v]: any) => this.diagnostics.set(k, v));
+          state.users.forEach(([k, v]: [string, unknown]) => this.users.set(k, v as MockUser));
+          state.goals.forEach(([k, v]: [string, unknown]) => this.goals.set(k, v as MockGoal));
+          state.paths.forEach(([k, v]: [string, unknown]) => this.paths.set(k, v as MockPath));
+          state.tasks.forEach(([k, v]: [string, unknown]) => this.tasks.set(k, v as MockTask));
+          state.assessments.forEach(([k, v]: [string, unknown]) => this.assessments.set(k, v as MockAssessment));
+          state.units.forEach(([k, v]: [string, unknown]) => this.units.set(k, v as MockUnit));
+          state.documents.forEach(([k, v]: [string, unknown]) => this.documents.set(k, v as MockDocument));
+          state.clarifications.forEach(([k, v]: [string, unknown]) => this.clarifications.set(k, v as MockClarification));
+          state.diagnostics.forEach(([k, v]: [string, unknown]) => this.diagnostics.set(k, v as MockDiagnostic));
           this._sessionUserId = state.sessionUserId;
-          this.scenario = state.scenario || "active-user";
+          const validScenarios = ["guest", "active-user", "locked-user", "disabled-user"] as const;
+          this.scenario = validScenarios.includes(state.scenario) ? state.scenario : "guest";
         } finally {
           this.isSavingSuspended = false;
         }

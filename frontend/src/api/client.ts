@@ -4,7 +4,7 @@ import { getCsrfToken, shouldAddCsrf, CSRF_HEADER_NAME } from "./csrf";
 import { triggerAuthFailure } from "./authFailure";
 import { ApiErrorDtoSchema } from "../schemas/errors";
 
-export interface ApiRequestOptions<T = any> extends Omit<RequestInit, "body"> {
+export interface ApiRequestOptions<T = unknown> extends Omit<RequestInit, "body"> {
   body?: unknown;
   timeoutMs?: number;
   schema?: ZodType<T>;
@@ -35,7 +35,7 @@ async function refreshSession(): Promise<void> {
   return refreshPromise;
 }
 
-export async function apiRequest<T = any>(
+export async function apiRequest<T = unknown>(
   path: string,
   options: ApiRequestOptions<T> = {}
 ): Promise<T> {
@@ -61,7 +61,7 @@ export async function apiRequest<T = any>(
   const headers = new Headers(init.headers || {});
 
   // 1. Body payload serialization
-  let requestBody: any = undefined;
+  let requestBody: FormData | string | undefined = undefined;
   if (body !== undefined) {
     if (body instanceof FormData) {
       requestBody = body;
@@ -172,7 +172,7 @@ export async function apiRequest<T = any>(
     }
 
     const contentType = response.headers.get("Content-Type") || "";
-    let data: any;
+    let data: unknown;
 
     if (contentType.includes("application/json")) {
       data = await response.json();
@@ -193,17 +193,17 @@ export async function apiRequest<T = any>(
     }
 
     return data as T;
-  } catch (err: any) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === "AbortError") {
       if (didTimeout) {
         throw new ApiError("请求超时", 408, "REQUEST_TIMEOUT");
       }
-      throw err;
+      throw error;
     }
-    if (err instanceof DOMException && err.name === "TimeoutError") {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new ApiError("请求超时", 408, "REQUEST_TIMEOUT");
     }
-    throw err;
+    throw error;
   } finally {
     clearTimeout(timeoutId);
     if (externalSignal) {

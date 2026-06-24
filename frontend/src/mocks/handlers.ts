@@ -517,7 +517,30 @@ export const handlers = [
     return new HttpResponse(null, { status: 404 });
   }),
 
-  // 13. GET /api/tasks/:taskId (Real-time simulation)
+  // 13a. GET /api/tasks (paginated list)
+  http.get("/api/tasks", () => {
+    if (!db.sessionUserId) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            message: "未登录",
+            details: null,
+            request_id: null,
+          },
+        },
+        { status: 401 }
+      );
+    }
+    const items = Array.from(db.tasks.values());
+    return HttpResponse.json({
+      items,
+      next_cursor: null,
+      total: items.length,
+    });
+  }),
+
+  // 13b. GET /api/tasks/:taskId (Real-time simulation)
   http.get("/api/tasks/:taskId", ({ params }) => {
     const taskId = params.taskId as string;
     const task = db.tasks.get(taskId);

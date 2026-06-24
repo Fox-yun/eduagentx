@@ -160,8 +160,8 @@ describe("API Client apiRequest", () => {
     );
 
     const [res1, res2] = await Promise.all([
-      apiRequest("/req1"),
-      apiRequest("/req2"),
+      apiRequest<{ ok: number }>("/req1"),
+      apiRequest<{ ok: number }>("/req2"),
     ]);
 
     expect(res1.ok).toBe(1);

@@ -13,10 +13,15 @@ test.describe("Real HTTP Token Refresh E2E Tests", () => {
     await page.click("button[type='submit']");
     await page.waitForURL("**/");
 
-    // 2. Wait 3 seconds so access token expires
+    // 2. Record the refresh token before expiration
+    const cookiesBefore = await context.cookies();
+    const oldRefreshToken = cookiesBefore.find(c => c.name === "refresh_token")?.value;
+    expect(oldRefreshToken).toBeTruthy();
+
+    // 3. Wait 3 seconds so access token expires
     await page.waitForTimeout(3000);
 
-    // 3. Navigate to profile settings page which triggers requests (e.g. GET /api/auth/me)
+    // 4. Navigate to profile settings page which triggers requests (e.g. GET /api/auth/me)
     await page.goto("/settings/profile?disable-msw=true");
 
     // Check we did not get kicked out to login
@@ -27,11 +32,11 @@ test.describe("Real HTTP Token Refresh E2E Tests", () => {
     const userDisplayName = page.locator("span:has-text('Cookie Tester')");
     await expect(userDisplayName).toBeVisible();
 
-    // Verify cookies were rotated (refresh_token should be different)
-    const allCookies = await context.cookies();
-    const refreshTokenCookie = allCookies.find(c => c.name === "refresh_token");
-    expect(refreshTokenCookie).toBeDefined();
-    expect(refreshTokenCookie?.value).not.toBeNull();
+    // 5. Verify refresh token was rotated (new value != old value)
+    const cookiesAfter = await context.cookies();
+    const newRefreshToken = cookiesAfter.find(c => c.name === "refresh_token")?.value;
+    expect(newRefreshToken).toBeTruthy();
+    expect(newRefreshToken).not.toBe(oldRefreshToken);
   });
 
   test("should handle concurrent business requests returning 401 with a single refresh call and successful retries", async ({ page }) => {

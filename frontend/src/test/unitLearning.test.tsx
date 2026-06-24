@@ -376,7 +376,7 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
         });
       }),
 
-      http.post("/api/assessments/assess-777/submit", async ({ request }) => {
+      http.post("/api/assessments/assess-777/submit", async () => {
         return HttpResponse.json({
           score: 40,
           passed: false,

@@ -183,9 +183,9 @@ export function TasksPanel() {
 
                   {/* Actions (View Path / Cancel) */}
                   <div className="flex justify-end gap-2 pt-0.5">
-                    {task.result && typeof task.result === "object" && typeof (task.result as any).path_id === "string" && task.status === "completed" && (
+                    {task.result != null && typeof task.result === "object" && "path_id" in task.result && typeof (task.result as Record<string, unknown>).path_id === "string" && task.status === "completed" && (
                       <Link
-                        to={appRoutes.learningPath((task.result as any).path_id)}
+                        to={appRoutes.learningPath((task.result as Record<string, unknown>).path_id as string)}
                         className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary hover:bg-primary-hover text-white text-[10px] font-bold rounded shadow-sm transition-colors cursor-pointer"
                       >
                         <Sparkles className="h-3 w-3" />

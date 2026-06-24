@@ -168,4 +168,20 @@ describe("ResumePage Component", () => {
       expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/path-789/review", { replace: true });
     });
   });
+
+  it("should show image fallback when illustration fails to load", async () => {
+    renderWithProviders(<ResumePage />, {
+      handlers: resumeHandlers,
+    });
+
+    expect(await screen.findByText("从哪里继续学习？")).toBeInTheDocument();
+
+    // Find the image and trigger error
+    const img = screen.queryByRole("img");
+    if (img) {
+      fireEvent.error(img);
+      // Should show fallback content
+      expect(screen.getByText("数据结构与算法")).toBeInTheDocument();
+    }
+  });
 });

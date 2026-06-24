@@ -34,25 +34,31 @@ test.describe("Real HTTP CSRF Protection E2E Tests", () => {
 
     // Locate the save button in profile settings and click it
     const saveBtn = page.locator("button[type='submit'], button:has-text('保存'), button:has-text('更新')");
+
+    // Set up response listener BEFORE clicking
+    const successResponsePromise = page.waitForResponse(response =>
+      response.url().includes("/api/users/me/profile") && response.status() === 200
+    );
+
     await saveBtn.click();
 
-    // Verify the CSRF header was attached to the unsafe POST request
-    await page.waitForTimeout(1000);
+    // Wait for the successful response
+    const successResponse = await successResponsePromise;
+    expect(successResponse.status()).toBe(200);
     expect(csrfHeaderSeen).toBe(true);
 
     // 3. Test CSRF Rejection: strip the CSRF header, verify it gets 403 Forbidden
     stripCsrf = true;
 
-    // Try to submit again
-    await saveBtn.click();
-    
-    // Check for error toast or console error about CSRF failure
-    // Our mock server returns { message: "CSRF token mismatch", code: "CSRF_ERROR" } with status 403.
-    // The client should display an error message
-    // Let's verify that a network request failed with 403
-    const response = await page.waitForResponse(response => 
-      response.url().includes("/api/users/me") && response.status() === 403
+    // Set up 403 response listener BEFORE clicking
+    const forbiddenResponsePromise = page.waitForResponse(response =>
+      response.url().includes("/api/users/me/profile") && response.status() === 403
     );
-    expect(response).toBeDefined();
+
+    await saveBtn.click();
+
+    // Wait for the 403 response
+    const forbiddenResponse = await forbiddenResponsePromise;
+    expect(forbiddenResponse.status()).toBe(403);
   });
 });

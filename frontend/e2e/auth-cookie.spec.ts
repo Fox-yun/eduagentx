@@ -48,10 +48,16 @@ test.describe("Real HTTP Cookie Authentication E2E Tests", () => {
     // Check we got redirected to login page
     await page.waitForURL("**/auth/login**");
     
-    // Verify cookies are deleted
+    // Verify all auth cookies are deleted
     const cookiesAfterLogout = await context.cookies();
     const accessAfter = cookiesAfterLogout.find(c => c.name === "access_token");
     expect(accessAfter).toBeUndefined();
+
+    const refreshAfter = cookiesAfterLogout.find(c => c.name === "refresh_token");
+    expect(refreshAfter).toBeUndefined();
+
+    const csrfAfter = cookiesAfterLogout.find(c => c.name === "csrftoken");
+    expect(csrfAfter).toBeUndefined();
   });
 
   test("should keep session if logout API call fails", async ({ page }) => {

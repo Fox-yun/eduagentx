@@ -11,6 +11,7 @@ import {
   createAssessment,
   submitAssessment,
 } from "../../api/units";
+import type { AssessmentModel, AssessmentSubmitResultModel } from "../../schemas/units";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
 import { useTaskStream } from "../../api/taskStream";
@@ -31,6 +32,10 @@ import {
   X,
 } from "lucide-react";
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function UnitLearningPage() {
   const { pathId, nodeId } = useParams<{ pathId: string; nodeId: string }>();
   const navigate = useNavigate();
@@ -43,9 +48,9 @@ export function UnitLearningPage() {
   
   // Assessment state
   const [quizOpen, setQuizOpen] = useState(false);
-  const [activeAssessment, setActiveAssessment] = useState<any>(null);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, any>>({});
-  const [assessmentResult, setAssessmentResult] = useState<any>(null);
+  const [activeAssessment, setActiveAssessment] = useState<AssessmentModel | null>(null);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string | string[] | null>>({});
+  const [assessmentResult, setAssessmentResult] = useState<AssessmentSubmitResultModel | null>(null);
 
   // Queries
   const { data: pathData } = useQuery({
@@ -94,8 +99,8 @@ export function UnitLearningPage() {
       toast("已提交内容生成请求，正在排队...", "success");
       setLocalActiveTaskId(res.activeTaskId);
     },
-    onError: (err: any) => {
-      toast(err.message || "生成内容失败，请重试", "error");
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "生成内容失败，请重试"), "error");
     },
   });
 
@@ -108,8 +113,8 @@ export function UnitLearningPage() {
       setPreferencesOpen(false);
       setLocalActiveTaskId(res.activeTaskId);
     },
-    onError: (err: any) => {
-      toast(err.message || "重新生成内容失败，请重试", "error");
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "重新生成内容失败，请重试"), "error");
     },
   });
 
@@ -122,14 +127,14 @@ export function UnitLearningPage() {
       setAssessmentResult(null);
       setQuizOpen(true);
     },
-    onError: (err: any) => {
-      toast(err.message || "创建通关评估失败，请重试", "error");
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "创建通关评估失败，请重试"), "error");
     },
   });
 
   // Submit Assessment mutation
   const { mutate: performSubmitAssessment, isPending: isSubmittingAssessment } = useMutation({
-    mutationFn: (answers: Record<string, any>) =>
+    mutationFn: (answers: Record<string, string | string[] | null>) =>
       submitAssessment(activeAssessment?.assessmentId || "", answers),
     onSuccess: (res) => {
       setAssessmentResult(res);
@@ -137,8 +142,8 @@ export function UnitLearningPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.path(pathId || "") });
       queryClient.invalidateQueries({ queryKey: queryKeys.resume() });
     },
-    onError: (err: any) => {
-      toast(err.message || "提交评估失败，请重试", "error");
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "提交评估失败，请重试"), "error");
     },
   });
 
@@ -147,16 +152,16 @@ export function UnitLearningPage() {
     performRegenerate(preferenceText);
   };
 
-  const handleQuizAnswerChange = (questionId: string, value: any) => {
+  const handleQuizAnswerChange = (questionId: string, value: string | string[] | null) => {
     setQuizAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
   const handleQuizCheckboxChange = (questionId: string, option: string, checked: boolean) => {
-    const current = quizAnswers[questionId] || [];
+    const current = Array.isArray(quizAnswers[questionId]) ? (quizAnswers[questionId] as string[]) : [];
     if (checked) {
       setQuizAnswers((prev) => ({ ...prev, [questionId]: [...current, option] }));
     } else {
-      setQuizAnswers((prev) => ({ ...prev, [questionId]: current.filter((o: string) => o !== option) }));
+      setQuizAnswers((prev) => ({ ...prev, [questionId]: current.filter((o) => o !== option) }));
     }
   };
 
@@ -188,7 +193,7 @@ export function UnitLearningPage() {
           </div>
           <h2 className="text-base font-bold text-ink mb-1.5 font-serif-cn">获取单元数据失败</h2>
           <p className="text-xs text-muted max-w-[280px] leading-relaxed mb-6">
-            {(unitError as any)?.message || "连接服务器失败，请重试。"}
+            {getErrorMessage(unitError, "连接服务器失败，请重试。")}
           </p>
           <button
             onClick={() => refetchUnit()}
@@ -467,7 +472,7 @@ export function UnitLearningPage() {
             {/* Quiz Body form */}
             {!assessmentResult ? (
               <form onSubmit={handleQuizSubmit} className="flex flex-col gap-6">
-                {activeAssessment.questions.map((q: any, index: number) => {
+                {activeAssessment.questions.map((q, index: number) => {
                   const currentAns = quizAnswers[q.id];
 
                   return (

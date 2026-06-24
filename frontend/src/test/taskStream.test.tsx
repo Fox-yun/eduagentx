@@ -272,3 +272,27 @@ describe("useTaskStream & Registry", () => {
     vi.useRealTimers();
   });
 });
+
+import { isTerminalTaskStatus, mapTaskEventType, TERMINAL_TASK_STATUSES } from "../features/tasks/taskEventPolicy";
+
+describe("taskEventPolicy", () => {
+  it("correctly identifies terminal statuses", () => {
+    const terminals = Array.from(TERMINAL_TASK_STATUSES);
+    for (const status of terminals) {
+      expect(isTerminalTaskStatus(status)).toBe(true);
+    }
+    expect(isTerminalTaskStatus("pending")).toBe(false);
+    expect(isTerminalTaskStatus("running")).toBe(false);
+  });
+
+  it("correctly maps task status to event type", () => {
+    expect(mapTaskEventType("completed")).toBe("completed");
+    expect(mapTaskEventType("partial_completed")).toBe("partial_completed");
+    expect(mapTaskEventType("failed")).toBe("failed");
+    expect(mapTaskEventType("cancelled")).toBe("cancelled");
+    expect(mapTaskEventType("expired")).toBe("snapshot");
+    expect(mapTaskEventType("interrupted")).toBe("snapshot");
+    expect(mapTaskEventType("pending")).toBe("progress");
+    expect(mapTaskEventType("running")).toBe("progress");
+  });
+});

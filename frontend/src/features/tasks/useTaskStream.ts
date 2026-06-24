@@ -394,7 +394,8 @@ export function useTaskStream(taskId: string | null | undefined) {
       setStatus(event.status);
 
       if (event.status === "failed") {
-        setError((event.result?.error as string) || event.message || "任务执行失败");
+        const resultObj = event.result as Record<string, unknown> | null | undefined;
+        setError((resultObj?.error as string) || event.message || "任务执行失败");
       }
 
       if (isTerminalTaskStatus(event.status)) {

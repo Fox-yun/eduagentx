@@ -1,7 +1,6 @@
 import { apiRequest } from "./client";
 import {
   LearningPathDtoSchema,
-  PathVersionDtoSchema,
   PathVersionModel,
   PathVersionListDtoSchema,
 } from "../schemas/paths";

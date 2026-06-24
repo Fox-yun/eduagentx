@@ -31,6 +31,22 @@ function serializeCookie(name, val, options = {}) {
   return str;
 }
 
+// Unified nested error response helper
+function sendError(res, status, code, message, details, requestId) {
+  const errorBody = {
+    error: {
+      code,
+      message,
+      request_id: requestId || null,
+    },
+  };
+  if (details !== undefined) {
+    errorBody.error.details = details;
+  }
+  res.statusCode = status;
+  res.end(JSON.stringify(errorBody));
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const cookies = parseCookies(req.headers.cookie);
@@ -64,10 +80,9 @@ const server = http.createServer((req, res) => {
     if (isUnsafeMethod && !isAuthLoginOrRegister && !path.startsWith("/__test__/")) {
       const csrfHeader = req.headers["x-csrf-token"];
       const csrfCookie = cookies["csrftoken"];
-      
+
       if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
-        res.statusCode = 403;
-        res.end(JSON.stringify({ message: "CSRF token mismatch", code: "CSRF_ERROR" }));
+        sendError(res, 403, "CSRF_ERROR", "CSRF token mismatch");
         return;
       }
     }
@@ -92,8 +107,7 @@ const server = http.createServer((req, res) => {
     if (path === "/api/auth/me" && method === "GET") {
       const accessToken = cookies["access_token"];
       if (!accessToken || accessToken === "expired") {
-        res.statusCode = 401;
-        res.end(JSON.stringify({ message: "未登录或Token已过期", code: "UNAUTHORIZED" }));
+        sendError(res, 401, "UNAUTHORIZED", "未登录或Token已过期");
         return;
       }
 
@@ -112,8 +126,7 @@ const server = http.createServer((req, res) => {
     // 3. POST /api/auth/login
     if (path === "/api/auth/login" && method === "POST") {
       if (!parsedBody.email || !parsedBody.password) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ message: "邮箱和密码必填", code: "BAD_REQUEST" }));
+        sendError(res, 400, "BAD_REQUEST", "邮箱和密码必填");
         return;
       }
 
@@ -144,8 +157,7 @@ const server = http.createServer((req, res) => {
     if (path === "/api/auth/refresh" && method === "POST") {
       const refreshToken = cookies["refresh_token"];
       if (!refreshToken || !refreshTokens.has(refreshToken)) {
-        res.statusCode = 401;
-        res.end(JSON.stringify({ message: "Refresh token invalid", code: "UNAUTHORIZED" }));
+        sendError(res, 401, "UNAUTHORIZED", "Refresh token invalid");
         return;
       }
 
@@ -160,8 +172,7 @@ const server = http.createServer((req, res) => {
           serializeCookie("refresh_token", "", { path: "/", httpOnly: true, maxAge: 0, sameSite: "Lax" }),
           serializeCookie("csrftoken", "", { path: "/", maxAge: 0, sameSite: "Lax" }),
         ]);
-        res.statusCode = 401;
-        res.end(JSON.stringify({ message: "Refresh token reused, session revoked", code: "REUSE_DETECTED" }));
+        sendError(res, 401, "REUSE_DETECTED", "Refresh token reused, session revoked");
         return;
       }
 
@@ -184,8 +195,7 @@ const server = http.createServer((req, res) => {
     // 5. POST /api/auth/logout
     if (path === "/api/auth/logout" && method === "POST") {
       if (req.headers["x-test-fail-logout"] === "true") {
-        res.statusCode = 500;
-        res.end(JSON.stringify({ message: "Internal server error during logout", code: "SERVER_ERROR" }));
+        sendError(res, 500, "SERVER_ERROR", "Internal server error during logout");
         return;
       }
 
@@ -240,8 +250,7 @@ const server = http.createServer((req, res) => {
       if (!isAuthRoute) {
         const accessToken = cookies["access_token"];
         if (!accessToken || accessToken === "expired") {
-          res.statusCode = 401;
-          res.end(JSON.stringify({ message: "未登录或Token已过期", code: "UNAUTHORIZED" }));
+          sendError(res, 401, "UNAUTHORIZED", "未登录或Token已过期");
           return;
         }
       }
@@ -250,8 +259,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    res.statusCode = 404;
-    res.end(JSON.stringify({ message: "Not Found" }));
+    sendError(res, 404, "NOT_FOUND", "Not Found");
   });
 });
 

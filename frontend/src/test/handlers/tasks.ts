@@ -1,6 +1,10 @@
 import { http, HttpResponse } from "msw";
 import { TaskDto } from "../../schemas/tasks";
 
+function mockNowIso(): string {
+  return new Date().toISOString();
+}
+
 const tasks: TaskDto[] = [
   {
     task_id: "task-1",
@@ -13,8 +17,8 @@ const tasks: TaskDto[] = [
     result: null,
     error: "",
     request_id: "req-1",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: mockNowIso(),
+    updated_at: mockNowIso(),
   },
   {
     task_id: "task-2",
@@ -27,8 +31,8 @@ const tasks: TaskDto[] = [
     result: null,
     error: "",
     request_id: "req-2",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: mockNowIso(),
+    updated_at: mockNowIso(),
   },
 ];
 

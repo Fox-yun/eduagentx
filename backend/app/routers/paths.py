@@ -1,0 +1,112 @@
+"""Learning path API endpoints."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth_deps import require_learning_user
+from app.core.database import get_db
+from app.models.user import User
+from app.services.path import PathService
+
+router = APIRouter()
+
+
+class RevisionRequest(BaseModel):
+    revision_request: str
+
+
+@router.get("/{path_id}")
+async def get_path(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a learning path with all details."""
+    service = PathService(db)
+    return await service.get_path_with_details(path_id, user.id)
+
+
+@router.get("/{path_id}/versions")
+async def list_versions(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """List all versions of a learning path."""
+    service = PathService(db)
+    versions = await service.list_versions(path_id, user.id)
+
+    # Map internal status to frontend enum
+    status_map = {
+        "draft": "draft",
+        "in_review": "draft",
+        "active": "active",
+        "superseded": "archived",
+        "rejected": "archived",
+        "failed": "failed",
+    }
+
+    return {
+        "items": [
+            {
+                "path_id": v.path_id,
+                "version": v.version_number,
+                "parent_version": None,
+                "status": status_map.get(v.status, "draft"),
+                "revision_reason": None,
+                "generation_summary": v.summary,
+                "total_estimated_minutes": v.estimated_total_minutes,
+                "critic_score": None,
+                "created_at": str(v.created_at),
+                "activated_at": str(v.activated_at) if v.activated_at else None,
+            }
+            for v in versions
+        ],
+        "next_cursor": None,
+        "total": len(versions),
+    }
+
+
+@router.post("/{path_id}/activate")
+async def activate_path(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Activate the latest draft version of a path."""
+    service = PathService(db)
+
+    # Get latest draft version
+    versions = await service.list_versions(path_id, user.id)
+    draft_versions = [v for v in versions if v.status in ("draft", "in_review")]
+
+    if not draft_versions:
+        from app.core.errors import ApiError
+
+        raise ApiError(code="NO_DRAFT_VERSION", message="No draft version to activate", status_code=400)
+
+    latest_draft = draft_versions[0]
+    path = await service.activate_version(path_id, user.id, latest_draft.id)
+    return {"message": "Path activated", "path_id": path.id}
+
+
+@router.post("/{path_id}/revision-requests")
+async def create_revision_request(
+    path_id: str,
+    body: RevisionRequest,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a revision request for a path."""
+    service = PathService(db)
+    await service.create_revision_request(path_id, user.id, body.revision_request)
+
+    return {
+        "next_step": "generating",
+        "active_task_id": None,
+    }

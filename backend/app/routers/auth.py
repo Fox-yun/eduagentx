@@ -22,7 +22,12 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    display_name: str
+    display_name: str = BaseModel.Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w\s一-鿿㐀-䶿\-'.]+$",
+        description="Display name: letters, digits, spaces, CJK, hyphens, apostrophes",
+    )
 
 
 class LoginRequest(BaseModel):

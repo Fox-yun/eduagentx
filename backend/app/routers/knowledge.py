@@ -108,13 +108,41 @@ async def reindex_document(
     document_id: str,
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
-    """Reindex a document."""
+) -> dict[str, Any]:
+    """Reindex a document.
+
+    Creates a background task for reindexing and updates document status.
+    """
     service = KnowledgeService(db)
     doc = await service.get_document(document_id, user.id)
 
-    # In production, would trigger reindex task
-    return {"message": "Reindex started", "document_id": doc.id}
+    # Validate document can be reindexed
+    if doc.status not in ("ready", "failed"):
+        raise ApiError(
+            code="INVALID_STATUS",
+            message=f"Cannot reindex document in '{doc.status}' status",
+            status_code=400,
+        )
+
+    # Update document status
+    await service.update_document_status(document_id, "reindexing", operation_status="queued")
+
+    # Create background task
+    from app.services.task import TaskService
+
+    task_service = TaskService(db)
+    task = await task_service.create_task(
+        user_id=user.id,
+        task_type="knowledge_reindex",
+        target_type="document",
+        target_id=document_id,
+    )
+
+    return {
+        "message": "Reindex started",
+        "document_id": doc.id,
+        "task_id": task.id,
+    }
 
 
 @router.get("/search")

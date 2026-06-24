@@ -14,6 +14,31 @@ def generate_request_id() -> str:
     return f"req_{uuid.uuid4().hex[:16]}"
 
 
+def get_client_ip(request: Request) -> str | None:
+    """Get the real client IP, respecting reverse proxy headers.
+
+    Checks (in order):
+    1. X-Forwarded-For (first IP, which is the original client)
+    2. X-Real-IP
+    3. request.client.host (direct connection)
+    """
+    # X-Forwarded-For: client, proxy1, proxy2
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    # X-Real-IP (common with nginx)
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+
+    # Direct connection
+    if request.client:
+        return request.client.host
+
+    return None
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Middleware that ensures every request has a request ID.
 

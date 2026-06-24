@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import get_current_session, get_current_user
 from app.core.cookies import clear_auth_cookies, create_auth_response
 from app.core.database import get_db
+from app.core.request_context import get_client_ip
 from app.core.security import generate_csrf_token as gen_csrf
 from app.models.user import User
 from app.services.auth import AuthService
@@ -96,7 +97,7 @@ async def register(
         email=body.email,
         password=body.password,
         display_name=body.display_name,
-        ip_address=request.client.host if request.client else None,
+        ip_address=get_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -125,7 +126,7 @@ async def login(
     result = await service.login(
         email=body.email,
         password=body.password,
-        ip_address=request.client.host if request.client else None,
+        ip_address=get_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -176,7 +177,7 @@ async def refresh(
     service = AuthService(db)
     result = await service.refresh(
         refresh_token=refresh_token,
-        ip_address=request.client.host if request.client else None,
+        ip_address=get_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -198,7 +199,7 @@ async def logout(
     await service.logout(
         session_id=session["session_id"],
         user_id=session["user_id"],
-        ip_address=request.client.host if request.client else None,
+        ip_address=get_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 

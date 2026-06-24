@@ -130,10 +130,13 @@ async def stream_task_events(
 
     # Verify ownership (uses the request-scoped session)
     task = await service.get_task(task_id, user.id)
-    task_status = task.status
-    task_progress = task.progress
-    task_stage = task.current_stage
-    task_created_at = task.created_at
+    # Use a mutable dict so the generator can update task state without nonlocal
+    task_state = {
+        "status": task.status,
+        "progress": task.progress,
+        "stage": task.current_stage,
+        "created_at": task.created_at,
+    }
 
     # Check for Last-Event-ID
     last_event_id = request.headers.get("last-event-id")
@@ -188,12 +191,12 @@ async def stream_task_events(
                     "event_id": f"{task_id}:heartbeat",
                     "task_id": task_id,
                     "type": "heartbeat",
-                    "status": task_status,
-                    "progress": task_progress,
-                    "stage": task_stage,
+                    "status": task_state["status"],
+                    "progress": task_state["progress"],
+                    "stage": task_state["stage"],
                     "message": None,
                     "result": None,
-                    "timestamp": to_iso_string(task_created_at),
+                    "timestamp": to_iso_string(task_state["created_at"]),
                 }
                 yield "event: heartbeat\n"
                 yield f"data: {json.dumps(heartbeat_data)}\n\n"
@@ -214,10 +217,9 @@ async def stream_task_events(
                     )
                     updated_task = task_result.scalar_one_or_none()
                     if updated_task:
-                        nonlocal task_status, task_progress, task_stage
-                        task_status = updated_task.status
-                        task_progress = updated_task.progress
-                        task_stage = updated_task.current_stage
+                        task_state["status"] = updated_task.status
+                        task_state["progress"] = updated_task.progress
+                        task_state["stage"] = updated_task.current_stage
 
             if new_events:
                 for event in new_events:

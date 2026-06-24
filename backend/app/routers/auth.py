@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_session, get_current_user
@@ -22,7 +22,7 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    display_name: str = BaseModel.Field(
+    display_name: str = Field(
         min_length=1,
         max_length=100,
         pattern=r"^[\w\s一-鿿㐀-䶿\-'.]+$",

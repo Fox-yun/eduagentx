@@ -1,7 +1,7 @@
 """Database models."""
 
 from app.models.clarification import ClarificationAnswer, ClarificationQuestion, ClarificationSet
-from app.models.goal import LearningGoal, Recommendation
+from app.models.goal import LearningGoal
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from app.models.path import (
     LearningEdge,
@@ -11,7 +11,7 @@ from app.models.path import (
     LearningPathVersion,
     LearningStage,
 )
-from app.models.progress import LearningProgress, MasterySnapshot
+from app.models.progress import LearningProgress, MasterySnapshot, Recommendation
 from app.models.task import BackgroundTask, TaskEvent
 from app.models.unit import (
     Assessment,

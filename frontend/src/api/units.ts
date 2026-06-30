@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { apiRequest } from "./client";
 import {
   UnitContentDtoSchema,
@@ -15,7 +16,7 @@ import {
   mapAssessmentSubmitResponse,
   mapPracticeQuestions,
 } from "../mappers/units";
-import { z } from "zod";
+
 
 export async function getUnitContent(
   pathId: string,
@@ -39,6 +40,8 @@ export async function getUnitContent(
         contentVersion: 1,
         status: "not_generated",
         activeTaskId: null,
+        activeVersionId: null,
+        pendingVersionId: null,
         introduction: null,
         objectives: [],
         sections: [],
@@ -136,7 +139,46 @@ export async function createPractice(
   const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/practice`, {
     method: "POST",
     schema: PracticeSetDtoSchema,
-    timeoutMs: 120000,  // LLM generation can take 30-60s
+    timeoutMs: 120000,
   });
   return mapPracticeQuestions(dto);
+}
+
+const MindMapResponseSchema = z.object({
+  tree: z.any(),
+  mermaid: z.string(),
+  node_id: z.string(),
+});
+
+export interface MindMapResult {
+  tree: any;
+  mermaid: string;
+  nodeId: string;
+}
+
+export async function getMindMap(
+  pathId: string,
+  nodeId: string
+): Promise<MindMapResult> {
+  const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/mind-map`, {
+    method: "GET",
+    schema: MindMapResponseSchema,
+  });
+  return { tree: dto.tree, mermaid: dto.mermaid, nodeId: dto.node_id };
+}
+
+const GenerateQuizBankResponseSchema = z.object({
+  next_step: z.literal("generating"),
+  active_task_id: z.string(),
+});
+
+export async function generateQuizBank(
+  pathId: string,
+  nodeId: string
+): Promise<{ nextStep: "generating"; activeTaskId: string }> {
+  const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/quiz-bank`, {
+    method: "POST",
+    schema: GenerateQuizBankResponseSchema,
+  });
+  return { nextStep: dto.next_step as "generating", activeTaskId: dto.active_task_id };
 }

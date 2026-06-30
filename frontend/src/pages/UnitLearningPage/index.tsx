@@ -60,6 +60,10 @@ export function UnitLearningPage() {
   const [tutorMessages, setTutorMessages] = useState<ChatMessage[]>([]);
   const tutorEndRef = React.useRef<HTMLDivElement>(null);
 
+  // Resource tabs state
+  const [activeTab, setActiveTab] = useState<"content" | "lecture" | "mindmap" | "quiz">("content");
+  const [mindMapData, setMindMapData] = useState<{ tree: any; mermaid: string } | null>(null);
+
   // Queries
   const { data: pathData } = useQuery({
     queryKey: queryKeys.path(pathId || ""),
@@ -248,7 +252,7 @@ export function UnitLearningPage() {
             </span>
           </div>
 
-          {/* Not Generated State */}
+          {/* Not Generated State — blank state, no active task */}
           {unitData?.status === "not_generated" && !isRegeneratedOrGenerating && (
             <div className="bg-panel border border-border rounded-2xl shadow-card p-12 text-center flex flex-col items-center gap-5 my-6">
               <div className="p-4 bg-primary-soft/30 text-primary rounded-full animate-pulse">
@@ -305,7 +309,7 @@ export function UnitLearningPage() {
             </div>
           )}
 
-          {/* Active Generating state (Task Stream Overlay inline) */}
+          {/* Active Generating Banner — shown as top bar when generating or regenerating */}
           {isRegeneratedOrGenerating && (
             <div className="bg-panel border border-border rounded-2xl shadow-card p-8 flex flex-col gap-5 my-4">
               <div className="flex flex-col gap-1">
@@ -313,7 +317,11 @@ export function UnitLearningPage() {
                   <Loader2 className="h-4.5 w-4.5 text-primary animate-spin" />
                   {taskStage ? `AI 智能体正在编写：${taskStage}` : "正在启动单元编写智能体..."}
                 </h3>
-                <p className="text-xs text-muted">结合全图拓扑、前置节点掌握情况和您的偏好语言进行针对性讲解。</p>
+                <p className="text-xs text-muted">
+                  {unitData?.activeVersionId
+                    ? "当前仍展示上一版本内容，新版本生成完成后将自动切换。"
+                    : "结合全图拓扑、前置节点掌握情况和您的偏好语言进行针对性讲解。"}
+                </p>
               </div>
 
               <div className="flex justify-between items-center text-xs text-muted font-semibold">
@@ -331,9 +339,39 @@ export function UnitLearningPage() {
             </div>
           )}
 
-          {/* Ready State: Main Learning Content */}
-          {unitData?.status === "ready" && !isRegeneratedOrGenerating && (
+          {/* Ready State: Main Learning Content — also shown during regeneration (old version remains visible) */}
+          {(unitData?.status === "ready" || unitData?.status === "regenerating") && unitData.content && (
             <div className="flex flex-col gap-8">
+              {/* Resource Tabs */}
+              <div className="flex gap-1 bg-panel border border-border rounded-2xl shadow-card p-1.5 overflow-x-auto">
+                {(["content", "lecture", "mindmap", "quiz"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => {
+                      setActiveTab(tab);
+                      if (tab === "mindmap" && !mindMapData) {
+                        import("../../api/units").then((m) =>
+                          m.getMindMap(pathId || "", nodeId || "").then(setMindMapData)
+                        );
+                      }
+                    }}
+                    className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap ${
+                      activeTab === tab
+                        ? "bg-primary text-white shadow-md"
+                        : "text-muted hover:text-ink hover:bg-page/50"
+                    }`}
+                  >
+                    {tab === "content" && "📖 课程内容"}
+                    {tab === "lecture" && "📝 讲义"}
+                    {tab === "mindmap" && "🧠 思维导图"}
+                    {tab === "quiz" && "📋 题库"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content Tab */}
+              {activeTab === "content" && (
+              <div className="flex flex-col gap-8">
               {/* Main Markdown explanation */}
               <article className="bg-panel border border-border rounded-2xl shadow-card p-6 sm:p-8 select-text">
                 <div className="text-xs text-ink leading-relaxed flex flex-col gap-4 font-sans select-text">
@@ -551,6 +589,87 @@ export function UnitLearningPage() {
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
+
+              </div>
+              )}
+
+              {/* Lecture Tab */}
+              {activeTab === "lecture" && unitData?.lecture?.content && (
+                <article className="bg-panel border border-border rounded-2xl shadow-card p-6 sm:p-8 select-text">
+                  <div className="text-xs text-ink leading-relaxed flex flex-col gap-4 font-sans select-text">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {unitData.lecture.content}
+                    </ReactMarkdown>
+                  </div>
+                </article>
+              )}
+              {activeTab === "lecture" && !unitData?.lecture?.content && (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-12 text-center">
+                  <p className="text-xs text-muted">尚未生成讲义。请在课程内容页面生成。</p>
+                </div>
+              )}
+
+              {/* Mind Map Tab */}
+              {activeTab === "mindmap" && (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-6">
+                  {mindMapData ? (
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-ink font-serif-cn">思维导图</h3>
+                        <button
+                          onClick={() => {
+                            const blob = new Blob([mindMapData.mermaid], { type: "text/plain" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url; a.download = "mindmap.mermaid";
+                            a.click(); URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1.5 border border-border hover:bg-page text-[10px] font-semibold text-muted rounded-lg cursor-pointer"
+                        >
+                          下载 Mermaid
+                        </button>
+                      </div>
+                      <pre className="bg-page/50 border border-border rounded-xl p-4 text-xs font-mono text-ink whitespace-pre-wrap overflow-x-auto max-h-96">
+                        {mindMapData.mermaid}
+                      </pre>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <p className="text-xs text-muted mb-3">点击加载思维导图</p>
+                      <button
+                        onClick={() =>
+                          import("../../api/units").then((m) =>
+                            m.getMindMap(pathId || "", nodeId || "").then(setMindMapData)
+                          )
+                        }
+                        className="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        生成思维导图
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Quiz Bank Tab */}
+              {activeTab === "quiz" && (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-12 text-center">
+                  <p className="text-xs text-muted mb-3">题库将异步生成，生成完成后可在线作答。</p>
+                  <button
+                    onClick={() => {
+                      import("../../api/units").then((m) =>
+                        m.generateQuizBank(pathId || "", nodeId || "").then((res) => {
+                          toast("题库生成请求已提交", "success");
+                          setLocalActiveTaskId(res.activeTaskId);
+                        })
+                      );
+                    }}
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    生成题库
+                  </button>
+                </div>
+              )}
 
             </div>
           )}

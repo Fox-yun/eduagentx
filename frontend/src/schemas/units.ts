@@ -28,6 +28,8 @@ export const UnitContentDtoSchema = z.object({
   content_version: z.number().int().positive(),
   status: z.enum(["not_generated", "generating", "ready", "regenerating", "failed"]),
   active_task_id: z.string().nullable(),
+  active_version_id: z.string().nullable().optional(),
+  pending_version_id: z.string().nullable().optional(),
   introduction: z.string().nullable(),
   objectives: z.array(z.string()),
   sections: z.array(UnitSectionDtoSchema),
@@ -69,6 +71,8 @@ export interface UnitContentModel {
   contentVersion: number;
   status: "generating" | "ready" | "failed" | "not_generated" | "regenerating";
   activeTaskId: string | null;
+  activeVersionId: string | null;
+  pendingVersionId: string | null;
   introduction: string | null;
   objectives: string[];
   sections: UnitSectionModel[];

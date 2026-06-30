@@ -65,6 +65,8 @@ export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
     contentVersion: dto.content_version,
     status: dto.status,
     activeTaskId: dto.active_task_id || null,
+    activeVersionId: dto.active_version_id || null,
+    pendingVersionId: dto.pending_version_id || null,
     introduction,
     objectives,
     sections: sections.map((s: any) => ({

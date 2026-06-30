@@ -1064,6 +1064,24 @@ def _build_fallback_lecture(node_title: str, node_difficulty: str, existing: dic
             "summary": f"本讲义深入讲解了{node_title}的核心知识。建议结合原始单元内容和练习题巩固所学。",
         }
 
+    # Return for case where existing sections were used
+    return {
+        "introduction": f"# {node_title} — 详细讲义\n\n本讲义将对{node_title}进行更深入、更全面的讲解。",
+        "sections": sections,
+        "key_takeaways": [
+            f"深入理解{node_title}的核心概念",
+            f"掌握{node_title}的实际应用方法",
+            "避免常见的理解和操作误区",
+        ],
+        "common_mistakes": [
+            {
+                "mistake": "只看不练",
+                "explanation": "仅阅读讲义而不动手实践，容易遗忘。建议每学完一个章节就完成对应的代码练习。",
+            }
+        ],
+        "summary": f"本讲义深入讲解了{node_title}的核心知识。建议结合原始单元内容和练习题巩固所学。",
+    }
+
 
 @celery_app.task(name="tasks.recover_stale")  # type: ignore[untyped-decorator]
 def recover_stale_tasks_task() -> dict[str, Any]:

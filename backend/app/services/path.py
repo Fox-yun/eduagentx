@@ -362,7 +362,7 @@ class PathService:
         path_id: str,
         user_id: str,
         revision_request: str,
-    ) -> tuple[LearningPathRevisionRequest, object | None]:
+    ) -> tuple[LearningPathRevisionRequest, BackgroundTask | None]:
         """Create a revision request and enqueue a background task.
 
         Uses SELECT ... FOR UPDATE to prevent concurrent revision creation.

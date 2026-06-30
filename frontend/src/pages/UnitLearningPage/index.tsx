@@ -61,7 +61,7 @@ export function UnitLearningPage() {
   const tutorEndRef = React.useRef<HTMLDivElement>(null);
 
   // Resource tabs state
-  const [activeTab, setActiveTab] = useState<"content" | "lecture" | "mindmap" | "quiz">("content");
+  const [activeTab, setActiveTab] = useState<"content" | "lecture" | "mindmap">("content");
   const [mindMapData, setMindMapData] = useState<{ tree: any; mermaid: string } | null>(null);
 
   // Queries
@@ -344,7 +344,7 @@ export function UnitLearningPage() {
             <div className="flex flex-col gap-8">
               {/* Resource Tabs */}
               <div className="flex gap-1 bg-panel border border-border rounded-2xl shadow-card p-1.5 overflow-x-auto">
-                {(["content", "lecture", "mindmap", "quiz"] as const).map((tab) => (
+                {(["content", "lecture", "mindmap"] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => {
@@ -364,7 +364,6 @@ export function UnitLearningPage() {
                     {tab === "content" && "📖 课程内容"}
                     {tab === "lecture" && "📝 讲义"}
                     {tab === "mindmap" && "🧠 思维导图"}
-                    {tab === "quiz" && "📋 题库"}
                   </button>
                 ))}
               </div>
@@ -648,26 +647,6 @@ export function UnitLearningPage() {
                       </button>
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Quiz Bank Tab */}
-              {activeTab === "quiz" && (
-                <div className="bg-panel border border-border rounded-2xl shadow-card p-12 text-center">
-                  <p className="text-xs text-muted mb-3">题库将异步生成，生成完成后可在线作答。</p>
-                  <button
-                    onClick={() => {
-                      import("../../api/units").then((m) =>
-                        m.generateQuizBank(pathId || "", nodeId || "").then((res) => {
-                          toast("题库生成请求已提交", "success");
-                          setLocalActiveTaskId(res.activeTaskId);
-                        })
-                      );
-                    }}
-                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl cursor-pointer"
-                  >
-                    生成题库
-                  </button>
                 </div>
               )}
 

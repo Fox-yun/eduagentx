@@ -318,7 +318,7 @@ class UnitService:
         )
 
         # Update unit content with task info
-        update_target = existing or uc  # type: ignore[possibly-undefined]
+        update_target = existing or uc
         update_target.active_task_id = task.id
         update_target.status = "generating"
 
@@ -444,12 +444,12 @@ class UnitService:
         sections = content_data.get("sections", [])
 
         # Build hierarchical tree
-        tree: list[dict[str, object]] = [
+        tree: list[dict[str, Any]] = [
             {"id": "root", "label": title, "children": []}
         ]
 
         # Objectives branch
-        obj_branch: dict[str, object] = {"id": "objectives", "label": "学习目标", "children": []}
+        obj_branch: dict[str, Any] = {"id": "objectives", "label": "学习目标", "children": []}
         for i, obj in enumerate(objectives):
             obj_branch["children"].append({"id": f"obj-{i}", "label": obj, "children": []})
         if objectives:
@@ -458,7 +458,7 @@ class UnitService:
         # Sections branch
         for sec in sections:
             sec_title = sec.get("title", "未命名章节")
-            sec_branch: dict[str, object] = {
+            sec_branch: dict[str, Any] = {
                 "id": f"sec-{sec.get('order', 0)}",
                 "label": sec_title,
                 "children": [],

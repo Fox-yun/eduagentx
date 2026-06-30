@@ -210,6 +210,7 @@ async def execute_path_revision(db: Any, task: Any) -> dict[str, Any]:
         await update_task_status(
             db, task.id, "running", progress=35, stage="generating", message="LLM 不可用，使用模板修订..."
         )
+        assert current_version is not None
         plan = _build_fallback_plan(current_stages, current_nodes, current_edges, current_version)
 
     # Build raw dicts for DAG validation
@@ -318,7 +319,7 @@ def _build_fallback_plan(
     current_stages: list[LearningStage],
     current_nodes: list[LearningNode],
     current_edges: list[LearningEdge],
-    current_version: LearningPathVersion | None,
+    current_version: LearningPathVersion,
 ) -> RevisedPathPlan:
     """Build a template-based revision plan when LLM is unavailable."""
     stages = [

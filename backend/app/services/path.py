@@ -245,9 +245,22 @@ class PathService:
         path_id: str,
         user_id: str,
         revision_request: str,
-    ) -> LearningPathRevisionRequest:
-        """Create a revision request for a path."""
-        await self.get_path(path_id, user_id)
+    ) -> tuple[LearningPathRevisionRequest, object | None]:
+        """Create a revision request and enqueue a background task.
+
+        Returns (revision_request, background_task | None).
+        Both are created atomically in the same transaction (no commit).
+        The caller must commit.
+        """
+        from app.services.task import TaskService
+
+        path = await self.get_path(path_id, user_id)
+
+        # Confirm there is a current active version to base the revision on
+        if not path.active_version_id:
+            raise ApiError(code="NO_ACTIVE_VERSION", message="Path has no active version to revise", status_code=400)
+
+        idempotency_key = f"path-revision:{path_id}:{revision_request[:64]}"
 
         request = LearningPathRevisionRequest(
             id=str(uuid.uuid4()),
@@ -257,8 +270,25 @@ class PathService:
         )
         self.db.add(request)
         await self.db.flush()
-        await self.db.commit()
-        return request
+
+        task_service = TaskService(self.db)
+        task = await task_service.enqueue_task(
+            user_id=user_id,
+            task_type="learning_path_revision",
+            target_type="revision_request",
+            target_id=request.id,
+            target_metadata={
+                "path_id": path_id,
+                "source_version_id": path.active_version_id,
+            },
+            idempotency_key=idempotency_key,
+        )
+
+        # Link task back to revision request
+        request.task_id = task.id
+        request.source_version_id = path.active_version_id
+
+        return request, task
 
     async def list_versions(
         self,

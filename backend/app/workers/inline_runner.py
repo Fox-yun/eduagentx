@@ -16,6 +16,7 @@ import structlog
 from app.core.database import get_session_factory
 from app.models.outbox import OutboxEvent
 from app.workers.outbox_dispatcher import OutboxDispatchError, dispatch_event
+from app.workers.task_handlers import get_handler
 from app.workers.task_runtime import update_task_status
 
 logger = structlog.get_logger()
@@ -25,13 +26,6 @@ POLL_INTERVAL_SECONDS = 2
 
 async def _execute_task_inline(task_id: str) -> None:
     """Execute a background task inline (same process, no Celery)."""
-    from app.workers.tasks import (
-        _execute_knowledge_index,
-        _execute_lecture_generation,
-        _execute_path_generation,
-        _execute_unit_generation,
-    )
-
     factory = get_session_factory()
     async with factory() as db:
         from sqlalchemy import select
@@ -48,17 +42,8 @@ async def _execute_task_inline(task_id: str) -> None:
         await update_task_status(db, task_id, "running", progress=0, stage="starting", message="Task started")
 
         try:
-            task_result: dict = {}
-            if task.task_type == "learning_path_generation":
-                task_result = await _execute_path_generation(db, task)
-            elif task.task_type == "learning_unit_generation":
-                task_result = await _execute_unit_generation(db, task)
-            elif task.task_type == "learning_lecture_generation":
-                task_result = await _execute_lecture_generation(db, task)
-            elif task.task_type == "knowledge_index":
-                task_result = await _execute_knowledge_index(db, task)
-            else:
-                task_result = {"error": f"Unknown task type: {task.task_type}"}
+            handler = get_handler(task.task_type)
+            if handler is None:
                 await update_task_status(
                     db,
                     task_id,
@@ -67,6 +52,8 @@ async def _execute_task_inline(task_id: str) -> None:
                     error_message=f"Unknown task type: {task.task_type}",
                 )
                 return
+
+            task_result = await handler(db, task)
 
             await update_task_status(
                 db,

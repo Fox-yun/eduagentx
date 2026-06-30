@@ -8,9 +8,9 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.path import LearningNode
 from app.models.unit import LearningUnitContent
 from app.prompts.agents import TUTOR_SYSTEM, tutor_context
+from app.services.learning_access import require_node_access
 from app.services.llm import LLMError, llm_chat
 
 logger = structlog.get_logger()
@@ -29,13 +29,21 @@ class TutorService:
         user_id: str,
         question: str,
     ) -> dict[str, Any]:
-        """Answer a student's question about a specific learning node."""
-        # Look up node context
-        node_result = await self.db.execute(select(LearningNode).where(LearningNode.id == node_id))
-        node = node_result.scalar_one_or_none()
-        node_title = node.title if node else "未知节点"
+        """Answer a student's question about a specific learning node.
 
-        # Look up unit content for richer context
+        Verifies access control before answering.
+        Never leaks internal errors to the user.
+        """
+        # 1. Access control — verify user owns the path and node belongs to active version
+        try:
+            ctx = await require_node_access(self.db, user_id, path_id, node_id)
+        except Exception:
+            logger.warning("tutor_access_denied", path_id=path_id, node_id=node_id, user_id=user_id)
+            raise
+
+        node_title = ctx.node.title or "未知节点"
+
+        # 2. Look up unit content for richer context
         content_result = await self.db.execute(
             select(LearningUnitContent).where(
                 LearningUnitContent.path_id == path_id,
@@ -45,7 +53,7 @@ class TutorService:
         )
         content = content_result.scalar_one_or_none()
 
-        # Build context string
+        # 3. Build context string
         node_content = ""
         if content and content.content:
             sections = content.content.get("sections", [])
@@ -70,9 +78,14 @@ class TutorService:
                 "node_id": node_id,
             }
         except LLMError as e:
-            logger.error("tutor_llm_error", error=str(e))
+            logger.error(
+                "tutor_llm_error",
+                error_type=type(e).__name__,
+                request_id=getattr(e, "request_id", None),
+                latency_ms=getattr(e, "latency_ms", None),
+            )
             return {
                 "question": question,
-                "answer": f"抱歉，辅导智能体暂时无法回答。错误信息：{e}",
+                "answer": "辅导服务暂时不可用，请稍后重试。",
                 "node_id": node_id,
             }

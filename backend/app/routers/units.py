@@ -67,24 +67,48 @@ async def regenerate_unit_content(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Regenerate unit content with optional user preferences."""
-    from sqlalchemy import select
+    """Regenerate unit content with optional user preferences.
 
+    Safe regeneration: existing content is preserved until the worker
+    atomically replaces it with the new version. If the worker fails,
+    old content remains available.
+    """
+    from app.models.task import BackgroundTask
     from app.models.unit import LearningUnitContent
+    from app.services.learning_access import require_node_access
     from app.services.task import TaskService
 
-    # Delete existing content so the worker creates a fresh one
-    result = await db.execute(
+    # Verify access control
+    await require_node_access(db, user.id, path_id, node_id)
+
+    # Check for existing pending/running regeneration task
+    from sqlalchemy import select
+
+    task_result = await db.execute(
+        select(BackgroundTask).where(
+            BackgroundTask.target_type == "node",
+            BackgroundTask.target_id == node_id,
+            BackgroundTask.task_type == "learning_unit_generation",
+            BackgroundTask.idempotency_key == f"unit-regenerate:{user.id}:{path_id}:{node_id}",
+            BackgroundTask.status.in_(["pending", "running"]),
+        )
+    )
+    existing_task = task_result.scalar_one_or_none()
+    if existing_task:
+        return {"next_step": "generating", "active_task_id": existing_task.id}
+
+    # Mark existing content as regenerating (do NOT delete it)
+    existing_result = await db.execute(
         select(LearningUnitContent).where(
             LearningUnitContent.path_id == path_id,
             LearningUnitContent.node_id == node_id,
             LearningUnitContent.user_id == user.id,
         )
     )
-    existing = result.scalar_one_or_none()
+    existing = existing_result.scalar_one_or_none()
     if existing:
-        await db.delete(existing)
-        await db.flush()
+        existing.content_status = "regenerating"
+        # We'll use this to detect regeneration vs first-time generation
 
     task_service = TaskService(db)
     metadata: dict[str, Any] = {"path_id": path_id}
@@ -97,6 +121,7 @@ async def regenerate_unit_content(
         target_type="node",
         target_id=node_id,
         target_metadata=metadata,
+        idempotency_key=f"unit-regenerate:{user.id}:{path_id}:{node_id}",
     )
     return {"next_step": "generating", "active_task_id": task.id}
 

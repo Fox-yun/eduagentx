@@ -607,7 +607,7 @@ class TestPathServiceRevisionRequest:
         db.add = MagicMock()
         db.add_all = MagicMock()
         svc = PathService(db)
-        path = _make_path()
+        path = _make_path(active_version_id="ver-1")
 
         call_count = 0
 
@@ -620,11 +620,10 @@ class TestPathServiceRevisionRequest:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        result = await svc.create_revision_request("path-1", "user-1", "Please revise")
-        assert result is not None
-        assert result.revision_request == "Please revise"
+        revision_req, task = await svc.create_revision_request("path-1", "user-1", "Please revise")
+        assert revision_req is not None
+        assert revision_req.revision_request == "Please revise"
         db.add.assert_called()
-        db.commit.assert_awaited()
 
 
 class TestPathServiceListVersions:

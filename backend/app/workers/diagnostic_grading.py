@@ -20,6 +20,7 @@ from app.services.diagnostic_scoring import (
 )
 from app.services.goal import GoalService
 from app.services.llm import LLMError, llm_json
+from app.workers.task_handlers import register_handler
 
 logger = structlog.get_logger()
 
@@ -27,6 +28,7 @@ logger = structlog.get_logger()
 DIAGNOSTIC_GRADING_TIMEOUT = 30  # seconds per short-answer question
 
 
+@register_handler("diagnostic_grading")
 async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     """Grade a diagnostic attempt's short-answer questions via LLM.
 

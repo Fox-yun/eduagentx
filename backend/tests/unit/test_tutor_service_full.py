@@ -13,40 +13,75 @@ def _mock_scalar_result(value):
     return r
 
 
-class TestTutorServiceAsk:
-    @pytest.mark.asyncio
-    async def test_ask_with_node_and_content(self):
-        from app.services.tutor import TutorService
+def _make_path():
+    """Create a mock LearningPath with required fields."""
+    p = MagicMock()
+    p.id = "path-1"
+    p.user_id = "user-1"
+    p.active_version_id = "ver-1"
+    p.status = "active"
+    return p
 
-        db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        svc = TutorService(db)
 
-        node = MagicMock()
-        node.id = "node-1"
-        node.title = "Python Lists"
+def _make_version():
+    """Create a mock LearningPathVersion with required fields."""
+    v = MagicMock()
+    v.id = "ver-1"
+    v.path_id = "path-1"
+    v.status = "active"
+    return v
 
-        content = MagicMock()
-        content.content = {
+
+def _make_node(node_id="node-1", title="Python Lists"):
+    """Create a mock LearningNode with required fields."""
+    n = MagicMock()
+    n.id = node_id
+    n.title = title
+    n.version_id = "ver-1"
+    n.status = "available"
+    return n
+
+
+def _make_content(sections=None):
+    """Create a mock LearningUnitContent."""
+    c = MagicMock()
+    if sections is not None:
+        c.content = {"sections": sections}
+    elif sections is None:
+        # Default content with sections
+        c.content = {
             "sections": [
                 {"title": "Intro", "content": "Lists are ordered collections..."},
                 {"title": "Operations", "content": "You can append, remove..."},
             ]
         }
+    return c
+
+
+class TestTutorServiceAsk:
+    """TutorService.ask tests with access guard."""
+
+    @pytest.mark.asyncio
+    async def test_ask_with_node_and_content(self):
+        from app.services.tutor import TutorService
+
+        db = AsyncMock()
+        svc = TutorService(db)
+
+        path = _make_path()
+        version = _make_version()
+        node = _make_node()
+        content = _make_content()
+
+        call_order = [path, version, node, content, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(node)
-            elif call_count == 2:
-                return _mock_scalar_result(content)
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
@@ -57,26 +92,26 @@ class TestTutorServiceAsk:
             assert result["node_id"] == "node-1"
 
     @pytest.mark.asyncio
-    async def test_ask_without_node(self):
+    async def test_ask_without_node_provides_fallback_title(self):
+        """When the queried node doesn't have a title, '未知节点' is used."""
         from app.services.tutor import TutorService
 
         db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = TutorService(db)
+
+        path = _make_path()
+        version = _make_version()
+        node = _make_node(title="")  # Empty title
+
+        call_order = [path, version, node, None, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(None)  # no node
-            elif call_count == 2:
-                return _mock_scalar_result(None)  # no content
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
@@ -89,28 +124,22 @@ class TestTutorServiceAsk:
         from app.services.tutor import TutorService
 
         db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = TutorService(db)
 
-        node = MagicMock()
-        node.title = "Test"
+        path = _make_path()
+        version = _make_version()
+        node = _make_node()
+        content = _make_content(sections=[])
 
-        content = MagicMock()
-        content.content = {"sections": []}
+        call_order = [path, version, node, content, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(node)
-            elif call_count == 2:
-                return _mock_scalar_result(content)
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
@@ -123,28 +152,23 @@ class TestTutorServiceAsk:
         from app.services.tutor import TutorService
 
         db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = TutorService(db)
 
-        node = MagicMock()
-        node.title = "Test"
-
+        path = _make_path()
+        version = _make_version()
+        node = _make_node()
         content = MagicMock()
         content.content = None
+
+        call_order = [path, version, node, content, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(node)
-            elif call_count == 2:
-                return _mock_scalar_result(content)
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
@@ -153,63 +177,78 @@ class TestTutorServiceAsk:
             assert result["answer"] == "Answer"
 
     @pytest.mark.asyncio
-    async def test_ask_llm_error_returns_fallback(self):
+    async def test_ask_llm_error_returns_safe_message(self):
+        """LLM errors must not leak internal details to the user."""
         from app.services.llm import LLMError
         from app.services.tutor import TutorService
 
         db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = TutorService(db)
+
+        path = _make_path()
+        version = _make_version()
+        node = _make_node()
+
+        call_order = [path, version, node, None, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1 or call_count == 2:
-                return _mock_scalar_result(None)
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with patch("app.services.tutor.llm_chat", new_callable=AsyncMock, side_effect=LLMError("API down")):
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
-            assert "抱歉" in result["answer"]
-            assert "API down" in result["answer"]
+            assert "辅导服务暂时不可用" in result["answer"]
+            assert "API down" not in result["answer"]  # Must not leak internal errors
 
     @pytest.mark.asyncio
     async def test_ask_with_many_sections_truncated(self):
         from app.services.tutor import TutorService
 
         db = AsyncMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = TutorService(db)
 
-        node = MagicMock()
-        node.title = "Test"
-
+        path = _make_path()
+        version = _make_version()
+        node = _make_node()
         content = MagicMock()
-        content.content = {"sections": [{"title": f"Section {i}", "content": f"Content {i}" * 100} for i in range(10)]}
+        content.content = {"sections": [{"title": f"S{i}", "content": "X" * 100} for i in range(10)]}
+
+        call_order = [path, version, node, content, None]
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
+            idx = min(call_count, len(call_order) - 1)
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(node)
-            elif call_count == 2:
-                return _mock_scalar_result(content)
-            return _mock_scalar_result(None)
+            return _mock_scalar_result(call_order[idx])
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"):
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
             assert result["answer"] == "Answer"
+
+    @pytest.mark.asyncio
+    async def test_ask_rejects_unauthorized_access(self):
+        """User cannot access another user's path (path not found = 404)."""
+        from app.core.errors import ApiError
+        from app.services.tutor import TutorService
+
+        db = AsyncMock()
+        svc = TutorService(db)
+
+        # Path query returns None (user doesn't own path)
+        async def execute_side_effect(query):
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with pytest.raises(ApiError, match="Learning path not found"):
+            await svc.ask("path-1", "node-1", "other-user", "Hack attempt?")

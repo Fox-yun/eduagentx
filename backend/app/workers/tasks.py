@@ -9,6 +9,7 @@ import structlog
 
 from app.core.database import get_session_factory
 from app.workers.celery_app import celery_app
+from app.workers.task_handlers import get_handler, register_handler
 from app.workers.task_runtime import recover_stale_tasks, update_task_status
 
 logger = structlog.get_logger()
@@ -61,23 +62,8 @@ def execute_background_task(self: Any, task_id: str) -> dict[str, Any]:
 
             # Execute based on task type
             try:
-                task_result: dict[str, Any] = {}
-                if task.task_type == "learning_path_generation":
-                    task_result = await _execute_path_generation(db, task)
-                elif task.task_type == "diagnostic_grading":
-                    from app.workers.diagnostic_grading import execute_diagnostic_grading
-
-                    task_result = await execute_diagnostic_grading(db, task)
-                elif task.task_type == "learning_unit_generation":
-                    task_result = await _execute_unit_generation(db, task)
-                elif task.task_type == "knowledge_index":
-                    task_result = await _execute_knowledge_index(db, task)
-                elif task.task_type == "learning_lecture_generation":
-                    task_result = await _execute_lecture_generation(db, task)
-                elif task.task_type == "e2e_progress_test":
-                    task_result = await _execute_e2e_progress_task(db, task)
-                else:
-                    task_result = {"error": f"Unknown task type: {task.task_type}"}
+                handler = get_handler(task.task_type)
+                if handler is None:
                     await update_task_status(
                         db,
                         task.id,
@@ -86,6 +72,8 @@ def execute_background_task(self: Any, task_id: str) -> dict[str, Any]:
                         error_message=f"Unknown task type: {task.task_type}",
                     )
                     return {"status": "error", "message": f"Unknown task type: {task.task_type}"}
+
+                task_result = await handler(db, task)
 
                 # Mark completed
                 await update_task_status(
@@ -166,6 +154,7 @@ async def _cleanup_engine() -> None:
     await engine.dispose()
 
 
+@register_handler("e2e_progress_test")
 async def _execute_e2e_progress_task(db: Any, task: Any) -> dict[str, Any]:
     """Execute a deterministic E2E progress task.
 
@@ -202,6 +191,7 @@ def _extract_topic(goal_title: str) -> str:
     return title if len(title) >= 2 else goal_title.strip()
 
 
+@register_handler("learning_path_generation")
 async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
     """Execute a path generation task using LLM to create 5-15 learning nodes."""
     import asyncio
@@ -230,7 +220,9 @@ async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
 要求：
 1. 生成 5-15 个学习节点（units），每个节点是一个具体的知识点或技能
 2. 节点标题必须准确描述该节点要学习的具体内容（不要使用"基础概念"、"进阶应用"这样的泛化标题）
-3. 【重要】从用户的学习目标中提取核心主题词，不要直接使用用户目标的完整表述。例如：目标是"我希望学习C++基础"时，标题应以"C++"开头（如"C++变量与数据类型"），而不是"我希望学习C++基础的变量与数据类型"
+3. 【重要】从用户的学习目标中提取核心主题词，不要直接使用用户目标的完整表述。
+   例如：目标是"我希望学习C++基础"时，标题应以"C++"开头（如"C++变量与数据类型"），
+   而不是"我希望学习C++基础的变量与数据类型"
 4. 每个节点包含 description、difficulty、estimated_minutes、learning_outcomes
 5. 节点之间通过 edges 定义前置依赖关系（DAG 结构）
 6. 节点按学习顺序排列，从基础到高级
@@ -490,6 +482,7 @@ async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
     return {"path_id": path.id, "version": version.version_number}
 
 
+@register_handler("learning_unit_generation")
 async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     """Execute a unit content generation task using LLM for detailed content."""
     import json
@@ -573,34 +566,74 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
 
     # Fallback: template-based content
     if content_data is None:
-        difficulty_label = {"beginner": "入门", "intermediate": "进阶", "advanced": "高级"}.get(node_difficulty, "基础")
+        diff_map = {"beginner": "入门", "intermediate": "进阶", "advanced": "高级"}
+        difficulty_label = diff_map.get(node_difficulty, "基础")
+        node_desc_fallback = node_desc or f"本单元将系统学习{node_title}的理论基础与实践应用。"
+
+        intro = f"# {node_title}\n\n{node_desc_fallback}"
+
+        sec1_intro = (
+            f"## 概念介绍\n\n"
+            f"{node_desc or f'{node_title}是本学习路径中的一个重要知识点。'}\n\n"
+            f"本节将从{difficulty_label}角度出发，"
+            f"帮助你建立对{node_title}的整体认知。\n\n### 学习目标\n\n"
+        )
+        sec1_content = sec1_intro + "\n".join(f"- {o}" for o in objectives)
+
+        sec2_content = (
+            f"## 核心原理\n\n要深入理解{node_title}，需要掌握以下关键点：\n\n"
+            f"1. **基本定义**：{node_title}的基本定义和适用场景\n"
+            f"2. **工作原理**：内部机制和数据流动方式\n"
+            f"3. **关键特性**：区别于其他概念的核心特征\n\n"
+            f"> 💡 建议结合实际案例来理解这些概念。"
+        )
+
+        sec3_content = (
+            f"## 实际应用\n\n{node_title}在实际开发中有广泛的应用场景。\n\n"
+            f"### 代码示例\n\n```python\n"
+            f"# {node_title} 基本示例\ndef main():\n"
+            f"    result = process()\n    return result\n\n"
+            f"def process():\n    return '处理完成'\n\n"
+            f"if __name__ == '__main__':\n    print(main())\n```\n\n"
+            f"### 注意事项\n\n1. 确保理解前置概念\n"
+            f"2. 注意边界条件的处理\n3. 考虑性能和可扩展性"
+        )
+
+        sec4_content = (
+            f"## 常见问题与最佳实践\n\n### 最佳实践\n\n"
+            f"- ✅ 先理解概念，再动手实践\n"
+            f"- ✅ 多做练习，加深理解\n"
+            f"- ✅ 阅读优秀项目中的实际应用\n\n"
+            f"### 进阶方向\n\n"
+            f"掌握{node_title}的基础后，可以进一步探索高级用法和性能优化技巧。"
+        )
+
         content_data = {
-            "introduction": f"# {node_title}\n\n{node_desc if node_desc else f'本单元将系统学习{node_title}的理论基础与实践应用。'}",
+            "introduction": intro,
             "objectives": objectives,
             "sections": [
                 {
                     "section_id": "sec-1",
                     "title": f"什么是{node_title}？",
-                    "content": f"## 概念介绍\n\n{node_desc if node_desc else f'{node_title}是本学习路径中的一个重要知识点。'}\n\n本节将从{difficulty_label}角度出发，帮助你建立对{node_title}的整体认知。\n\n### 学习目标\n\n"
-                    + "\n".join(f"- {o}" for o in objectives),
+                    "content": sec1_content,
                     "order": 1,
                 },
                 {
                     "section_id": "sec-2",
                     "title": f"{node_title}的核心原理",
-                    "content": f"## 核心原理\n\n要深入理解{node_title}，需要掌握以下关键点：\n\n1. **基本定义**：{node_title}的基本定义和适用场景\n2. **工作原理**：内部机制和数据流动方式\n3. **关键特性**：区别于其他概念的核心特征\n\n> 💡 建议结合实际案例来理解这些概念。",
+                    "content": sec2_content,
                     "order": 2,
                 },
                 {
                     "section_id": "sec-3",
                     "title": f"{node_title}的实际应用",
-                    "content": f"## 实际应用\n\n{node_title}在实际开发中有广泛的应用场景。\n\n### 代码示例\n\n```python\n# {node_title} 基本示例\ndef main():\n    # 实现核心逻辑\n    result = process()\n    return result\n\ndef process():\n    return '处理完成'\n\nif __name__ == '__main__':\n    print(main())\n```\n\n### 注意事项\n\n1. 确保理解前置概念\n2. 注意边界条件的处理\n3. 考虑性能和可扩展性",
+                    "content": sec3_content,
                     "order": 3,
                 },
                 {
                     "section_id": "sec-4",
                     "title": "常见问题与最佳实践",
-                    "content": f"## 常见问题与最佳实践\n\n### 最佳实践\n\n- ✅ 先理解概念，再动手实践\n- ✅ 多做练习，加深理解\n- ✅ 阅读优秀项目中的实际应用\n\n### 进阶方向\n\n掌握{node_title}的基础后，可以进一步探索高级用法和性能优化技巧。",
+                    "content": sec4_content,
                     "order": 4,
                 },
             ],
@@ -646,23 +679,45 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
 
     await update_task_status(db, task.id, "running", progress=90, stage="finalizing", message="正在写入学习内容...")
 
-    content = LearningUnitContent(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        path_id=path_id,
-        path_version_id=path_version_id,
-        node_id=node_id,
-        status="ready",
-        content=content_data,
+    # Check if this is a regeneration (existing content to update)
+    existing_content_result = await db.execute(
+        select(LearningUnitContent).where(
+            LearningUnitContent.path_id == path_id,
+            LearningUnitContent.node_id == node_id,
+            LearningUnitContent.user_id == user_id,
+        )
     )
-    db.add(content)
-    await db.flush()
+    existing_content = existing_content_result.scalar_one_or_none()
+
+    if existing_content:
+        # Safe regeneration: update existing record atomically
+        existing_content.status = "ready"
+        existing_content.content = content_data
+        existing_content.version_number = (existing_content.version_number or 1) + 1
+        await db.flush()
+        unit_id = existing_content.id
+        logger.info("unit_content_regenerated", unit_id=unit_id, version=existing_content.version_number)
+    else:
+        # First-time generation: create new record
+        content = LearningUnitContent(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            path_id=path_id,
+            path_version_id=path_version_id,
+            node_id=node_id,
+            status="ready",
+            content=content_data,
+        )
+        db.add(content)
+        await db.flush()
+        unit_id = content.id
 
     await update_task_status(db, task.id, "running", progress=100, stage="completed", message="单元内容生成完成")
 
-    return {"path_id": path_id, "unit_id": content.id, "node_id": node_id}
+    return {"path_id": path_id, "unit_id": unit_id, "node_id": node_id}
 
 
+@register_handler("knowledge_index")
 async def _execute_knowledge_index(db: Any, task: Any) -> dict[str, Any]:
     """Execute a knowledge indexing task."""
     import uuid
@@ -701,6 +756,13 @@ async def _execute_knowledge_index(db: Any, task: Any) -> dict[str, Any]:
     return {"document_id": doc_id, "chunks": 1}
 
 
+@register_handler("knowledge_reindex")
+async def _execute_knowledge_reindex(db: Any, task: Any) -> dict[str, Any]:
+    """Execute a knowledge reindex — reuses the index logic."""
+    return await _execute_knowledge_index(db, task)
+
+
+@register_handler("learning_lecture_generation")
 async def _execute_lecture_generation(db: Any, task: Any) -> dict[str, Any]:
     """Generate an expanded lecture for an existing unit content."""
     import json
@@ -857,22 +919,25 @@ def _build_fallback_lecture(node_title: str, node_difficulty: str, existing: dic
             }
         ]
 
-    return {
-        "introduction": f"# {node_title} — 详细讲义\n\n本讲义将对{node_title}进行更深入、更全面的讲解，帮助你彻底掌握这一知识点。",
-        "sections": sections,
-        "key_takeaways": [
-            f"深入理解{node_title}的核心概念",
-            f"掌握{node_title}的实际应用方法",
-            "避免常见的理解和操作误区",
-        ],
-        "common_mistakes": [
-            {
-                "mistake": "只看不练",
-                "explanation": "仅阅读讲义而不动手实践，容易遗忘。建议每学完一个章节就完成对应的代码练习。",
-            }
-        ],
-        "summary": f"本讲义深入讲解了{node_title}的核心知识。建议结合原始单元内容和练习题巩固所学。",
-    }
+        intro = (
+            f"# {node_title} — 详细讲义\n\n本讲义将对{node_title}进行更深入、更全面的讲解，帮助你彻底掌握这一知识点。"
+        )
+        return {
+            "introduction": intro,
+            "sections": sections,
+            "key_takeaways": [
+                f"深入理解{node_title}的核心概念",
+                f"掌握{node_title}的实际应用方法",
+                "避免常见的理解和操作误区",
+            ],
+            "common_mistakes": [
+                {
+                    "mistake": "只看不练",
+                    "explanation": "仅阅读讲义而不动手实践，容易遗忘。建议每学完一个章节就完成对应的代码练习。",
+                }
+            ],
+            "summary": f"本讲义深入讲解了{node_title}的核心知识。建议结合原始单元内容和练习题巩固所学。",
+        }
 
 
 @celery_app.task(name="tasks.recover_stale")  # type: ignore[untyped-decorator]

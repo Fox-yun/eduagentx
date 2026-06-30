@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
@@ -17,7 +17,12 @@ router = APIRouter()
 
 
 class ChatRequest(BaseModel):
-    question: str
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(
+        min_length=1,
+        max_length=4000,
+    )
     node_id: str
     path_id: str
 

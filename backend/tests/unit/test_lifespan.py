@@ -194,7 +194,8 @@ class TestExecuteBackgroundTaskDispatch:
             patch("app.workers.tasks.get_session_factory", return_value=mock_factory),
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
             patch(
-                "app.workers.tasks._execute_knowledge_index", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+                "app.workers.tasks.get_handler",
+                return_value=AsyncMock(side_effect=RuntimeError("boom")),
             ),
             patch("app.workers.tasks._cleanup_engine", new_callable=AsyncMock),
         ):
@@ -229,9 +230,8 @@ class TestExecuteBackgroundTaskDispatch:
             patch("app.workers.tasks.get_session_factory", return_value=mock_factory),
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
             patch(
-                "app.workers.tasks._execute_e2e_progress_task",
-                new_callable=AsyncMock,
-                return_value={"result": "e2e progress completed"},
+                "app.workers.tasks.get_handler",
+                return_value=AsyncMock(return_value={"result": "e2e progress completed"}),
             ),
             patch("app.workers.tasks._cleanup_engine", new_callable=AsyncMock),
         ):

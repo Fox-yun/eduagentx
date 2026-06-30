@@ -114,7 +114,16 @@ class LearningPathRevisionRequest(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     revision_request: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    source_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    generated_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 # DAG Validation

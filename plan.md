@@ -1,1247 +1,1543 @@
-Phase 3.1 可以正式关闭。基于你报告中的完整证据链，当前状态可记录为：
+# EduAgentX 未完成模块上线实施方案
 
-> **Phase 3.1 Production Verified**
-> **Phase 3.1.1 Closure Complete — 0 failed / 0 warnings**
+## 一、总体目标
 
-下面直接进入 Phase 3.2。该阶段的核心不是单纯”把答案算成分数”，而是保证：
+本轮不优先追求高级 RAG、复杂推荐算法或额外 Coverage，而是先完成完整可用链路：
 
 ```text
-诊断提交
-→ 可靠评分
-→ 结果持久化
-→ Goal 状态转换
-→ Path Generation Task
-→ Transactional Outbox
-→ Worker 异步执行
+诊断完成
+→ 路径生成
+→ 路径修订
+→ 路径激活
+→ 单元内容生成
+→ 讲义生成
+→ 练习与评估
+→ 掌握度更新
+→ 知识文件上传
+→ 文档索引与搜索
+→ Tutor 使用课程与知识库回答
+→ 真实学习推荐
 ```
 
-# [Phase 3.2] Diagnostic Real Scoring & Goal Planning Transition
+最终必须通过一条真实完整流程：
 
-## 一、阶段目标
-
-完成真实诊断评分与学习路径规划状态闭环：
-
-* [x] 客观题使用确定性程序评分。
-* [x] 简答题使用结构化 LLM 评分。
-* [x] LLM 不可用时生成明确的临时评分。
-* [x] Diagnostic Attempt、Answer、Result 全部真实持久化。
-* [x] 重复提交不会生成重复结果。
-* [x] 并发提交最多一个成功创建评分任务。
-* [x] Diagnostic 完成后 Goal 进入 Planning。
-* [x] Path Generation Task、初始事件和 Outbox 同事务创建。
-* [x] API 不直接调用 Celery。
-* [x] 前端支持诊断提交、评分中、结果展示和路径生成跳转。
-* [x] 页面刷新后能够恢复当前状态。
-* [x] Worker、Outbox 或 LLM 故障时流程可恢复。
-
-> **Phase 3.2 Production Verified**
-> **Backend: 632 passed, 0 failed, 0 warnings**
-> **Frontend: 243 passed, 0 failed**
-> **Migration: 012 == head, upgrade/downgrade verified**
-> **Docker: All 11 services healthy**
-
-### 实施证据
-
-| 范围 | 状态 | 证据 |
-|------|------|------|
-| 领域模型 (4 表) | ✅ | `models/diagnostic.py` — Question, Attempt, Answer, Result |
-| Migration 012 | ✅ | 011→012→011 升降级通过 |
-| 客观题评分 | ✅ | `services/diagnostic_scoring.py` (6 纯函数, 29 unit tests) |
-| LLM 简答评分 | ✅ | `workers/diagnostic_grading.py` — 两阶段, provisional fallback |
-| Router 重构 | ✅ | `routers/diagnostics.py` — FOR UPDATE, 幂等性, outbox |
-| 前端 Schema/Mapper | ✅ | 243/243 前端测试通过 |
-| 集成测试 | ✅ | 12 integration tests (submission, transition, concurrency) |
-| 契约测试 | ✅ | 12 contract tests (DTO 不泄露 correct_answer/rubric) |
-| Playwright E2E | ✅ | `e2e/diagnostic-real.spec.ts` (需 Docker 环境执行) |
-| Worker & 调度 | ✅ | 5 worker tests, tasks.py 注册, 失败恢复 |
-
-### Git 历史 (phase/3.2-diagnostic-closure)
-
-| Commit | 描述 |
-|--------|------|
-| `e68e704` | feat(diagnostic): implement scoring and planning transition |
-| `491629c` | fix(test): align mock data discriminated union keys |
-| `3946a67` | test(diagnostic): add PostgreSQL integration tests |
-| `0bd1a9d` | test(diagnostic): add contract tests for DTO safety |
-| `8ddaf49` | test(diagnostic): add Playwright real-backend diagnostic E2E |
-| `2e7a049` | fix(test): isolate email outbox test from leftover integration events |
+```text
+FULL LEARNING FLOW PASSED
+```
 
 ---
 
-# 二、Phase 3.2 实施边界
+## 二、执行优先级
 
-本阶段实现：
+### 第一批：P0 功能阻断修复
 
-```text
-Clarification
-→ Diagnostic
-→ Scoring
-→ Diagnostic Result
-→ Goal Planning
-→ Path Generation Task
-```
+* [x] 建立 Task Type 与 Worker Handler 一致性检查。
+* [x] 实现 `learning_path_revision`。
+* [x] 修复 `knowledge_reindex` 无 Worker Handler。
+* [ ] 修复知识库上传后文件内容被丢弃。(Phase 3.7)
+* [ ] 删除前端生产路径中的 Mock Recommendations。(Phase 3.8)
+* [x] 修复 Tutor 越权和内部错误泄漏。
+* [x] 修复单元再生成时提前删除旧内容。
 
-本阶段不深入实现：
+### 第二批：核心学习闭环
 
-```text
-Path 内容生成质量与 Revision
-Unit Content
-Assessment Mastery
-Knowledge Base
-Recommendations
-```
+* [ ] 路径修订与版本激活。
+* [ ] Unit Content 与 Lecture。
+* [ ] Assessment 与 Mastery。
+* [ ] Node Unlock 与 Resume。
 
-这些分别属于 Phase 3.3 以后。
+### 第三批：知识与智能功能
 
----
+* [ ] MinIO 文件存储。
+* [ ] 文档解析、分块与 PostgreSQL 全文搜索。
+* [ ] Tutor RAG。
+* [ ] 规则推荐系统。
 
-# 三、Component 1：现有实现审计
+### 第四批：全流程上线验收
 
-在修改代码前，先完整读取以下文件：
-
-```text
-backend/app/models/diagnostic.py
-backend/app/models/goal.py
-backend/app/models/task.py
-backend/app/schemas/diagnostic.py
-backend/app/services/diagnostic.py
-backend/app/services/task.py
-backend/app/routers/diagnostics.py
-backend/app/workers/tasks.py
-backend/app/workers/task_runtime.py
-
-frontend/src/api/
-frontend/src/pages/
-frontend/src/features/
-frontend/src/types/
-frontend/e2e/
-```
-
-执行搜索：
-
-```powershell
-Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\backend
-
-Get-ChildItem app -Recurse -File |
-  Select-String -Pattern `
-    "diagnostic|correct_answer|rubric|dimension|score|planning|\.delay\(|apply_async\("
-```
-
-审计输出必须确认：
-
-* [ ] 当前 Diagnostic、Question、Attempt、Answer、Result 模型。
-* [ ] Question 是否保存正确答案。
-* [ ] 是否存在固定分数或全部答对的占位逻辑。
-* [ ] 当前前端请求字段。
-* [ ] 当前前端响应字段。
-* [ ] Goal Status Enum。
-* [ ] Diagnostic 完成后的现有状态转换。
-* [ ] Path Task 的现有创建位置。
-* [ ] 是否存在 API 直接调用 `.delay()`。
-* [ ] 是否已有 Diagnostic Worker Task。
-* [ ] 是否已有可复用的 Task/Outbox Runtime。
-
-不要在完成审计前新增重复表或第二套接口。
+* [ ] Full-flow Smoke Script。
+* [ ] Real Playwright Learning Flow。
+* [ ] Worker、Redis、LLM、MinIO 故障恢复。
+* [ ] Staging 运行验证。
 
 ---
 
-# 四、Component 2：冻结诊断契约
+## 三、Phase 3.3.0：Task Capability 与运行时阻断修复
 
-优先保留现有 URL 和 DTO。
+在开始具体模块前，先解决"前端认为支持、Worker 实际不支持"的问题。
 
-假设现有接口类似：
+### 3.3.0.1 建立统一 Task Handler Registry
 
-```text
-GET  /api/goals/{goal_id}/diagnostic
-POST /api/goals/{goal_id}/diagnostic/submit
-GET  /api/goals/{goal_id}/diagnostic/result
+当前 Worker 使用长 `if/elif`：
+
+```python
+if task.task_type == "learning_path_generation":
+    ...
+elif task.task_type == "diagnostic_grading":
+    ...
 ```
 
-若当前路径不同，应使用项目已有路径，不新建平行接口。
+建议新增：
 
-## 4.1 公共 Question DTO
+```text
+backend/app/workers/task_handlers.py
+```
 
-允许返回：
+实现：
 
-```json
-{
-  "question_id": "uuid",
-  "question_type": "single_choice",
-  "prompt": "问题内容",
-  "options": [
-    {
-      "value": "a",
-      "label": "选项 A"
-    }
-  ],
-  "dimension": "fundamentals",
-  "max_score": 10,
-  "required": true
+```python
+TaskHandler = Callable[
+    [AsyncSession, BackgroundTask],
+    Awaitable[dict[str, Any]],
+]
+
+TASK_HANDLERS: dict[str, TaskHandler] = {
+    "learning_path_generation":
+        execute_path_generation,
+    "diagnostic_grading":
+        execute_diagnostic_grading,
+    "learning_unit_generation":
+        execute_unit_generation,
+    "learning_lecture_generation":
+        execute_lecture_generation,
+    "knowledge_index":
+        execute_knowledge_index,
+    "knowledge_reindex":
+        execute_knowledge_reindex,
+    "learning_path_revision":
+        execute_path_revision,
+    "e2e_progress_test":
+        execute_e2e_progress_task,
 }
 ```
 
-禁止返回：
+Worker：
 
-```text
-correct_answer
-rubric
-reference_answer
-grading_prompt
-internal_metadata
-```
+```python
+handler = TASK_HANDLERS.get(
+    task.task_type,
+)
 
-## 4.2 提交请求
+if handler is None:
+    raise UnknownTaskTypeError(
+        task.task_type,
+    )
 
-保持统一结构：
-
-```json
-{
-  "attempt_id": "uuid",
-  "answers": [
-    {
-      "question_id": "uuid",
-      "answer": "a"
-    },
-    {
-      "question_id": "uuid",
-      "answer": ["a", "c"]
-    },
-    {
-      "question_id": "uuid",
-      "answer": "用户简答内容"
-    }
-  ]
-}
-```
-
-Schema 要求：
-
-* [ ] `extra="forbid"`。
-* [ ] Question ID 不可重复。
-* [ ] Answer 类型按题型在 Service 中验证。
-* [ ] Answer 长度有限制。
-* [ ] 未知 Question 返回业务错误。
-* [ ] Question 必须属于当前 Diagnostic。
-* [ ] Attempt 必须属于当前用户和 Goal。
-
----
-
-# 五、Component 3：诊断领域模型
-
-## 5.1 Diagnostic Question
-
-确认或补齐字段：
-
-```text
-id
-diagnostic_id
-question_type
-prompt
-options
-correct_answer
-rubric
-dimension
-difficulty
-max_score
-sequence
-required
-created_at
-```
-
-支持题型：
-
-```text
-single_choice
-multiple_choice
-true_false
-short_answer
+task_result = await handler(
+    db,
+    task,
+)
 ```
 
 要求：
 
-* [ ] `max_score > 0`。
-* [ ] `sequence >= 0`。
-* [ ] Multiple Choice 的答案存储为稳定 Option Value 集合。
-* [ ] True/False 使用 Boolean。
-* [ ] Short Answer 必须有 Rubric。
-* [ ] Correct Answer 和 Rubric 仅服务端可见。
+* [ ] 未知类型严格 Failed。
+* [ ] 不能被错误标记为 Completed。
+* [ ] 正式任务类型集中注册。
+* [ ] Inline Runner 和 Celery Worker 使用同一 Registry。
+* [ ] E2E 专用类型只能在测试环境启用。
 
-## 5.2 Diagnostic Attempt
+---
 
-建议状态：
+### 3.3.0.2 增加契约一致性测试
+
+创建：
 
 ```text
-draft
-submitted
-grading
+backend/tests/contract/test_task_capabilities.py
+```
+
+验证：
+
+* [ ] 后端公开 Task Type 均有 Handler。
+* [ ] 前端 `TaskTypeSchema` 与后端枚举一致。
+* [ ] 不支持的类型不出现在公共 Schema。
+* [ ] `knowledge_reindex` 有真实 Handler。
+* [ ] `learning_path_revision` 有真实 Handler。
+
+当前前端公开但后端未完整支持的类型需要逐项处理：
+
+```text
+learning_goal_analysis
+learning_diagnostic_generation
+learning_path_revision
+learning_assessment_generation
+learning_path_adaptation
+knowledge_reindex
+```
+
+处理规则：
+
+* 当前确实使用：实现 Handler。
+* 当前未使用：从前端公共 Task Schema 删除。
+* 后续计划使用：暂不暴露给生产前端。
+
+---
+
+### 3.3.0.3 任务创建不应强制 Commit
+
+当前 `TaskService.create_task()` 内部执行：
+
+```python
+await self.db.commit()
+```
+
+这会妨碍以下原子事务：
+
+```text
+RevisionRequest
++ BackgroundTask
++ TaskEvent
++ Outbox
+```
+
+新增：
+
+```python
+async def enqueue_task(
+    ...,
+) -> BackgroundTask:
+    # add task/event/outbox
+    # flush only
+    # do not commit
+```
+
+保留便利方法：
+
+```python
+async def create_task(
+    ...,
+) -> BackgroundTask:
+    task = await self.enqueue_task(...)
+    await self.db.commit()
+    return task
+```
+
+领域 Service 统一使用：
+
+```python
+enqueue_task()
+```
+
+由调用方控制 Commit。
+
+---
+
+## 四、Phase 3.3：Learning Path Generation & Revision Closure
+
+初始路径生成已经存在，本阶段重点补齐**修订闭环**和版本一致性。
+
+### 4.1 当前确定问题
+
+当前：
+
+```text
+POST /learning-paths/{path_id}/revision-requests
+```
+
+只执行：
+
+```text
+创建 LearningPathRevisionRequest
+Commit
+返回 active_task_id = null
+```
+
+前端 Schema 要求：
+
+```typescript
+active_task_id: z.string()
+```
+
+因此生产页面提交修订后会直接发生契约失败。
+
+同时 Worker 没有：
+
+```text
+learning_path_revision
+```
+
+Handler。
+
+---
+
+### 4.2 Revision Request 模型补充
+
+为 `LearningPathRevisionRequest` 增加：
+
+```text
+task_id
+source_version_id
+generated_version_id
+status
+error
+started_at
+completed_at
+updated_at
+```
+
+状态：
+
+```text
+pending
+running
 completed
 failed
-```
-
-字段至少包括：
-
-```text
-id
-diagnostic_id
-goal_id
-user_id
-status
-submitted_at
-completed_at
-grading_quality
-created_at
-updated_at
-```
-
-`grading_quality`：
-
-```text
-final
-provisional
-```
-
-## 5.3 Diagnostic Answer
-
-字段：
-
-```text
-id
-attempt_id
-question_id
-answer
-score
-max_score
-is_correct
-feedback
-grading_source
-grading_status
-created_at
-updated_at
-```
-
-`grading_source`：
-
-```text
-program
-llm
-fallback
-```
-
-`grading_status`：
-
-```text
-graded
-provisional
-failed
+cancelled
 ```
 
 数据库约束：
 
 ```text
-UNIQUE(attempt_id, question_id)
-```
-
-## 5.4 Diagnostic Result
-
-字段：
-
-```text
-id
-attempt_id
-total_score
-percentage
-dimension_scores
-strong_areas
-weak_areas
-readiness_level
-grading_quality
-created_at
-updated_at
-```
-
-约束：
-
-```text
-UNIQUE(attempt_id)
-```
-
-Path Generation 必须读取持久化 Result，不应重新即时计算分数。
-
----
-
-# 六、Component 4：数据库 Migration
-
-只有模型字段确实不足时才生成 Migration。
-
-```powershell
-Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\backend
-
-& ".venv\Scripts\python.exe" -m alembic revision `
-  --autogenerate `
-  -m "complete diagnostic scoring"
-```
-
-人工检查：
-
-* [ ] 没有误删现有表或字段。
-* [ ] 旧数据有安全默认值。
-* [ ] Status 字段约束正确。
-* [ ] Question Type 约束正确。
-* [ ] `attempt_id + question_id` 唯一。
-* [ ] Result 对 Attempt 唯一。
-* [ ] 必要索引存在。
-* [ ] Downgrade 可以执行。
-* [ ] 只有一个 Alembic Head。
-
-验证：
-
-```powershell
-& ".venv\Scripts\python.exe" -m alembic heads
-& ".venv\Scripts\python.exe" -m alembic history
-```
-
-测试数据库：
-
-```powershell
-$env:APP_ENV = "test"
-$env:DATABASE_URL = "postgresql+asyncpg://eduagentx:eduagentx_dev_password@127.0.0.1:5432/eduagentx_test"
-$env:REDIS_URL = "redis://127.0.0.1:6379/15"
-
-& ".venv\Scripts\python.exe" -m alembic upgrade head
-& ".venv\Scripts\python.exe" -m alembic current
+task_id UNIQUE
+generated_version_id UNIQUE
 ```
 
 ---
 
-# 七、Component 5：确定性客观题评分
+### 4.3 Router 原子创建 Revision Task
 
-建议新建：
-
-```text
-backend/app/services/diagnostic_scoring.py
-```
-
-## 7.1 评分结果类型
-
-```python
-@dataclass(frozen=True)
-class ScoredDiagnosticAnswer:
-    score: Decimal
-    max_score: Decimal
-    is_correct: bool | None
-    feedback: str | None
-    grading_source: str
-    grading_status: str
-```
-
-## 7.2 单选题
-
-规则：
+修改：
 
 ```text
-用户 Option Value == 标准 Option Value
-→ 满分
-
-否则
-→ 0 分
+backend/app/routers/paths.py
+backend/app/services/path.py
 ```
 
-禁止依赖显示 Label。
-
-## 7.3 多选题
-
-第一版采用严格集合评分：
-
-```python
-selected = set(user_answer)
-expected = set(correct_answer)
-
-is_correct = selected == expected
-score = max_score if is_correct else 0
-```
-
-必须满足：
-
-* [ ] 顺序不影响结果。
-* [ ] 多选一个错误选项视为错误。
-* [ ] 少选一个正确选项视为错误。
-* [ ] 重复 Option Value 被 Schema 或 Service 拒绝。
-
-暂不引入部分得分，除非已有冻结产品规则。
-
-## 7.4 判断题
-
-内部统一为 Boolean：
-
-```python
-is_correct = bool(user_answer) is bool(correct_answer)
-```
-
-不混用：
+事务：
 
 ```text
-"true"
-"false"
-1
-0
-"正确"
-"错误"
-```
-
-Schema 层完成规范化。
-
-## 7.5 未作答
-
-建议规则：
-
-```text
-required=true 且未提交
-→ 422 ANSWER_REQUIRED
-
-required=false 且未提交
-→ 0 分
-```
-
-必须与前端行为一致并冻结。
-
-## 7.6 总分
-
-正确计算：
-
-```text
-实际总得分
-÷
-总最大分数
-×
-100
-```
-
-禁止简单平均各题百分比。
-
-## 7.7 维度分数
-
-```text
-某维度实际得分
-÷
-该维度最大得分
-×
-100
-```
-
-没有题目的维度不写入结果，避免除零。
-
----
-
-# 八、Component 6：简答题结构化 LLM 评分
-
-## 8.1 严格结构化输出
-
-建议定义 Pydantic Schema：
-
-```python
-class ShortAnswerGrade(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    score: float
-    feedback: str
-    matched_criteria: list[str]
-    missing_criteria: list[str]
-```
-
-LLM 不负责返回：
-
-```text
-attempt_id
-question_id
-user_id
-max_score
-```
-
-这些由服务端可信数据提供。
-
-## 8.2 Score 校验
-
-```text
-0 <= score <= question.max_score
-```
-
-超出范围：
-
-* [ ] 不截断后伪装正常。
-* [ ] 视为 LLM 输出无效。
-* [ ] 进入 Provisional Fallback。
-* [ ] 记录结构化告警。
-
-## 8.3 Prompt 内容
-
-Prompt 包含：
-
-```text
-Question
-User Answer
-Reference Criteria
-Rubric
-Maximum Score
-Required JSON Schema
-```
-
-禁止包含：
-
-```text
-其他用户答案
-用户密码或 Token
-无关个人数据
-内部系统 Prompt
-```
-
-## 8.4 超时
-
-增加独立配置：
-
-```env
-DIAGNOSTIC_GRADING_TIMEOUT_SECONDS=30
-```
-
-LLM 超时后进入 Provisional，不让 Attempt 永久停留 Grading。
-
----
-
-# 九、Component 7：Provisional Fallback
-
-LLM 不可用时：
-
-```text
-score = max_score × 0.5
-grading_source = fallback
-grading_status = provisional
-attempt.grading_quality = provisional
-result.grading_quality = provisional
-```
-
-Feedback：
-
-```text
-自动评分服务暂时不可用，当前结果为临时评分，后续可能重新评估。
-```
-
-业务规则：
-
-* [ ] 用户可以继续进入 Path Planning，避免流程阻塞。
-* [ ] UI 必须显示“临时评分”。
-* [ ] Provisional 不用于后续 Mastery 计算。
-* [ ] Provisional 不自动解锁学习节点。
-* [ ] 后续可以创建 Regrade Task。
-* [ ] Regrade 导致结果明显变化时可以触发 Path Revision。
-
-本阶段只需保留可扩展字段，不必完整实现自动重评调度。
-
----
-
-# 十、Component 8：异步提交与评分流程
-
-不要在 HTTP 请求事务里调用 LLM。
-
-## 10.1 Submit API 事务
-
-```text
-SELECT Attempt FOR UPDATE
-→ 校验 Attempt 所有权和状态
-→ 保存 Answers
-→ 程序评分客观题
-→ Attempt = grading
-→ 创建 diagnostic_grading BackgroundTask
-→ 创建初始 Task Event
-→ 创建 task.execute Outbox
+SELECT Path FOR UPDATE
+→ 确认用户归属
+→ 确认存在当前版本
+→ 创建 RevisionRequest
+→ 创建 learning_path_revision Task
+→ 创建 TaskEvent
+→ 创建 Outbox
 → Commit
+```
+
+幂等键：
+
+```text
+path-revision:{revision_request_id}
 ```
 
 返回：
 
 ```json
 {
-  "attempt_id": "uuid",
-  "status": "grading",
-  "task_id": "uuid"
+  "next_step": "generating",
+  "active_task_id": "uuid",
+  "revision_request_id": "uuid"
 }
 ```
 
-## 10.2 Worker 事务外调用 LLM
+不得再返回：
 
-建议 Worker：
-
-### 事务 A
-
-```text
-读取 Attempt
-确认状态为 grading
-标记 Task running
-提交
+```json
+{
+  "active_task_id": null
+}
 ```
-
-### 事务外
-
-```text
-调用 LLM
-解析结果
-构建评分数据
-```
-
-### 事务 B
-
-```text
-SELECT Attempt FOR UPDATE
-→ 保存简答评分
-→ 聚合 Result
-→ Attempt = completed
-→ Goal = planning
-→ 创建 learning_path_generation Task
-→ 创建初始 Task Event
-→ 创建 task.execute Outbox
-→ Commit
-```
-
-不要在长时间 LLM 调用期间持有数据库事务。
 
 ---
 
-# 十一、Component 9：幂等性与并发安全
+### 4.4 Path Revision Worker
 
-## 11.1 Attempt 提交
-
-以下情况必须幂等：
+新增：
 
 ```text
-Attempt 已 grading
-→ 返回现有 grading Task
-
-Attempt 已 completed
-→ 返回现有 Result 和 Path Task
-
-Attempt failed 且允许重试
-→ 创建受控 Retry，不重复 Answer
+backend/app/workers/path_revision.py
 ```
 
-## 11.2 数据库约束
-
-建议保证：
+执行流程：
 
 ```text
-一个 Attempt 只有一个 Result
-一个 Attempt 只有一个活动 Diagnostic Grading Task
-一个 Goal 同一阶段只有一个活动 Path Generation Task
+加载 RevisionRequest
+→ 加载当前 Path Version
+→ 加载 Diagnostic Result
+→ 加载节点、阶段与边
+→ 调用 LLM 生成候选修订
+→ DAG 校验
+→ 创建新 Version
+→ 创建新 Stage/Node/Edge
+→ RevisionRequest = completed
+→ 新 Version = in_review
+→ Task = completed
 ```
 
-如果 BackgroundTask 支持 Idempotency Key，使用：
+关键规则：
 
-```text
-diagnostic-grade:{attempt_id}
-path-generate:{goal_id}:{diagnostic_result_id}
-```
-
-## 11.3 并发提交
-
-两个并发 Submit 请求：
-
-```text
-最多创建一个 Grading Task
-最多创建一个 Outbox
-答案最终状态一致
-```
-
-使用：
-
-```sql
-SELECT ... FOR UPDATE
-```
-
-并结合数据库唯一约束。
+* [ ] 不直接修改当前激活版本。
+* [ ] 不自动激活修订版本。
+* [ ] 用户必须在 Review 页面确认。
+* [ ] 已完成节点尽可能通过稳定 Logical Node Key 继承。
+* [ ] 不直接复用旧数据库 Node ID。
+* [ ] 修订失败时旧版本继续可用。
+* [ ] LLM 失败时使用受控模板修订或明确失败。
 
 ---
 
-# 十二、Component 10：Goal 状态机
+### 4.5 激活新版本
 
-集中实现或复用：
-
-```text
-transition_goal()
-```
-
-不要在多个 Service 中直接：
-
-```python
-goal.status = GoalStatus.PLANNING
-```
-
-允许转换应以现有 Enum 为准，例如：
+激活操作必须原子执行：
 
 ```text
-clarifying
-→ diagnosing
-→ planning
-→ ready
-→ active
-```
-
-规则：
-
-* [ ] Diagnostic Attempt 完成后才能进入 Planning。
-* [ ] Path Task 创建成功后才提交 Planning。
-* [ ] Path Task 与 Goal 状态同事务。
-* [ ] 非法转换返回明确业务错误。
-* [ ] Path Worker 失败时 Goal 进入可重试状态。
-* [ ] Goal 状态变更写审计或领域事件。
-
----
-
-# 十三、Component 11：Path Task 原子创建
-
-Diagnostic 完成事务中创建：
-
-```text
-BackgroundTask
-TaskEvent(snapshot/pending)
-OutboxEvent(task.execute)
-```
-
-Task：
-
-```text
-task_type = learning_path_generation
-target_id = goal_id
+旧 Active Version → superseded
+新 Review Version → active
+Path.active_version_id → 新 Version
+Goal.current_path_id → Path
+初始化新节点 Progress
+迁移可继承 Progress
+Commit
 ```
 
 禁止：
 
-```python
-execute_background_task.delay(task.id)
-```
-
-搜索：
-
-```powershell
-Get-ChildItem app -Recurse -File |
-  Select-String -Pattern "\.delay\(|apply_async\("
-```
-
-API 和业务 Service 中不得出现直接投递。
+* 新版本已激活但 Path 仍指向旧版本；
+* 旧版本和新版本同时 Active；
+* 失败时丢失旧学习进度。
 
 ---
 
-# 十四、Component 12：错误恢复
+### 4.6 前端闭环
 
-## 14.1 LLM Error
+修改：
 
-* [ ] 进入 Provisional。
-* [ ] Attempt 最终 Completed。
-* [ ] Goal 可以进入 Planning。
-* [ ] 日志记录 Provider 和异常类型。
-* [ ] 不泄露完整用户答案。
+```text
+frontend/src/pages/PathReviewPage/
+frontend/src/api/paths.ts
+```
 
-## 14.2 数据库 Error
+流程：
 
-* [ ] 不进入 Provisional。
-* [ ] 整个事务回滚。
-* [ ] 不产生孤立 Result。
-* [ ] 不产生孤立 Path Task。
-* [ ] Worker 按任务策略 Retry 或 Failed。
-
-## 14.3 Worker Cancel
-
-* [ ] Cancelled Task 不创建 Result。
-* [ ] Cancelled Task 不创建 Path Task。
-* [ ] Attempt 进入可恢复状态。
-* [ ] 不继续写 Completed。
-
-## 14.4 Worker Restart
-
-* [ ] Stale Grading Task 被 Recovery 检测。
-* [ ] 重试不会产生重复 Result。
-* [ ] 重试不会产生重复 Path Task。
-
----
-
-# 十五、Component 13：前端实现
-
-## 15.1 Diagnostic Form
-
-* [ ] 按题型渲染。
-* [ ] 单选使用 Radio。
-* [ ] 多选使用 Checkbox。
-* [ ] 判断题使用 Boolean 控件。
-* [ ] 简答题有长度限制。
-* [ ] 必答题前端校验。
-* [ ] 提交期间禁用按钮。
-* [ ] 防止双击提交。
-* [ ] 不在前端持有正确答案。
-
-## 15.2 Grading 页面
-
-* [ ] 使用 Task SSE。
-* [ ] SSE 失败切换 Polling。
-* [ ] 显示当前评分阶段。
-* [ ] Task Failed 显示重试。
-* [ ] 页面刷新能够恢复 Attempt 和 Task。
-* [ ] 终态停止 SSE 和 Polling。
-
-## 15.3 Result 页面
+```text
+提交修订
+→ 获得 activeTaskId
+→ 进入 PathGenerating
+→ SSE 显示修订进度
+→ 任务完成
+→ 打开新 Version Review
+→ 用户激活
+```
 
 显示：
 
-```text
-总分
-能力等级
-维度分数
-优势
-薄弱项
-临时评分标记
-```
-
-* [ ] Provisional 有明确 Badge。
-* [ ] 不显示内部 Rubric。
-* [ ] 不显示标准答案，除非产品明确要求。
-* [ ] 完成后导航到 Path Generating 页面。
+* 当前版本；
+* 新版本；
+* 新增节点；
+* 删除节点；
+* 顺序变化；
+* 修订理由。
 
 ---
 
-# 十六、Component 14：Unit Tests
+### 4.7 Phase 3.3 验收
 
-创建：
+必须覆盖：
+
+* [ ] 修订 API 返回真实 Task ID。
+* [ ] Worker 生成新版本。
+* [ ] 原激活版本不被覆盖。
+* [ ] DAG 校验通过。
+* [ ] 重复提交不产生重复 Task。
+* [ ] Worker 失败后旧版本仍可学习。
+* [ ] Review 页面可显示新版本。
+* [ ] Activation 可切换版本。
+* [ ] Playwright Path Revision E2E 通过。
+
+---
+
+## 五、Phase 3.4：Unit Content & Lecture Closure
+
+### 5.1 增加统一访问校验
+
+新增：
 
 ```text
-tests/unit/test_diagnostic_scoring.py
-tests/unit/test_diagnostic_short_answer_grading.py
+backend/app/services/learning_access.py
 ```
 
-## 客观题覆盖
+实现：
 
-* [ ] 单选正确。
-* [ ] 单选错误。
-* [ ] 多选顺序不同。
-* [ ] 多选多余答案。
-* [ ] 多选缺少答案。
-* [ ] 判断题正确。
-* [ ] 判断题错误。
-* [ ] 未作答。
-* [ ] 不同 Max Score。
-* [ ] 总分加权。
-* [ ] 维度聚合。
-* [ ] 0 分。
-* [ ] 100 分。
-* [ ] 能力等级边界。
+```python
+async def require_node_access(
+    db,
+    user_id,
+    path_id,
+    node_id,
+) -> NodeAccessContext:
+    ...
+```
 
-## 简答题覆盖
+必须验证：
 
-* [ ] 正常结构化结果。
-* [ ] Score 超范围。
-* [ ] 缺少字段。
-* [ ] 多余字段。
-* [ ] 非法 JSON。
-* [ ] Timeout。
-* [ ] Provider Error。
-* [ ] Provisional Fallback。
-* [ ] Fallback 不标记 Final。
+* Path 属于当前用户；
+* Path 未归档；
+* Node 属于 Path 当前有效 Version；
+* Node 状态允许学习；
+* Node 不是其他版本中的同名节点；
+* 当前用户有权访问。
 
-运行：
+以下接口必须调用：
 
-```powershell
-& ".venv\Scripts\python.exe" -m pytest `
-  tests/unit/test_diagnostic_scoring.py `
-  tests/unit/test_diagnostic_short_answer_grading.py `
-  -v
+```text
+生成单元内容
+重新生成内容
+生成讲义
+创建练习
+创建评估
+Tutor Chat
 ```
 
 ---
 
-# 十七、Component 15：Integration Tests
+### 5.2 修复危险的再生成流程
 
-创建：
+当前流程：
 
 ```text
-tests/integration/test_diagnostic_submission.py
-tests/integration/test_diagnostic_grading.py
-tests/integration/test_diagnostic_planning_transition.py
+删除现有内容
+→ 创建生成任务
 ```
+
+若 Worker 失败，旧内容永久丢失。
+
+改为：
+
+```text
+保留当前 Ready 内容
+→ 创建 Regeneration Task
+→ Worker 在内存中完成新内容
+→ 新内容成功后原子替换
+→ version_number + 1
+```
+
+失败时：
+
+```text
+旧内容继续可用
+新 Task = failed
+UI 显示重新生成失败
+```
+
+禁止在任务开始前删除现有内容。
+
+---
+
+### 5.3 Unit 任务幂等
+
+幂等键：
+
+```text
+unit-generate:{user_id}:{path_version_id}:{node_id}
+lecture-generate:{unit_content_id}:{version_number}
+```
+
+当已有 Pending/Running Task 时：
+
+```text
+返回现有 Task
+```
+
+当已有 Ready Content 时：
+
+```text
+普通 Generate 返回现有内容
+Regenerate 才生成新版本
+```
+
+---
+
+### 5.4 内容状态
+
+建议：
+
+```text
+not_generated
+generating
+ready
+regenerating
+failed
+```
+
+`GET content` 返回：
+
+```text
+status
+active_task_id
+content_version
+content
+last_error
+```
+
+前端刷新后可以恢复生成状态。
+
+---
+
+### 5.5 Lecture 安全更新
+
+当前 Lecture 直接修改 Unit JSON。
+
+修改为：
+
+```text
+生成完整 Lecture
+→ 校验 Schema
+→ 在成功事务中写入
+```
+
+LLM 失败时：
+
+* 保留旧 Lecture；
+* 模板 Lecture 可作为明确 Fallback；
+* `generation_metadata` 标注来源；
+* 不覆盖已有高质量 Lecture。
+
+---
+
+### 5.6 Unit E2E
 
 覆盖：
 
-* [ ] 用户只能提交自己的 Attempt。
-* [ ] Question 必须属于当前 Diagnostic。
-* [ ] Answer 唯一。
-* [ ] 重复提交返回相同 Task。
-* [ ] 并发提交只有一个 Task。
-* [ ] 并发提交只有一个 Outbox。
-* [ ] Worker 完成后只有一个 Result。
-* [ ] Goal 进入 Planning。
-* [ ] 只创建一个 Path Task。
-* [ ] 只创建一个 Path Outbox。
-* [ ] 事务失败不留下孤立数据。
-* [ ] 其他用户数据不受影响。
-* [ ] Provisional Result 正确持久化。
-
-运行：
-
-```powershell
-& ".venv\Scripts\python.exe" -m pytest `
-  tests/integration/test_diagnostic_submission.py `
-  tests/integration/test_diagnostic_grading.py `
-  tests/integration/test_diagnostic_planning_transition.py `
-  -v
+```text
+激活路径
+→ 打开可用 Node
+→ 生成 Unit
+→ SSE 进度
+→ 内容显示
+→ 生成 Lecture
+→ Lecture 显示
+→ Regenerate
+→ 旧内容在生成期间仍可读
+→ 新版本成功替换
 ```
 
 ---
 
-# 十八、Component 16：Worker Tests
+## 六、Phase 3.5：Assessment、Practice 与 Mastery Closure
 
-创建：
+### 6.1 当前运行风险
+
+目前 Assessment 创建和简答评分在 HTTP 请求内调用 LLM，前端使用：
+
+```typescript
+timeoutMs: 120000
+```
+
+这可能导致：
+
+* Nginx 或代理超时；
+* 用户重复点击；
+* 数据库长事务；
+* LLM 中断后状态不明确；
+* 页面刷新无法恢复。
+
+---
+
+### 6.2 Assessment Generation 改为后台任务
+
+实现 Task Type：
 
 ```text
-tests/workers/test_diagnostic_grading_task.py
+learning_assessment_generation
 ```
+
+流程：
+
+```text
+POST assessments
+→ 创建 Assessment pending
+→ 创建 BackgroundTask
+→ Outbox
+→ 返回 task_id
+```
+
+Worker：
+
+```text
+读取 Node 与 Unit
+→ LLM 生成题目
+→ 校验题型与标准答案
+→ 保存 Questions
+→ Assessment = ready
+```
+
+Fallback：
+
+* 生成不少于规定数量的模板题；
+* 明确记录 `generation_source=fallback`；
+* 不返回空评估。
+
+---
+
+### 6.3 Assessment Submission
+
+客观题同步评分，简答题建议复用 Phase 3.2 的异步评分模式。
+
+流程：
+
+```text
+保存 Attempt 和 Answers
+→ 客观题评分
+→ 有简答题：创建 assessment_grading Task
+→ 无简答题：直接完成
+```
+
+必须保证：
+
+* [ ] 重复提交幂等。
+* [ ] 每个 Assessment Attempt 的 Answer 唯一。
+* [ ] Provisional 不更新 Mastery。
+* [ ] Provisional 不解锁后续节点。
+* [ ] Final Pass 才更新 Progress。
+* [ ] Practice 永远不修改正式 Mastery。
+
+---
+
+### 6.4 Mastery 和节点解锁
+
+事务：
+
+```text
+Assessment Final
+→ 保存 Attempt
+→ 保存 Mastery Snapshot
+→ 更新 LearningProgress
+→ 标记当前 Node Completed
+→ 检查后继节点全部前置条件
+→ 解锁满足条件的节点
+→ Commit
+```
+
+多前置节点必须全部完成才解锁：
+
+```text
+A → C
+B → C
+
+只有 A、B 都完成
+C 才 Available
+```
+
+---
+
+### 6.5 Assessment E2E
 
 覆盖：
 
-* [ ] 正常评分。
-* [ ] LLM Timeout。
-* [ ] LLM Provider Error。
-* [ ] Provisional 完成。
-* [ ] 数据库异常 Retry。
-* [ ] Worker Cancel。
-* [ ] Attempt 不存在。
-* [ ] Attempt 已完成时幂等返回。
-* [ ] Path Task 正确创建。
-* [ ] Outbox 正确创建。
-* [ ] 不重复 Result。
-* [ ] 不重复 Path Task。
-
-运行：
-
-```powershell
-& ".venv\Scripts\python.exe" -m pytest `
-  tests/workers/test_diagnostic_grading_task.py `
-  -v
-```
+* 创建评估；
+* 等待生成完成；
+* 提交客观题；
+* 提交简答题；
+* Provisional 不改变 Mastery；
+* Final Pass 更新 Mastery；
+* Failed 不解锁节点；
+* 多前置节点解锁逻辑；
+* 重复提交不重复增加 Mastery。
 
 ---
 
-# 十九、Component 17：Contract Tests
+## 七、Phase 3.6-A：Tutor 安全闭环
 
-检查：
+Tutor 基础功能可以先上线，RAG 在知识库完成后接入。
 
-* [ ] Question Response 不包含 `correct_answer`。
-* [ ] Question Response 不包含 `rubric`。
-* [ ] Submit Request 拒绝未知字段。
-* [ ] Answer DTO 正确。
-* [ ] Grading Response 包含 `task_id`。
-* [ ] Result 包含 `grading_quality`。
-* [ ] OpenAPI Method 和 Schema 正确。
-* [ ] 前端类型与后端一致。
+### 7.1 修复访问控制
 
-运行：
+当前只按 `node_id` 查询：
 
-```powershell
-& ".venv\Scripts\python.exe" -m pytest `
-  tests/contract `
-  -v
-
-& ".venv\Scripts\python.exe" `
-  scripts/verify_openapi.py
+```python
+select(LearningNode).where(
+    LearningNode.id == node_id,
+)
 ```
 
----
-
-# 二十、Component 18：Playwright Real E2E
-
-创建：
+必须改为通过完整关系验证：
 
 ```text
-frontend/e2e/diagnostic-real.spec.ts
+User
+→ Path
+→ Active Path Version
+→ Node
 ```
+
+用户不能通过猜测 Node ID 访问其他用户内容。
+
+---
+
+### 7.2 请求 Schema
+
+```python
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    question: str = Field(
+        min_length=1,
+        max_length=4000,
+    )
+    node_id: str
+    path_id: str
+```
+
+---
+
+### 7.3 安全错误响应
+
+禁止返回：
+
+```text
+错误信息：{provider_error}
+```
+
+用户响应：
+
+```text
+辅导服务暂时不可用，请稍后重试。
+```
+
+日志记录：
+
+```text
+provider
+error_type
+request_id
+latency
+```
+
+不得记录：
+
+* API Key；
+* Token；
+* 完整敏感问题；
+* Provider 原始鉴权错误。
+
+---
+
+### 7.4 Timeout 与重试
+
+* 单次 LLM Timeout；
+* 最多一次安全重试；
+* 失败后明确 503 或安全化业务响应；
+* 不永久占用数据库连接。
+
+---
+
+## 八、Phase 3.7：Knowledge Base MVP 上线
+
+这是目前最不完整的模块，应实现可靠 MVP，而不是先上 pgvector、Reranker 或 Graph RAG。
+
+### 8.1 当前确认缺陷
+
+当前上传：
+
+```text
+await file.read()
+→ 计算 size
+→ 生成假的 storage_key
+→ 创建数据库记录
+→ 文件内容丢弃
+```
+
+当前索引：
+
+```text
+创建 "Sample content chunk"
+```
+
+当前搜索：
+
+```text
+ILIKE
+score = 0.5
+file_name = ""
+```
+
+当前重建：
+
+```text
+创建 knowledge_reindex Task
+→ Worker 不支持该类型
+→ UNKNOWN_TASK_TYPE
+```
+
+---
+
+### 8.2 增加 MinIO
+
+Docker Compose 增加：
+
+```yaml
+minio:
+  image: minio/minio
+  command:
+    - server
+    - /data
+    - --console-address
+    - ":9001"
+  ports:
+    - "9000:9000"
+    - "9001:9001"
+  environment:
+    MINIO_ROOT_USER: eduagentx
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  volumes:
+    - minio-data:/data
+```
+
+增加初始化 Bucket 服务：
+
+```text
+eduagentx-knowledge
+```
+
+---
+
+### 8.3 Storage 抽象
+
+新增：
+
+```text
+backend/app/services/storage.py
+```
+
+接口：
+
+```python
+class ObjectStorage(Protocol):
+    async def put(...)
+    async def get(...)
+    async def delete(...)
+    async def exists(...)
+```
+
+实现：
+
+```text
+MinioObjectStorage
+```
+
+测试可使用：
+
+```text
+InMemoryObjectStorage
+```
+
+业务代码不直接调用 MinIO SDK。
+
+---
+
+### 8.4 流式上传
+
+禁止完整：
+
+```python
+content = await file.read()
+```
+
+改为分块流式读取：
+
+* 计算 SHA-256；
+* 检查累计大小；
+* 上传到对象存储；
+* MIME 白名单；
+* 文件名安全化；
+* Storage Key 使用 UUID，不使用原文件名直接拼接。
+
+Storage Key：
+
+```text
+knowledge/{user_id}/{document_id}/source
+```
+
+上传事务：
+
+```text
+上传对象
+→ 创建 Document
+→ 创建 knowledge_index Task
+→ 创建 Outbox
+→ Commit
+```
+
+若数据库失败：
+
+```text
+删除已上传对象
+```
+
+---
+
+### 8.5 文档解析
+
+第一版支持：
+
+```text
+PDF
+TXT
+Markdown
+DOCX
+CSV
+JSON
+```
+
+解析器接口：
+
+```python
+class DocumentParser(Protocol):
+    async def parse(
+        self,
+        stream,
+    ) -> ParsedDocument:
+        ...
+```
+
+输出：
+
+```text
+text
+page_number
+section_title
+metadata
+```
+
+无法解析时：
+
+```text
+Document.status = failed
+Document.error = 安全化错误
+```
+
+---
+
+### 8.6 Chunking
+
+第一版采用确定性分块：
+
+```text
+800～1200 tokens
+10%～15% overlap
+优先按段落和标题边界切分
+```
+
+增加：
+
+```text
+index_version
+content_hash
+```
+
+Reindex 时：
+
+```text
+新 Version Chunks 写入
+→ 成功后切换 Active Index Version
+→ 删除或归档旧 Chunks
+```
+
+不能先删除旧 Chunk 再重建。
+
+---
+
+### 8.7 搜索
+
+为了优先上线，第一版使用 PostgreSQL Full Text Search：
+
+```text
+to_tsvector
+plainto_tsquery
+ts_rank_cd
+```
+
+返回真实：
+
+```json
+{
+  "id": "chunk-id",
+  "document_id": "doc-id",
+  "file_name": "source.pdf",
+  "text": "...",
+  "score": 0.83,
+  "page_number": 12,
+  "section_title": "..."
+}
+```
+
+不要再返回：
+
+```text
+file_name = ""
+score = 0.5
+```
+
+pgvector、Hybrid Search 和 Reranker放到后续增强，不阻塞 MVP 上线。
+
+---
+
+### 8.8 Reindex Handler
+
+Worker Registry 同时实现：
+
+```text
+knowledge_index
+knowledge_reindex
+```
+
+可复用同一个内部函数：
+
+```python
+execute_knowledge_index(
+    reindex=False,
+)
+
+execute_knowledge_index(
+    reindex=True,
+)
+```
+
+---
+
+### 8.9 Delete
+
+删除流程：
+
+```text
+Document → deleting
+→ 删除对象存储文件
+→ 删除或归档 Chunks
+→ Document → deleted
+```
+
+失败：
+
+```text
+operation_status = delete_failed
+```
+
+允许用户重试删除。
+
+---
+
+### 8.10 Knowledge E2E
 
 覆盖：
 
+```text
+上传真实 PDF/TXT
+→ 显示 Indexing
+→ Worker 解析
+→ Ready
+→ 搜索命中文本
+→ 显示文件名/页码/分数
+→ Reindex
+→ 删除
+→ 搜索不再返回
+```
+
+同时验证用户隔离。
+
+---
+
+## 九、Phase 3.6-B：Tutor RAG
+
+Knowledge MVP 完成后再接入 Tutor。
+
+流程：
+
+```text
+验证 Path/Node 权限
+→ 查询 Unit Content
+→ Knowledge Search Top K
+→ 构建有长度限制的 Context
+→ 调用 LLM
+→ 返回 Answer + Citations
+```
+
+响应：
+
+```json
+{
+  "question": "...",
+  "answer": "...",
+  "node_id": "...",
+  "citations": [
+    {
+      "document_id": "...",
+      "file_name": "...",
+      "page_number": 12,
+      "chunk_id": "..."
+    }
+  ]
+}
+```
+
+规则：
+
+* 用户只能检索自己的文档；
+* Context 有 Token 上限；
+* 不把所有文档一次性塞入 Prompt；
+* 引用必须对应实际使用的 Chunk；
+* 无知识结果时仍可基于 Unit Content 回答。
+
+---
+
+## 十、Phase 3.8：Rule-Based Recommendations
+
+### 10.1 当前问题
+
+生产组件直接使用：
+
+```typescript
+import {
+  mockRecommendations,
+} from "../../mocks/recommendations";
+```
+
+并硬编码：
+
+```typescript
+const mockResources = [...]
+```
+
+必须从生产代码移除。
+
+---
+
+### 10.2 后端接口
+
+新增：
+
+```text
+GET /api/learning-paths/{path_id}/recommendations
+```
+
+第一版不使用 LLM。
+
+规则：
+
+#### 复习推荐
+
+```text
+Mastery < 60
+或
+Assessment Failed
+→ review recommendation
+```
+
+#### 练习推荐
+
+```text
+Node Available
+但未完成
+→ practice recommendation
+```
+
+#### 继续学习
+
+```text
+当前最早 Available Node
+→ continue recommendation
+```
+
+#### 资料推荐
+
+```text
+Knowledge Search 命中 Node Title / Concepts
+→ resource recommendation
+```
+
+响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "...",
+      "type": "review",
+      "title": "...",
+      "reason": "...",
+      "node_ids": ["..."],
+      "status": "new",
+      "resource": null
+    }
+  ]
+}
+```
+
+---
+
+### 10.3 前端替换 Mock
+
+新增：
+
+```text
+frontend/src/api/recommendations.ts
+frontend/src/schemas/recommendations.ts
+```
+
+修改：
+
+```text
+RecommendationPanel.tsx
+RecommendationCard.tsx
+```
+
+要求：
+
+* 使用 React Query；
+* Loading State；
+* Empty State；
+* Error State；
+* 不再使用 `MockRecommendation` 命名；
+* 资料来自真实 Knowledge API；
+* MSW Mock 只存在于测试环境。
+
+---
+
+## 十一、全功能 Smoke Script
+
+新增：
+
+```text
+backend/scripts/smoke_full_learning_flow.py
+```
+
+流程：
+
+* [ ] 注册并验证用户。
+* [ ] 登录。
+* [ ] 完成 Onboarding。
 * [ ] 创建 Goal。
 * [ ] 完成 Clarification。
-* [ ] 加载 Diagnostic。
-* [ ] 按题型填写答案。
-* [ ] 提交按钮防重复。
-* [ ] 进入 Grading。
-* [ ] Task SSE 收到状态更新。
-* [ ] 显示结果。
-* [ ] 显示维度分数。
-* [ ] Provisional 显示临时标记。
-* [ ] Goal 进入 Planning。
-* [ ] Path Task 被创建。
-* [ ] 进入 Path Generating。
-* [ ] 页面刷新后状态恢复。
+* [ ] 完成 Diagnostic。
+* [ ] 等待 Diagnostic Grading。
+* [ ] 等待 Path Generation。
+* [ ] 请求 Path Revision。
+* [ ] 等待 Revision。
+* [ ] 激活 Path Version。
+* [ ] 生成 Unit。
+* [ ] 生成 Lecture。
+* [ ] 生成 Practice。
+* [ ] 生成 Assessment。
+* [ ] 提交 Assessment。
+* [ ] 验证 Mastery。
+* [ ] 验证下一 Node Unlock。
+* [ ] 上传知识文档。
+* [ ] 等待 Index。
+* [ ] 搜索知识。
+* [ ] 调用 Tutor。
+* [ ] 获取 Recommendations。
+* [ ] 验证 Resume。
+* [ ] Logout。
 
-运行：
+任何一步失败：
 
-```powershell
-Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\frontend
+```text
+立即退出非零状态
+输出 API、Task ID、Error Code
+```
 
-npx playwright test `
-  --config=playwright.real.config.ts `
-  e2e/diagnostic-real.spec.ts `
-  --workers=1 `
-  --retries=0 `
-  --trace=on
+最终只输出：
+
+```text
+FULL LEARNING FLOW PASSED
 ```
 
 ---
 
-# 二十一、故障恢复验证
+## 十二、Playwright 全流程
 
-## LLM 不可用
+新增：
 
-临时设置无效 Provider：
-
-* [ ] 客观题正常评分。
-* [ ] 简答题进入 Provisional。
-* [ ] Attempt 不永久停留 Grading。
-* [ ] Goal 仍可进入 Planning。
-* [ ] Path Task 正常创建。
-* [ ] UI 显示临时结果。
-
-## Worker 重启
-
-```powershell
-Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\backend\docker
-
-docker compose restart celery-worker
+```text
+frontend/e2e/learning-full-real.spec.ts
+frontend/e2e/knowledge-real.spec.ts
+frontend/e2e/path-revision-real.spec.ts
+frontend/e2e/assessment-real.spec.ts
 ```
 
-验收：
+最低断言：
 
-* [ ] 不重复 Result。
-* [ ] 不重复 Path Task。
-* [ ] Stale Task 最终恢复或明确 Failed。
-* [ ] Attempt 不永久 Grading。
-
-## Publisher 停止
-
-```powershell
-docker compose stop outbox-publisher
-```
-
-提交 Diagnostic：
-
-* [ ] Attempt 和 Task 已提交。
-* [ ] Outbox 保持 Pending。
-* [ ] 不直接调用 Celery。
-
-恢复：
-
-```powershell
-docker compose start outbox-publisher
-```
-
-最终 Worker 开始评分。
+* Path Revision 有真实 Task ID；
+* Unit 内容真实生成；
+* Assessment 提交后 Mastery 改变；
+* Knowledge 文件真实可搜索；
+* Tutor 返回安全回答和引用；
+* Recommendations 不含硬编码 Mock；
+* 页面刷新能够恢复异步状态；
+* Worker 失败时 UI 可重试。
 
 ---
 
-# 二十二、Phase 3.2 验证命令
+## 十三、故障恢复验收
 
-## 后端定向测试
+### Worker 停止
+
+* 创建 Task；
+* 停止 Worker；
+* 恢复 Worker；
+* Task 最终继续或明确 Failed；
+* 不产生重复版本、内容、评估或 Chunk。
+
+### Outbox Publisher 停止
+
+* Task 与 Outbox 已写入；
+* Publisher 停止期间不丢任务；
+* 恢复后继续执行。
+
+### MinIO 停止
+
+* 上传返回明确错误或进入可恢复状态；
+* 数据库不出现指向不存在对象的 Ready Document；
+* 恢复后可以重试。
+
+### LLM 不可用
+
+* Path 使用模板 Fallback；
+* Unit 使用模板 Fallback；
+* Assessment 简答进入 Provisional；
+* Tutor 返回安全错误；
+* 核心流程不永久卡在 Running。
+
+---
+
+## 十四、推荐 PR 顺序
+
+### PR 3.3.0：Runtime Capability Fixes
+
+* Task Handler Registry；
+* Task Type Contract；
+* `enqueue_task()`；
+* Tutor 安全基础；
+* Unit Ownership Guard；
+* Knowledge Reindex Handler 临时修复。
+
+### PR 3.3：Path Revision Closure
+
+* Revision Task；
+* Revision Worker；
+* 新 Version；
+* Review 与 Activation；
+* Path Revision E2E。
+
+### PR 3.4：Unit Content Closure
+
+* 安全生成；
+* 内容版本；
+* 非破坏 Regenerate；
+* Lecture；
+* Unit E2E。
+
+### PR 3.5：Assessment & Mastery Closure
+
+* 后台生成；
+* 异步简答评分；
+* Mastery；
+* Node Unlock；
+* Assessment E2E。
+
+### PR 3.7：Knowledge MVP
+
+* MinIO；
+* Parser；
+* Chunk；
+* FTS；
+* Reindex；
+* Delete；
+* Knowledge E2E。
+
+### PR 3.6：Tutor RAG
+
+* 权限；
+* 安全错误；
+* RAG；
+* Citations；
+* Tutor E2E。
+
+### PR 3.8：Recommendations
+
+* 规则引擎；
+* API；
+* 删除前端 Mock；
+* Recommendation E2E。
+
+### PR 3.9：Full Launch Verification
+
+* Full Smoke；
+* Full Playwright；
+* Failure Recovery；
+* Staging 验收；
+* Release Archive。
+
+---
+
+## 十五、每个 PR 的最低门禁
+
+后端：
 
 ```powershell
 Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\backend
-
-& ".venv\Scripts\python.exe" -m pytest `
-  tests/unit/test_diagnostic_scoring.py `
-  tests/unit/test_diagnostic_short_answer_grading.py `
-  tests/integration/test_diagnostic_submission.py `
-  tests/integration/test_diagnostic_grading.py `
-  tests/integration/test_diagnostic_planning_transition.py `
-  tests/workers/test_diagnostic_grading_task.py `
-  -v
-```
-
-## 后端全量门禁
-
-```powershell
 & ".venv\Scripts\python.exe" -m ruff check .
 & ".venv\Scripts\python.exe" -m ruff format --check .
 & ".venv\Scripts\python.exe" -m mypy app
 & ".venv\Scripts\python.exe" -m pytest -W error -v
 ```
 
-## 前端全量门禁
+前端：
 
 ```powershell
 Set-Location C:\Users\xtzzz\Desktop\document\project\cnsoftcup\frontend
-
 npm run typecheck
 npm run lint
 npm test
 npm run check:contract
 npm run build
-npm run e2e:real
 ```
 
 ---
 
-# 二十三、Phase 3.2 验收标准
+## 十六、当前执行状态
 
-## 评分
+### 当前阶段：Phase 3.3.0 — Task Capability 与运行时阻断修复 ✅ 已完成
 
-* [ ] 客观题结果确定且可复现。
-* [ ] 多选题不依赖顺序。
-* [ ] 简答题使用结构化输出。
-* [ ] LLM 失败产生 Provisional。
-* [ ] Provisional 不伪装成 Final。
-* [ ] 总分和维度分数正确。
+#### 3.3.0.1 Task Handler Registry
+- [x] 创建 `backend/app/workers/task_handlers.py`
+- [x] 实现 `TASK_HANDLERS` registry
+- [x] Worker 改为使用 registry
+- [x] Inline Runner 也使用 registry
+- [x] 未知类型严格 Failed
 
-## 事务
+#### 3.3.0.2 契约一致性测试
+- [x] `backend/tests/contract/test_task_capabilities.py` — 8 tests passed
+- [x] 前后端 Task Type 一致性验证
+- [x] 每个公开类型有 Handler
 
-* [ ] Attempt、Answer、Result 状态一致。
-* [ ] Goal、Path Task 和 Outbox 同事务。
-* [ ] 并发提交不会重复创建数据。
-* [ ] API 不直接调用 Celery。
-* [ ] LLM 调用不持有长数据库事务。
+#### 3.3.0.3 enqueue_task()
+- [x] 实现 `enqueue_task()` (flush only)
+- [x] 领域 Service 改用 `enqueue_task()`
+- [x] 保留 `create_task()` 便利方法
 
-## 状态机
+#### 3.3.0.4 learning_path_revision Handler
+- [x] 实现 `execute_path_revision` (LLM + template fallback)
 
-* [ ] Diagnostic 完成后 Goal 进入 Planning。
-* [ ] Path Generation Task 被创建。
-* [ ] Worker 失败后可恢复。
-* [ ] 页面刷新后能够恢复状态。
+#### 3.3.0.5 knowledge_reindex Handler
+- [x] 修复 Worker Handler (复用 knowledge_index)
 
-## 安全
+#### 3.3.0.6 Unit Ownership Guard
+- [x] 创建 `learning_access.py`
+- [x] 接入生成/再生成/讲义/练习/评估/Tutor
 
-* [ ] 用户不能访问其他用户 Attempt。
-* [ ] 公共 DTO 不泄露答案和 Rubric。
-* [ ] 输入字段经过严格验证。
-* [ ] 日志不包含完整敏感回答。
-* [ ] Submit 具备防重放和幂等性。
+#### 3.3.0.7 Safe Regenerate
+- [x] 保留旧内容直到新内容就绪
+- [x] 幂等键 (unit-regenerate:{user_id}:{path_id}:{node_id})
+- [x] 内容版本递增
 
-## 质量
+#### 3.3.0.8 Tutor Error Guard
+- [x] 访问控制 (require_node_access)
+- [x] 请求 Schema (`extra="forbid"`, min_length/max_length)
+- [x] 安全错误响应 (不泄露 LLM 错误)
+- [x] 日志不泄露敏感信息
 
-* [ ] Ruff 通过。
-* [ ] Format 通过。
-* [ ] MyPy 通过。
-* [ ] 后端全量测试 0 failed、0 warning。
-* [ ] 前端 Typecheck、Lint、Test、Build 通过。
-* [ ] Diagnostic Real E2E 通过。
-* [ ] Docker 全部服务健康。
-
----
-
-# 二十四、完成标志
-
-Phase 3.2 只有在以下结果成立时才关闭：
-
-```text
-Diagnostic Submit Passed
-Diagnostic Grading Passed
-Goal Planning Transition Passed
-Path Task Created Through Outbox
-Diagnostic Browser E2E Passed
-0 Failed
-0 Warning
-```
-
-完成后进入：
-
-> **Phase 3.3：Learning Path Generation & Revision Closure**
-
-建议首先提交一个小型 **Phase 3.2-A PR**，只完成“领域模型审计、客观题评分、DTO 与数据库约束”；第二个 **Phase 3.2-B PR** 再实现“异步简答评分、Goal 状态转换和 Path Task Outbox”。这样更容易定位事务和状态机问题。
+### 下一步：Phase 3.3 — Path Revision 完整闭环

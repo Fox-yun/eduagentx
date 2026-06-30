@@ -24,7 +24,7 @@ class TaskService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create_task(
+    async def enqueue_task(
         self,
         user_id: str,
         task_type: str,
@@ -34,7 +34,14 @@ class TaskService:
         request_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> BackgroundTask:
-        """Create a new background task."""
+        """Create a new background task WITHOUT committing.
+
+        Flushes only, so the caller can wrap this in a larger transaction
+        (e.g. RevisionRequest + BackgroundTask + TaskEvent + Outbox atomically).
+
+        Use enqueue_task() in domain services that need atomicity.
+        Use create_task() for simple callers that want auto-commit.
+        """
         # Check idempotency
         if idempotency_key:
             existing = await self.db.execute(
@@ -65,6 +72,31 @@ class TaskService:
         await self._publish_to_outbox(task)
 
         await self.db.flush()
+        return task
+
+    async def create_task(
+        self,
+        user_id: str,
+        task_type: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        target_metadata: dict | None = None,
+        request_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> BackgroundTask:
+        """Create a new background task with auto-commit.
+
+        Convenience wrapper around enqueue_task() for simple callers.
+        """
+        task = await self.enqueue_task(
+            user_id=user_id,
+            task_type=task_type,
+            target_type=target_type,
+            target_id=target_id,
+            target_metadata=target_metadata,
+            request_id=request_id,
+            idempotency_key=idempotency_key,
+        )
         await self.db.commit()
         return task
 

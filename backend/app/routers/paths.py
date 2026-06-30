@@ -125,11 +125,18 @@ async def create_revision_request(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Create a revision request for a path."""
+    """Create a revision request for a path.
+
+    Atomically creates the revision request and a background task.
+    Returns a real active_task_id so the frontend can poll progress.
+    """
     service = PathService(db)
-    await service.create_revision_request(path_id, user.id, body.revision_request)
+    revision_req, task = await service.create_revision_request(path_id, user.id, body.revision_request)
+
+    await db.commit()
 
     return {
         "next_step": "generating",
-        "active_task_id": None,
+        "active_task_id": task.id if task else None,
+        "revision_request_id": revision_req.id,
     }

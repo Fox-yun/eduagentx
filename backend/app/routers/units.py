@@ -122,6 +122,32 @@ async def create_practice(
     return await service.create_practice(path_id, node_id, user.id)
 
 
+@router.get("/{path_id}/nodes/{node_id}/mind-map")
+async def get_mind_map(
+    path_id: str,
+    node_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a mind map tree generated from unit content (deterministic, no LLM)."""
+    await require_node_access(db, user.id, path_id, node_id)
+    service = UnitService(db)
+    return await service.get_mind_map(path_id, node_id, user.id)
+
+
+@router.post("/{path_id}/nodes/{node_id}/quiz-bank")
+async def generate_quiz_bank(
+    path_id: str,
+    node_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Generate a quiz bank for a learning node (async background task)."""
+    await require_node_access(db, user.id, path_id, node_id)
+    service = UnitService(db)
+    return await service.generate_quiz_bank(path_id, node_id, user.id)
+
+
 async def submit_assessment(
     assessment_id: str,
     body: SubmitAssessmentRequest,

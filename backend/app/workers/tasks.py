@@ -958,16 +958,39 @@ async def _execute_lecture_generation(db: Any, task: Any) -> dict[str, Any]:
     if lecture_data is None:
         lecture_data = _build_fallback_lecture(node_title, node_difficulty, existing)
 
-    # Step 6: Save
+    # Step 6: Save to independent LearningLecture
     await update_task_status(db, task.id, "running", progress=90, stage="saving", message="正在保存讲义内容...")
 
-    existing["lecture"] = lecture_data
-    unit_content.content = existing
+    from app.models.unit import LearningLecture
+
+    lecture_result = await db.execute(
+        select(LearningLecture).where(
+            LearningLecture.node_id == node_id,
+            LearningLecture.user_id == user_id,
+        )
+    )
+    lecture = lecture_result.scalar_one_or_none()
+
+    if lecture:
+        lecture.content = lecture_data
+        lecture.status = "ready"
+        lecture.active_task_id = None
+    else:
+        lecture = LearningLecture(
+            id=__import__("uuid").uuid4().hex[:26],
+            user_id=user_id,
+            path_id=path_id,
+            node_id=node_id,
+            status="ready",
+            content=lecture_data,
+        )
+        db.add(lecture)
+
     await db.flush()
 
     await update_task_status(db, task.id, "running", progress=100, stage="completed", message="讲义生成完成")
 
-    return {"unit_id": unit_content.id, "node_id": node_id}
+    return {"lecture_id": lecture.id, "node_id": node_id}
 
 
 def _build_fallback_lecture(node_title: str, node_difficulty: str, existing: dict) -> dict:

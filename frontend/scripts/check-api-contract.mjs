@@ -255,11 +255,12 @@ async function main() {
   const validDiagnostic = {
     diagnostic_id: "diag-1",
     goal_id: "goal-1",
-    status: "pending",
+    attempt_id: "attempt-1",
+    status: "draft",
     questions: [
       {
         question_id: "dq-1",
-        type: "single_choice",
+        question_type: "single_choice",
         prompt: "Choose one",
         options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
         answer: null,

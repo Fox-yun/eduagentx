@@ -120,7 +120,7 @@ describe("Onboarding & Goals Workflows", () => {
       questions: [
         {
           question_id: "q-lang",
-          question_type: "single_choice",
+          type: "single_choice",
           prompt: "你想学哪个语言的库？",
           required: true,
           options: [
@@ -131,7 +131,7 @@ describe("Onboarding & Goals Workflows", () => {
         },
         {
           question_id: "q-topics",
-          question_type: "multiple_choice",
+          type: "multiple_choice",
           prompt: "主要学习哪些主题？",
           required: true,
           options: [
@@ -226,7 +226,7 @@ describe("Onboarding & Goals Workflows", () => {
       questions: [
         {
           question_id: "q-lang",
-          question_type: "single_choice",
+          type: "single_choice",
           prompt: "你想学哪个语言的库？",
           required: true,
           options: [{ value: "Python", label: "Python" }],
@@ -270,7 +270,7 @@ describe("Onboarding & Goals Workflows", () => {
           questions: [
             {
               question_id: "q-lang",
-              question_type: "single_choice",
+              type: "single_choice",
               prompt: "你想学哪个语言的库？",
               required: true,
               options: [{ value: "Python", label: "Python" }],

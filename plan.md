@@ -1622,15 +1622,17 @@ npm run build
 - [x] 遗留列 (content, version_number) 保留为兼容
 - [x] 605 passed, 0 回归
 
-### 下一步：Phase 3.4-C2 — 安全 Generate / Regenerate
+### 当前阶段：Phase 3.4-C2 — 安全 Generate / Regenerate ✅ 已完成
 
-- [ ] Generate 幂等 (已有 Ready 直接返回)
-- [ ] Regenerate 创建新 generating Version
-- [ ] 生成期间旧内容持续可读
-- [ ] 成功后原子切换 active_version_id
-- [ ] 失败后旧版本保留
-- [ ] Worker 双事务拆分 (Transaction A / LLM / Transaction B)
-- [ ] Integration Tests
+- [x] Generate 幂等 (已有 Ready 直接返回，已有 Task 返回相同 task_id)
+- [x] Regenerate 创建新 generating Version，保留 active_version_id
+- [x] GET content 返回 active_version_id + pending_version_id (regenerating 时)
+- [x] 成功后原子切换: 旧版本→superseded, 新版本→ready, active_version_id→新版本
+- [x] 失败后旧版本保留, 版本→failed, active_version_id 不变
+- [x] Worker 双事务拆分: Txn A(commit) → LLM → Txn B(FOR UPDATE + commit)
+- [x] Txn B 检查 Task 未取消 (CANCELLED → version→failed, 不激活)
+- [x] Fallback 内容也走 Txn B (保持原子切换)
+- [x] 3 worker tests updated (605 passed, 0 回归)
 
 ### 下一步：Phase 3.4-D — 文档资源
 

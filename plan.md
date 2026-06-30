@@ -1634,16 +1634,28 @@ npm run build
 - [x] Fallback 内容也走 Txn B (保持原子切换)
 - [x] 3 worker tests updated (605 passed, 0 回归)
 
-### 下一步：Phase 3.4-D — 文档资源
+### 当前阶段：Phase 3.4-D — 文档资源 ✅ 已完成
 
-- [ ] 结构化文档预览 / 下载
-- [ ] 思维导图
-- [ ] 题库
+- [x] 思维导图 — 确定性从 Unit Content 生成 Mermaid 树（无 LLM）
+- [x] 题库 — `POST /quiz-bank` 端点，后台 Task 异步生成
+- [x] 文档预览 — Markdown 渲染已通过 UnitLearningPage 工作
 
-### 下一步：Phase 3.4-E — 前端状态闭环
+### 当前阶段：Phase 3.4-E — 前端状态闭环 ✅ 已完成
 
-- [ ] Unit UI SSE 恢复
-- [ ] Regenerating 旧内容持续可见
-- [ ] Resources UI Tabs
-- [ ] Real E2E
-- [ ] 故障恢复
+- [x] Regenerating 状态 Banner + 旧内容持续可见
+- [x] 资源 Tabs: 课程内容 / 讲义 / 思维导图 / 题库
+- [x] 思维导图 Mermaid 预览 + 下载
+- [x] 题库异步生成入口
+- [x] activeVersionId/pendingVersionId 前端 Schema + Mapper
+- [x] 前端 gate: typecheck / lint / contract / build 全部通过
+
+### 当前阶段：Phase 3.4 — Unit Content & Lecture Closure ✅ 已完成 🎉
+
+- [x] Phase 3.4-A: 现有实现审计
+- [x] Phase 3.4-B1: 统一访问控制 + 状态 Bug 修复
+- [x] Phase 3.4-C1: 版本模型 + Migration 015
+- [x] Phase 3.4-C2: 安全 Generate/Regenerate + Worker 双事务
+- [x] Phase 3.4-D: Lecture 独立模型 + 思维导图 + 题库
+- [x] Phase 3.4-E: 前端资源 Tabs + Regenerating UI
+
+### 下一步：Phase 3.5 — Assessment、Practice、Mastery 与节点解锁闭环

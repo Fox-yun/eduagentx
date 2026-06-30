@@ -22,6 +22,7 @@ from app.models.path import (
     validate_dag,
 )
 from app.models.progress import LearningProgress
+from app.models.task import BackgroundTask
 
 logger = structlog.get_logger()
 
@@ -146,6 +147,7 @@ class PathService:
                 id=str(uuid.uuid4()),
                 version_id=version.id,
                 stage_id=stage_id_map.get(node_data.get("stage_id")),
+                logical_key=node_data.get("logical_key"),
                 title=node_data["title"],
                 description=node_data.get("description"),
                 node_order=node_data.get("node_order", 1),
@@ -188,44 +190,69 @@ class PathService:
         user_id: str,
         version_id: str,
     ) -> LearningPath:
-        """Activate a path version using CAS for concurrency safety."""
-        path = await self.get_path(path_id, user_id)
+        """Activate a path version using CAS for concurrency safety.
 
-        # Get the version
+        Transaction:
+          1. Lock the path row (FOR UPDATE)
+          2. Verify the target version exists, belongs to this path, and is in_review
+          3. Read old active version and supersede it
+          4. Migrate progress from old node IDs to new node IDs (by logical_key)
+          5. Set new version to active, update path reference
+          6. Commit
+        """
+        # 1. Lock path row
         result = await self.db.execute(
+            select(LearningPath)
+            .where(
+                LearningPath.id == path_id,
+                LearningPath.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        path = result.scalar_one_or_none()
+        if not path:
+            raise ApiError(code="PATH_NOT_FOUND", message="Learning path not found", status_code=404)
+
+        # 2. Verify the target version
+        ver_result = await self.db.execute(
             select(LearningPathVersion).where(
                 LearningPathVersion.id == version_id,
                 LearningPathVersion.path_id == path_id,
             )
         )
-        version = result.scalar_one_or_none()
+        version = ver_result.scalar_one_or_none()
         if not version:
             raise ApiError(code="VERSION_NOT_FOUND", message="Path version not found", status_code=404)
 
-        if version.status not in ("draft", "in_review"):
-            raise ApiError(code="INVALID_STATUS", message="Version cannot be activated", status_code=400)
+        from app.models.path import validate_version_transition
 
-        # CAS update
-        expected_version = path.active_version_id
-        result = await self.db.execute(
-            update(LearningPath)
-            .where(
-                LearningPath.id == path_id,
-                LearningPath.active_version_id.is_(expected_version)
-                if expected_version is None
-                else LearningPath.active_version_id == expected_version,
+        if not validate_version_transition(version.status, "active"):
+            raise ApiError(
+                code="INVALID_STATUS",
+                message=f"Version status '{version.status}' cannot be activated",
+                status_code=400,
             )
-            .values(active_version_id=version_id, status="active")
-        )
 
-        if not result.rowcount or result.rowcount != 1:  # type: ignore[attr-defined]
-            raise ApiError(code="PATH_VERSION_CONFLICT", message="Version conflict detected", status_code=409)
+        # 3. Supersede old active version
+        old_active_version_id = path.active_version_id
+        if old_active_version_id and old_active_version_id != version_id:
+            old_ver_result = await self.db.execute(
+                select(LearningPathVersion).where(LearningPathVersion.id == old_active_version_id)
+            )
+            old_version = old_ver_result.scalar_one_or_none()
+            if old_version and old_version.status == "active":
+                old_version.status = "superseded"
 
-        # Update version status
+        # 4. Migrate progress from old nodes to new nodes by logical_key
+        await self._migrate_progress(path_id, user_id, old_active_version_id, version_id)
+
+        # 5. Set new version as active
         version.status = "active"
         version.activated_at = utc_now()
+        path.active_version_id = version_id
+        path.status = "active"
 
-        # Initialize node statuses: roots become available, others stay locked
+        # Initialize root node statuses
         await self._initialize_node_statuses(version_id)
 
         # Update goal
@@ -236,9 +263,99 @@ class PathService:
         await self.db.flush()
         await self.db.commit()
 
-        # Refresh path
         await self.db.refresh(path)
         return path
+
+    async def _migrate_progress(
+        self,
+        path_id: str,
+        user_id: str,
+        old_version_id: str | None,
+        new_version_id: str,
+    ) -> None:
+        """Migrate learning progress from old version nodes to new version nodes.
+
+        Matching is done by logical_key. Rules:
+        - Same logical_key + existed before → retain completed status and mastery
+        - Same logical_key but different content → retain history, mark as inherited
+        - New logical_key → leave as default (available/locked based on prerequisites)
+        - Old logical_key removed → progress stays with old version (no deletion)
+        """
+        if not old_version_id:
+            return
+
+        # Get old and new nodes
+        old_nodes_result = await self.db.execute(select(LearningNode).where(LearningNode.version_id == old_version_id))
+        old_nodes = list(old_nodes_result.scalars().all())
+
+        new_nodes_result = await self.db.execute(select(LearningNode).where(LearningNode.version_id == new_version_id))
+        new_nodes = list(new_nodes_result.scalars().all())
+
+        # Build logical_key → node_id maps
+        old_by_key: dict[str, str] = {}
+        for n in old_nodes:
+            if n.logical_key:
+                old_by_key[n.logical_key] = n.id
+
+        new_by_key: dict[str, str] = {}
+        for n in new_nodes:
+            if n.logical_key:
+                new_by_key[n.logical_key] = n.id
+
+        if not old_by_key and not new_by_key:
+            return  # No logical_keys on either side — skip migration
+
+        # Get existing progress for all old nodes
+        old_node_ids = list(old_by_key.values())
+        if not old_node_ids:
+            return
+
+        progress_result = await self.db.execute(
+            select(LearningProgress).where(
+                LearningProgress.user_id == user_id,
+                LearningProgress.path_id == path_id,
+                LearningProgress.node_id.in_(old_node_ids),
+            )
+        )
+        existing_progress = list(progress_result.scalars().all())
+
+        # Map old node_id → progress
+        progress_by_old_node: dict[str, LearningProgress] = {p.node_id: p for p in existing_progress}
+
+        # Migrate: for each old progress entry with a matching logical_key in new version,
+        # create or update progress on the new node
+        for old_lk, old_nid in old_by_key.items():
+            if old_lk not in new_by_key:
+                continue  # Node was removed — keep old progress as-is
+            if old_nid not in progress_by_old_node:
+                continue  # No progress to migrate
+
+            new_nid = new_by_key[old_lk]
+            old_progress = progress_by_old_node[old_nid]
+
+            # Check if new progress already exists
+            existing_new = await self.db.execute(
+                select(LearningProgress).where(
+                    LearningProgress.user_id == user_id,
+                    LearningProgress.path_id == path_id,
+                    LearningProgress.node_id == new_nid,
+                )
+            )
+            if existing_new.scalar_one_or_none():
+                continue  # Already migrated
+
+            # Create migrated progress entry for the new node
+            new_progress = LearningProgress(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                path_id=path_id,
+                node_id=new_nid,
+                status=old_progress.status,
+                mastery=old_progress.mastery,
+                attempts=old_progress.attempts,
+                completed_at=old_progress.completed_at,
+            )
+            self.db.add(new_progress)
 
     async def create_revision_request(
         self,
@@ -248,25 +365,60 @@ class PathService:
     ) -> tuple[LearningPathRevisionRequest, object | None]:
         """Create a revision request and enqueue a background task.
 
+        Uses SELECT ... FOR UPDATE to prevent concurrent revision creation.
+        Checks for existing pending/running revisions on the same path.
         Returns (revision_request, background_task | None).
         Both are created atomically in the same transaction (no commit).
         The caller must commit.
         """
         from app.services.task import TaskService
 
-        path = await self.get_path(path_id, user_id)
+        # Lock the path row to prevent concurrent revision requests
+        result = await self.db.execute(
+            select(LearningPath)
+            .where(
+                LearningPath.id == path_id,
+                LearningPath.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        path = result.scalar_one_or_none()
+        if not path:
+            raise ApiError(code="PATH_NOT_FOUND", message="Learning path not found", status_code=404)
+
+        if path.status == "archived":
+            raise ApiError(code="PATH_ARCHIVED", message="Cannot revise an archived path", status_code=403)
 
         # Confirm there is a current active version to base the revision on
         if not path.active_version_id:
             raise ApiError(code="NO_ACTIVE_VERSION", message="Path has no active version to revise", status_code=400)
 
-        idempotency_key = f"path-revision:{path_id}:{revision_request[:64]}"
+        # Check for existing pending or running revision requests on this path
+        existing_result = await self.db.execute(
+            select(LearningPathRevisionRequest)
+            .where(
+                LearningPathRevisionRequest.path_id == path_id,
+                LearningPathRevisionRequest.status.in_({"pending", "running"}),
+            )
+            .limit(1)
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            # Return the existing revision request and its task (if any)
+            task = None
+            if existing.task_id:
+                task_result = await self.db.execute(select(BackgroundTask).where(BackgroundTask.id == existing.task_id))
+                task = task_result.scalar_one_or_none()
+            return existing, task
+
+        idempotency_key = f"path-revision:{path_id}:{path.active_version_id}:{revision_request[:64]}"
 
         request = LearningPathRevisionRequest(
             id=str(uuid.uuid4()),
             path_id=path_id,
             user_id=user_id,
             revision_request=revision_request,
+            source_version_id=path.active_version_id,
         )
         self.db.add(request)
         await self.db.flush()
@@ -286,9 +438,169 @@ class PathService:
 
         # Link task back to revision request
         request.task_id = task.id
-        request.source_version_id = path.active_version_id
 
         return request, task
+
+    async def get_version_with_details(
+        self,
+        path_id: str,
+        user_id: str,
+        version_id: str,
+    ) -> dict:
+        """Get a specific version with its stages, nodes, and edges."""
+        await self.get_path(path_id, user_id)
+
+        result = await self.db.execute(
+            select(LearningPathVersion).where(
+                LearningPathVersion.id == version_id,
+                LearningPathVersion.path_id == path_id,
+            )
+        )
+        version = result.scalar_one_or_none()
+        if not version:
+            raise ApiError(code="VERSION_NOT_FOUND", message="Path version not found", status_code=404)
+
+        stages_result = await self.db.execute(
+            select(LearningStage).where(LearningStage.version_id == version.id).order_by(LearningStage.stage_order)
+        )
+        stages = list(stages_result.scalars().all())
+
+        nodes_result = await self.db.execute(
+            select(LearningNode).where(LearningNode.version_id == version.id).order_by(LearningNode.node_order)
+        )
+        nodes = list(nodes_result.scalars().all())
+
+        edges_result = await self.db.execute(select(LearningEdge).where(LearningEdge.version_id == version.id))
+        edges = list(edges_result.scalars().all())
+
+        path = await self.get_path(path_id, user_id)
+        return await self._format_path(path, version, stages, nodes, edges)
+
+    async def compute_version_diff(
+        self,
+        path_id: str,
+        user_id: str,
+        version_id: str,
+    ) -> dict:
+        """Compute diff between the active version and a candidate version.
+
+        Uses logical_key for node matching.
+        """
+        path = await self.get_path(path_id, user_id)
+
+        # Get the candidate version
+        cand_result = await self.db.execute(
+            select(LearningPathVersion).where(
+                LearningPathVersion.id == version_id,
+                LearningPathVersion.path_id == path_id,
+            )
+        )
+        candidate = cand_result.scalar_one_or_none()
+        if not candidate:
+            raise ApiError(code="VERSION_NOT_FOUND", message="Path version not found", status_code=404)
+
+        # Get the active version
+        if not path.active_version_id:
+            raise ApiError(code="NO_ACTIVE_VERSION", message="Path has no active version", status_code=400)
+
+        active_result = await self.db.execute(
+            select(LearningPathVersion).where(LearningPathVersion.id == path.active_version_id)
+        )
+        active = active_result.scalar_one_or_none()
+        if not active:
+            raise ApiError(code="ACTIVE_VERSION_NOT_FOUND", message="Active version not found", status_code=404)
+
+        # Get nodes for both versions
+        active_nodes_result = await self.db.execute(select(LearningNode).where(LearningNode.version_id == active.id))
+        active_nodes = list(active_nodes_result.scalars().all())
+
+        cand_nodes_result = await self.db.execute(select(LearningNode).where(LearningNode.version_id == candidate.id))
+        cand_nodes = list(cand_nodes_result.scalars().all())
+
+        # Build logical_key maps
+        active_by_key: dict[str, LearningNode] = {}
+        for n in active_nodes:
+            if n.logical_key:
+                active_by_key[n.logical_key] = n
+
+        cand_by_key: dict[str, LearningNode] = {}
+        for n in cand_nodes:
+            if n.logical_key:
+                cand_by_key[n.logical_key] = n
+
+        active_keys = set(active_by_key.keys())
+        cand_keys = set(cand_by_key.keys())
+
+        added_keys = cand_keys - active_keys
+        removed_keys = active_keys - cand_keys
+        common_keys = active_keys & cand_keys
+
+        COMPARED_FIELDS = {"title", "description", "difficulty", "estimated_minutes"}
+
+        added = []
+        for k in sorted(added_keys):
+            n = cand_by_key[k]
+            added.append(
+                {
+                    "logical_key": k,
+                    "title": n.title,
+                    "description": n.description,
+                    "difficulty": n.difficulty,
+                    "estimated_minutes": n.estimated_minutes,
+                }
+            )
+
+        removed = []
+        for k in sorted(removed_keys):
+            n = active_by_key[k]
+            removed.append(
+                {
+                    "logical_key": k,
+                    "title": n.title,
+                    "description": n.description,
+                    "difficulty": n.difficulty,
+                    "estimated_minutes": n.estimated_minutes,
+                }
+            )
+
+        modified = []
+        for k in sorted(common_keys):
+            old_n = active_by_key[k]
+            new_n = cand_by_key[k]
+            changes = {}
+            for f in COMPARED_FIELDS:
+                old_val = getattr(old_n, f, None)
+                new_val = getattr(new_n, f, None)
+                if old_val != new_val:
+                    changes[f] = {"old": old_val, "new": new_val}
+            if changes:
+                modified.append(
+                    {
+                        "logical_key": k,
+                        "title": new_n.title,
+                        "changes": changes,
+                    }
+                )
+
+        # Calculate time delta
+        old_total = sum(n.estimated_minutes for n in active_nodes)
+        new_total = sum(n.estimated_minutes for n in cand_nodes)
+        estimated_minutes_delta = new_total - old_total
+
+        return {
+            "active_version_id": active.id,
+            "active_version_number": active.version_number,
+            "candidate_version_id": candidate.id,
+            "candidate_version_number": candidate.version_number,
+            "added_nodes": added,
+            "removed_nodes": removed,
+            "modified_nodes": modified,
+            "unchanged_count": len(common_keys) - len(modified),
+            "estimated_minutes_delta": estimated_minutes_delta,
+            "difficulty_delta": "increased"
+            if new_total > old_total
+            else ("decreased" if new_total < old_total else "unchanged"),
+        }
 
     async def list_versions(
         self,
@@ -365,6 +677,7 @@ class PathService:
                 {
                     "node_id": n.id,
                     "stage_id": n.stage_id,
+                    "logical_key": n.logical_key,
                     "title": n.title,
                     "description": n.description,
                     "node_order": n.node_order,

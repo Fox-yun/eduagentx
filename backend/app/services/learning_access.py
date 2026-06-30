@@ -20,10 +20,10 @@ class NodeAccessContext:
     """Result of a successful node access check."""
 
     path: LearningPath
-    version: LearningPathVersion
+    version: LearningPathVersion | None
     node: LearningNode
     path_id: str
-    version_id: str
+    version_id: str | None
     node_id: str
     user_id: str
 
@@ -57,9 +57,9 @@ async def require_node_access(
     if not path:
         raise ApiError(code="PATH_NOT_FOUND", message="Learning path not found", status_code=404)
 
-    # 2. Check path is not archived
+    # 2. Check path is not archived — return 404 to avoid leaking path existence
     if path.status == "archived":
-        raise ApiError(code="PATH_ARCHIVED", message="Learning path is archived", status_code=403)
+        raise ApiError(code="PATH_ARCHIVED", message="Learning path is archived", status_code=404)
 
     # 3. Resolve the relevant version
     version_id = path.active_version_id

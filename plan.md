@@ -1541,3 +1541,102 @@ npm run build
 - [x] 日志不泄露敏感信息
 
 ### 下一步：Phase 3.3 — Path Revision 完整闭环
+
+### 当前阶段：Phase 3.3 — Path Revision 完整闭环 ✅ 已完成
+
+#### 3.3-A：修订领域模型与 Worker
+- [x] Revision 状态机常量 (ALLOWED_REVISION_TRANSITIONS)
+- [x] Version 状态机常量 (ALLOWED_VERSION_TRANSITIONS)
+- [x] `validate_revision_transition()` / `validate_version_transition()`
+- [x] 增强 DAG 校验 (strict 模式：重复边、estimated_minutes、logical_key 唯一)
+- [x] `compute_node_diff()` — 基于 logical_key 的节点差异计算
+- [x] Migration 014: `logical_key` 列 + source_version_id NOT NULL + 索引
+- [x] `create_revision_request()` FOR UPDATE + 去重 (pending/running 检测)
+- [x] 改进幂等键包含 source_version_id
+- [x] RevisedPathPlan Pydantic schema (RevisedStage/RevisedNode/RevisedEdge)
+- [x] Worker 双事务模式 (Transaction A→LLM→Transaction B)
+- [x] Transaction B 验证 revision 仍为 running (FOR UPDATE)
+- [x] LLM Fallback 模板修订
+
+#### 3.3-B：版本激活、Diff 与 Progress Migration
+- [x] `activate_version()` 使用 FOR UPDATE 原子操作
+- [x] 旧 Active Version → superseded
+- [x] `_migrate_progress()` — 基于 logical_key 的进度迁移
+- [x] 完全继承 (相同 logical_key, 保留 mastery/completed)
+- [x] `compute_version_diff()` API
+- [x] `get_version_with_details()` API
+- [x] `GET /{path_id}/versions/{version_id}` 端点
+- [x] `GET /{path_id}/versions/{version_id}/diff` 端点
+- [x] `POST /{path_id}/versions/{version_id}/activate` 端点
+
+#### 3.3-C：测试覆盖
+- [x] PathService 激活测试 (成功/未找到/状态无效/旧版本废弃)
+- [x] 现有 674 测试全部通过
+- [x] Migration 014 round-trip (013→014→013→head)
+- [x] Ruff check/format 全部通过
+
+### 下一步：Phase 3.4 — Unit Content & Lecture
+
+### 当前阶段：Phase 3.4-A — 现有实现审计 ✅ 已完成
+
+- [x] 确认 Unit Content 存储结构 (LearningUnitContent JSON 列)
+- [x] 确认版本机制缺失 (无独立 Version 表，Regenerate 直接覆盖)
+- [x] 发现 content_status 非持久化属性 Bug (routers/units.py:110)
+- [x] 确认 Lecture 嵌套在 Unit JSON 中 (workers/tasks.py:862)
+- [x] 确认 Worker 长事务问题 (LLM 在 DB Session 内)
+- [x] 确认访问控制覆盖缺失 (5/6 端点缺少 require_node_access)
+- [x] 确认页面刷新恢复机制 (存在但脆弱)
+- [x] 确认 Regenerate 会覆盖旧内容 (无版本保护)
+- [x] 冻结公共枚举建议 (not_generated/generating/ready/regenerating/failed)
+- [x] 冻结 Version 状态 (generating/ready/failed/superseded)
+- [x] 冻结 Source (llm/fallback/manual)
+- [x] 冻结 Quality Status (final/provisional)
+
+### 当前阶段：Phase 3.4-B1 — 统一访问控制与状态修复 🔄 进行中
+
+- [ ] GET /content 使用 require_node_access
+- [ ] POST /content 使用 require_node_access
+- [ ] POST /content/lecture 使用 require_node_access
+- [ ] POST /assessments 使用 require_node_access
+- [ ] POST /practice 使用 require_node_access
+- [ ] 修复 content_status → status (regenerating 持久化写入)
+- [ ] 后端 UNIT_CONTENT_STATUSES 加入 regenerating
+- [ ] 前端 Zod 枚举加入 regenerating
+- [ ] 统一错误语义 (404 NODE_NOT_FOUND / 409 NODE_NOT_AVAILABLE)
+- [ ] 安全测试 test_unit_endpoint_access.py
+- [ ] Ruff / mypy / pytest 通过
+- [ ] 前端 typecheck / lint / test / contract / build 通过
+- [ ] Git 提交
+
+### 下一步：Phase 3.4-C1 — 版本模型与 Migration 015
+
+- [ ] LearningUnitContentVersion 模型
+- [ ] LearningUnitContent.active_version_id
+- [ ] LearningUnitContent.active_task_id
+- [ ] Migration 015 创建顺序 (Version 表 → 字段 → FK)
+- [ ] 旧内容回填为 Version 1
+- [ ] Downgrade 验证
+
+### 下一步：Phase 3.4-C2 — 安全 Generate / Regenerate
+
+- [ ] Generate 幂等 (已有 Ready 直接返回)
+- [ ] Regenerate 创建新 generating Version
+- [ ] 生成期间旧内容持续可读
+- [ ] 成功后原子切换 active_version_id
+- [ ] 失败后旧版本保留
+- [ ] Worker 双事务拆分 (Transaction A / LLM / Transaction B)
+- [ ] Integration Tests
+
+### 下一步：Phase 3.4-D — 文档资源
+
+- [ ] 结构化文档预览 / 下载
+- [ ] 思维导图
+- [ ] 题库
+
+### 下一步：Phase 3.4-E — 前端状态闭环
+
+- [ ] Unit UI SSE 恢复
+- [ ] Regenerating 旧内容持续可见
+- [ ] Resources UI Tabs
+- [ ] Real E2E
+- [ ] 故障恢复

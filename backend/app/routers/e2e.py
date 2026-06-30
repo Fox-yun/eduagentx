@@ -16,12 +16,21 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.datetime import utc_now
 from app.core.database import get_db
 from app.core.errors import ApiError
+from app.models.goal import LearningGoal
 from app.models.outbox import OutboxEvent
+from app.models.path import (
+    LearningEdge,
+    LearningNode,
+    LearningPath,
+    LearningPathVersion,
+    LearningStage,
+)
 from app.models.task import BackgroundTask, TaskEvent
 from app.models.user import AuthSession, User
 
@@ -64,12 +73,13 @@ async def bootstrap_learning_session(
     _token: None = Depends(_require_e2e_token),
     _db_check: None = Depends(_require_test_db),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> JSONResponse:
     """Create a fully-authenticated user with onboarding completed.
 
-    Returns: { user_id, email, access_token, refresh_token, csrf_token, session_id }
+    Returns JSON with auth tokens and sets CSRF cookie.
     The caller can use these tokens directly in subsequent API calls.
     """
+    from app.config import get_settings
     from app.core.security import (
         create_access_token,
         generate_csrf_token,
@@ -119,16 +129,27 @@ async def bootstrap_learning_session(
 
     access_token = create_access_token(user.id, session.id)
     csrf_token = generate_csrf_token()
+    settings = get_settings()
 
-    return {
-        "user_id": user.id,
-        "email": email,
-        "password": password,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "csrf_token": csrf_token,
-        "session_id": session.id,
-    }
+    response = JSONResponse(
+        content={
+            "user_id": user.id,
+            "email": email,
+            "password": password,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "csrf_token": csrf_token,
+            "session_id": session.id,
+        },
+    )
+    response.set_cookie(
+        key=settings.csrf_cookie_name,
+        value=csrf_token,
+        httponly=False,
+        samesite="lax",
+        secure=False,
+    )
+    return response
 
 
 @router.post("/create-progress-task")
@@ -189,3 +210,183 @@ async def create_progress_task(
     await db.commit()
 
     return {"task_id": task_id}
+
+
+@router.post("/bootstrap-path-version")
+async def bootstrap_path_version(
+    request: Request,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a learning path with an active version for revision E2E tests.
+
+    Creates: LearningGoal → LearningPath → LearningPathVersion (active)
+             → LearningStage (2) → LearningNode (4) → LearningEdge (3)
+
+    Returns: { path_id, version_id, goal_id }
+    Requires X-E2E-User-Id header with the user_id from bootstrap-learning-session.
+    """
+    user_id = request.headers.get("X-E2E-User-Id", "")
+    if not user_id:
+        raise ApiError(code="BAD_REQUEST", message="X-E2E-User-Id required", status_code=400)
+
+    now = utc_now()
+    goal_id = str(uuid.uuid4())
+    path_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+
+    # LearningGoal
+    goal = LearningGoal(
+        id=goal_id,
+        user_id=user_id,
+        title="E2E Path Revision Test Goal",
+        raw_description="Test learning goal for path revision E2E",
+        use_diagnostic=False,
+    )
+    db.add(goal)
+
+    # LearningPath (without active_version_id initially — circular FK)
+    path = LearningPath(
+        id=path_id,
+        user_id=user_id,
+        goal_id=goal_id,
+        status="active",
+    )
+    db.add(path)
+    await db.flush()
+
+    # LearningPathVersion (active)
+    version = LearningPathVersion(
+        id=version_id,
+        path_id=path_id,
+        version_number=1,
+        source="initial_generation",
+        status="active",
+        summary="E2E test path version 1",
+        estimated_total_minutes=120,
+        created_by="system",
+        activated_at=now,
+    )
+    db.add(version)
+    await db.flush()
+
+    # Now set the path's active_version_id
+    path.active_version_id = version_id
+
+    # LearningStage (2 stages)
+    stage1_id = str(uuid.uuid4())
+    stage1 = LearningStage(
+        id=stage1_id,
+        version_id=version_id,
+        title="基础概念",
+        description="Foundation concepts",
+        stage_order=1,
+    )
+    db.add(stage1)
+
+    stage2_id = str(uuid.uuid4())
+    stage2 = LearningStage(
+        id=stage2_id,
+        version_id=version_id,
+        title="进阶应用",
+        description="Advanced applications",
+        stage_order=2,
+    )
+    db.add(stage2)
+    await db.flush()
+
+    # LearningNode (4 nodes with logical_keys for progress migration)
+    nodes = [
+        LearningNode(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            stage_id=stage1_id,
+            logical_key="e2e-concept-1",
+            title="概念一",
+            description="E2E test concept 1",
+            node_order=1,
+            level=1,
+            difficulty="beginner",
+            estimated_minutes=30,
+            status="unlocked",
+            content_status="not_generated",
+        ),
+        LearningNode(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            stage_id=stage1_id,
+            logical_key="e2e-concept-2",
+            title="概念二",
+            description="E2E test concept 2",
+            node_order=2,
+            level=1,
+            difficulty="beginner",
+            estimated_minutes=30,
+            status="locked",
+            content_status="not_generated",
+        ),
+        LearningNode(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            stage_id=stage2_id,
+            logical_key="e2e-advanced-1",
+            title="进阶一",
+            description="E2E test advanced 1",
+            node_order=3,
+            level=2,
+            difficulty="intermediate",
+            estimated_minutes=30,
+            status="locked",
+            content_status="not_generated",
+        ),
+        LearningNode(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            stage_id=stage2_id,
+            logical_key="e2e-advanced-2",
+            title="进阶二",
+            description="E2E test advanced 2",
+            node_order=4,
+            level=2,
+            difficulty="intermediate",
+            estimated_minutes=30,
+            status="locked",
+            content_status="not_generated",
+        ),
+    ]
+    for n in nodes:
+        db.add(n)
+    await db.flush()
+
+    # LearningEdge (3 prerequisite edges)
+    edges = [
+        LearningEdge(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            source_node_id=nodes[0].id,
+            target_node_id=nodes[1].id,
+        ),
+        LearningEdge(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            source_node_id=nodes[1].id,
+            target_node_id=nodes[2].id,
+        ),
+        LearningEdge(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            source_node_id=nodes[2].id,
+            target_node_id=nodes[3].id,
+        ),
+    ]
+    for e in edges:
+        db.add(e)
+
+    await db.commit()
+
+    return {
+        "path_id": path_id,
+        "version_id": version_id,
+        "goal_id": goal_id,
+    }

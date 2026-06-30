@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -13,7 +12,6 @@ from app.workers.task_handlers import (
     PUBLIC_TASK_TYPES,
     RESERVED_TASK_TYPES,
     TASK_HANDLERS,
-    TaskHandler,
     get_handler,
     register_builtin_task_handlers,
     register_handler,
@@ -103,16 +101,12 @@ class TestBuiltinRegistration:
 
         register_builtin_task_handlers()
         for task_type, handler in TASK_HANDLERS.items():
-            assert inspect.iscoroutinefunction(handler), (
-                f"Handler for '{task_type}' is not a coroutine"
-            )
+            assert inspect.iscoroutinefunction(handler), f"Handler for '{task_type}' is not a coroutine"
 
     def test_reserved_types_not_registered(self) -> None:
         register_builtin_task_handlers()
         registered_reserved = RESERVED_TASK_TYPES & TASK_HANDLERS.keys()
-        assert not registered_reserved, (
-            f"RESERVED_TASK_TYPES should not have handlers: {registered_reserved}"
-        )
+        assert not registered_reserved, f"RESERVED_TASK_TYPES should not have handlers: {registered_reserved}"
 
     def test_public_types_coverage(self) -> None:
         """Every PUBLIC task type is either IMPLEMENTED or RESERVED."""
@@ -170,9 +164,7 @@ class TestHandlerContract:
             sig = inspect.signature(handler)
             ret = sig.return_annotation
             # Some handlers may have string annotations; just check they exist
-            assert ret is not inspect.Parameter.empty, (
-                f"Handler for {task_type} has no return annotation"
-            )
+            assert ret is not inspect.Parameter.empty, f"Handler for {task_type} has no return annotation"
 
 
 class TestTypeClassification:
@@ -180,18 +172,14 @@ class TestTypeClassification:
 
     def test_no_overlap_implemented_reserved(self) -> None:
         overlap = IMPLEMENTED_TASK_TYPES & RESERVED_TASK_TYPES
-        assert not overlap, (
-            f"IMPLEMENTED and RESERVED overlap: {overlap}"
-        )
+        assert not overlap, f"IMPLEMENTED and RESERVED overlap: {overlap}"
 
     def test_public_is_superset_of_implemented(self) -> None:
         missing = IMPLEMENTED_TASK_TYPES - PUBLIC_TASK_TYPES
         # e2e_progress_test is internal-only, not public
         # diagnostic_grading is separate from learning_diagnostic_generation
         internal_only = {"e2e_progress_test", "diagnostic_grading"}
-        assert missing == internal_only, (
-            f"IMPLEMENTED types not in PUBLIC (except internal): {missing - internal_only}"
-        )
+        assert missing == internal_only, f"IMPLEMENTED types not in PUBLIC (except internal): {missing - internal_only}"
 
     def test_reserved_may_be_in_public(self) -> None:
         """RESERVED types can appear in PUBLIC as documented tech debt."""

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
 from app.models.user import User
+from app.services.learning_access import require_node_access
 from app.services.unit import UnitService
 
 router = APIRouter()
@@ -32,6 +33,7 @@ async def get_unit_content(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Get unit content for a learning node."""
+    await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
     return await service.get_unit_content(path_id, node_id, user.id)
 
@@ -44,8 +46,8 @@ async def generate_unit_content(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate unit content for a learning node."""
-    # In production, this would create a background task
-    # For now, return a placeholder
+    await require_node_access(db, user.id, path_id, node_id)
+
     from app.services.task import TaskService
 
     task_service = TaskService(db)
@@ -73,17 +75,15 @@ async def regenerate_unit_content(
     atomically replaces it with the new version. If the worker fails,
     old content remains available.
     """
-    from app.models.task import BackgroundTask
-    from app.models.unit import LearningUnitContent
-    from app.services.learning_access import require_node_access
-    from app.services.task import TaskService
-
-    # Verify access control
     await require_node_access(db, user.id, path_id, node_id)
 
-    # Check for existing pending/running regeneration task
     from sqlalchemy import select
 
+    from app.models.task import BackgroundTask
+    from app.models.unit import LearningUnitContent
+    from app.services.task import TaskService
+
+    # Check for existing pending/running regeneration task
     task_result = await db.execute(
         select(BackgroundTask).where(
             BackgroundTask.target_type == "node",
@@ -107,8 +107,7 @@ async def regenerate_unit_content(
     )
     existing = existing_result.scalar_one_or_none()
     if existing:
-        existing.content_status = "regenerating"
-        # We'll use this to detect regeneration vs first-time generation
+        existing.status = "regenerating"
 
     task_service = TaskService(db)
     metadata: dict[str, Any] = {"path_id": path_id}
@@ -134,6 +133,8 @@ async def generate_lecture(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate a detailed lecture for an existing unit content."""
+    await require_node_access(db, user.id, path_id, node_id)
+
     from app.services.task import TaskService
 
     task_service = TaskService(db)
@@ -155,6 +156,7 @@ async def create_assessment(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Create an assessment for a learning node."""
+    await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
     return await service.create_assessment(path_id, node_id, user.id)
 
@@ -167,6 +169,7 @@ async def create_practice(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Create a practice question set (repeatable, not scored)."""
+    await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
     return await service.create_practice(path_id, node_id, user.id)
 

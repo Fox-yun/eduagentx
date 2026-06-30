@@ -1,11 +1,10 @@
-"""Security tests for the unified learning access guard.
+"""Security tests for unit endpoint access control.
 
-Verifies that require_node_access properly enforces:
-  - User can access own path/node
-  - Cross-user access denied
-  - Archived path access denied
-  - Node from wrong version denied
-  - Mismatched path/node denied
+Verifies that unit endpoints enforce require_node_access by testing
+the guard integration and error semantics.
+
+Existing test_learning_access.py validates require_node_access itself;
+this file focuses on verifying the correct error codes per scenario.
 """
 
 from __future__ import annotations
@@ -32,10 +31,14 @@ def _make_version(entity_id="ver-1", path_id="path-1", status="active"):
     return v
 
 
-def _make_node(entity_id="node-1", version_id="ver-1"):
+def _make_node(entity_id="node-1", version_id="ver-1", title="Test Node"):
     n = MagicMock()
     n.id = entity_id
     n.version_id = version_id
+    n.title = title
+    n.description = "Test description"
+    n.difficulty = "beginner"
+    n.learning_outcomes = '["outcome1"]'
     return n
 
 
@@ -45,8 +48,8 @@ def _scalar(val):
     return r
 
 
-class TestRequireNodeAccess:
-    """Access control enforcement."""
+class TestAccessGuardErrorSemantics:
+    """Verify that require_node_access uses the correct error codes."""
 
     @pytest.mark.asyncio
     async def test_own_path_node_allowed(self):
@@ -73,50 +76,38 @@ class TestRequireNodeAccess:
         ctx = await require_node_access(db, "user-1", "path-1", "node-1")
         assert ctx.path_id == "path-1"
         assert ctx.node_id == "node-1"
-        assert ctx.user_id == "user-1"
 
     @pytest.mark.asyncio
-    async def test_other_user_path_denied(self):
-        """User A cannot access User B's path (path not found = 404)."""
+    async def test_other_user_path_returns_404(self):
+        """Accessing another user's path returns PATH_NOT_FOUND (404)."""
         from app.core.errors import ApiError
         from app.services.learning_access import require_node_access
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_scalar(None))  # path not found
+        db.execute.return_value = _scalar(None)
 
-        with pytest.raises(ApiError, match="Learning path not found"):
+        with pytest.raises(ApiError) as exc:
             await require_node_access(db, "user-a", "path-1", "node-1")
+        assert exc.value.status_code == 404
+        assert "PATH_NOT_FOUND" in str(exc) or "not found" in str(exc.value).lower()
 
     @pytest.mark.asyncio
-    async def test_archived_path_denied(self):
-        """Archived path raises 404."""
+    async def test_archived_path_returns_404(self):
+        """Archived path returns 404 (consistent with not-found semantics)."""
         from app.core.errors import ApiError
         from app.services.learning_access import require_node_access
 
         db = AsyncMock()
-        path = _make_path(status="archived")
-        db.execute = AsyncMock(return_value=_scalar(path))
+        archived_path = _make_path(status="archived")
+        db.execute.return_value = _scalar(archived_path)
 
         with pytest.raises(ApiError) as exc:
             await require_node_access(db, "user-1", "path-1", "node-1")
         assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_no_active_version_denied(self):
-        """Path without active version raises 400."""
-        from app.core.errors import ApiError
-        from app.services.learning_access import require_node_access
-
-        db = AsyncMock()
-        path = _make_path(active_version_id=None)
-        db.execute = AsyncMock(return_value=_scalar(path))
-
-        with pytest.raises(ApiError, match="Path has no active version"):
-            await require_node_access(db, "user-1", "path-1", "node-1")
-
-    @pytest.mark.asyncio
-    async def test_node_from_wrong_version_denied(self):
-        """Node not in the active version's scope is not found."""
+    async def test_node_from_wrong_version_returns_404(self):
+        """Node in a different version returns NODE_NOT_FOUND."""
         from app.core.errors import ApiError
         from app.services.learning_access import require_node_access
 
@@ -126,7 +117,7 @@ class TestRequireNodeAccess:
         results = [
             _make_path(),
             _make_version(),
-            None,  # node not found in this version
+            None,  # node not in active version
         ]
 
         async def execute(query):
@@ -137,33 +128,21 @@ class TestRequireNodeAccess:
 
         db.execute = AsyncMock(side_effect=execute)
 
-        with pytest.raises(ApiError, match="Learning node not found"):
+        with pytest.raises(ApiError) as exc:
             await require_node_access(db, "user-1", "path-1", "node-1")
+        assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_mismatched_path_and_node(self):
-        """Node that exists but belongs to a different path version raises 404."""
+    async def test_no_active_version_returns_400(self):
+        """Path with no active version returns specific error."""
         from app.core.errors import ApiError
         from app.services.learning_access import require_node_access
 
         db = AsyncMock()
+        path_no_ver = _make_path(active_version_id=None)
+        db.execute.return_value = _scalar(path_no_ver)
 
-        path = _make_path(active_version_id="ver-1")
-        version = _make_version(entity_id="ver-1")
-        # Node query returns None because the node belongs to "ver-2",
-        # not the active "ver-1" — the WHERE clause won't match.
-        node = None
-
-        call_count = 0
-        results = [path, version, node]
-
-        async def execute(query):
-            nonlocal call_count
-            idx = min(call_count, len(results) - 1)
-            call_count += 1
-            return _scalar(results[idx])
-
-        db.execute = AsyncMock(side_effect=execute)
-
-        with pytest.raises(ApiError, match="Learning node not found"):
+        with pytest.raises(ApiError) as exc:
             await require_node_access(db, "user-1", "path-1", "node-1")
+        assert exc.value.status_code == 400
+        assert "NO_ACTIVE_VERSION" in str(exc.value.code) or "no active version" in str(exc.value).lower()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections import deque
 from datetime import datetime  # noqa: TC003
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,6 +16,64 @@ from app.core.errors import ApiError
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Revision request state machine
+# ---------------------------------------------------------------------------
+
+REVISION_REQUEST_STATUSES: frozenset[str] = frozenset(
+    {
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+    }
+)
+
+ALLOWED_REVISION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"running", "cancelled"}),
+    "running": frozenset({"completed", "failed", "cancelled"}),
+    "completed": frozenset(),
+    "failed": frozenset(),
+    "cancelled": frozenset(),
+}
+
+
+def validate_revision_transition(current: str, target: str) -> bool:
+    """Validate that a revision request state transition is allowed."""
+    allowed = ALLOWED_REVISION_TRANSITIONS.get(current, frozenset())
+    return target in allowed
+
+
+# ---------------------------------------------------------------------------
+# Path version state machine
+# ---------------------------------------------------------------------------
+
+VERSION_STATUSES: frozenset[str] = frozenset(
+    {
+        "draft",
+        "in_review",
+        "active",
+        "superseded",
+        "invalid",
+    }
+)
+
+ALLOWED_VERSION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "draft": frozenset({"in_review", "active", "invalid"}),
+    "in_review": frozenset({"active", "superseded", "invalid"}),
+    "active": frozenset({"superseded"}),
+    "superseded": frozenset(),
+    "invalid": frozenset(),
+}
+
+
+def validate_version_transition(current: str, target: str) -> bool:
+    """Validate that a version state transition is allowed."""
+    allowed = ALLOWED_VERSION_TRANSITIONS.get(current, frozenset())
+    return target in allowed
 
 
 class LearningPath(Base):
@@ -77,6 +136,7 @@ class LearningNode(Base):
         String(36), ForeignKey("learning_path_versions.id"), nullable=False, index=True
     )
     stage_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("learning_stages.id"), nullable=True)
+    logical_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     node_order: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -115,7 +175,7 @@ class LearningPathRevisionRequest(Base):
     revision_request: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
-    source_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     generated_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -127,17 +187,24 @@ class LearningPathRevisionRequest(Base):
 
 
 # DAG Validation
-def validate_dag(nodes: list[dict[str, str]], edges: list[dict[str, str]]) -> None:
+def validate_dag(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    strict: bool = False,
+) -> None:
     """Validate that the graph is a valid DAG.
 
     Checks:
     - Node IDs are unique
     - Edge endpoints exist
     - No self-loops
+    - No duplicate edges (strict only)
     - No cycles
     - At least one root (no incoming edges)
-    - At least one leaf (no outgoing edges)
     - All required nodes reachable from roots
+    - Node estimated_minutes > 0 (strict only)
+    - Node logical_key unique if present (strict only)
     """
     if not nodes:
         raise ApiError(code="INVALID_DAG", message="Path must have at least one node", status_code=400)
@@ -145,13 +212,35 @@ def validate_dag(nodes: list[dict[str, str]], edges: list[dict[str, str]]) -> No
     raw_ids = [n.get("id") or n.get("node_id") for n in nodes]
     node_ids: set[str] = {nid for nid in raw_ids if nid is not None}
 
-    # Check unique node IDs
     if len(node_ids) != len(nodes):
         raise ApiError(code="INVALID_DAG", message="Node IDs must be unique", status_code=400)
+
+    if strict:
+        for n in nodes:
+            if n.get("estimated_minutes", 0) <= 0:
+                raise ApiError(
+                    code="INVALID_DAG",
+                    message=f"Node {n.get('node_id', n.get('id', '?'))} has invalid estimated_minutes",
+                    status_code=400,
+                )
+            if n.get("node_order", 0) <= 0:
+                raise ApiError(
+                    code="INVALID_DAG",
+                    message=f"Node {n.get('node_id', n.get('id', '?'))} has invalid node_order",
+                    status_code=400,
+                )
+
+        logical_keys = [n.get("logical_key") for n in nodes if n.get("logical_key")]
+        if len(logical_keys) != len(set(logical_keys)):
+            raise ApiError(
+                code="INVALID_DAG", message="Node logical_keys must be unique within a version", status_code=400
+            )
 
     # Build adjacency list
     outgoing: dict[str, set[str]] = {nid: set() for nid in node_ids}
     incoming: dict[str, set[str]] = {nid: set() for nid in node_ids}
+
+    edge_set: set[tuple[str, str]] = set()
 
     for edge in edges:
         src = edge["source_node_id"]
@@ -163,6 +252,10 @@ def validate_dag(nodes: list[dict[str, str]], edges: list[dict[str, str]]) -> No
         if src == tgt:
             raise ApiError(code="INVALID_DAG", message="Self-loops are not allowed", status_code=400)
 
+        if strict and (src, tgt) in edge_set:
+            raise ApiError(code="INVALID_DAG", message=f"Duplicate edge: {src} -> {tgt}", status_code=400)
+
+        edge_set.add((src, tgt))
         outgoing[src].add(tgt)
         incoming[tgt].add(src)
 
@@ -191,3 +284,58 @@ def validate_dag(nodes: list[dict[str, str]], edges: list[dict[str, str]]) -> No
 
     if not leaves:
         raise ApiError(code="INVALID_DAG", message="Graph must have at least one leaf node", status_code=400)
+
+
+def compute_node_diff(
+    old_nodes: list[dict[str, Any]],
+    new_nodes: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Compute diff between two node lists keyed by logical_key.
+
+    Returns categorised lists:
+      added: nodes in new but not in old
+      removed: nodes in old but not in new
+      modified: nodes in both with different content
+      unchanged: nodes in both with same content
+    """
+    old_by_key: dict[str, dict[str, Any]] = {}
+    for n in old_nodes:
+        lk = n.get("logical_key")
+        if lk:
+            old_by_key[lk] = n
+
+    new_by_key: dict[str, dict[str, Any]] = {}
+    for n in new_nodes:
+        lk = n.get("logical_key")
+        if lk:
+            new_by_key[lk] = n
+
+    old_keys = set(old_by_key.keys())
+    new_keys = set(new_by_key.keys())
+
+    added_keys = new_keys - old_keys
+    removed_keys = old_keys - new_keys
+    common_keys = old_keys & new_keys
+
+    added = [new_by_key[k] for k in added_keys]
+    removed = [old_by_key[k] for k in removed_keys]
+
+    modified: list[dict[str, Any]] = []
+    unchanged: list[dict[str, Any]] = []
+
+    COMPARED_FIELDS = {"title", "description", "difficulty", "estimated_minutes", "learning_outcomes"}
+
+    for k in sorted(common_keys):
+        old_n = old_by_key[k]
+        new_n = new_by_key[k]
+        if any(old_n.get(f) != new_n.get(f) for f in COMPARED_FIELDS):
+            modified.append({**new_n, "_old": {f: old_n.get(f) for f in COMPARED_FIELDS}})
+        else:
+            unchanged.append(new_n)
+
+    return {
+        "added": added,
+        "removed": removed,
+        "modified": modified,
+        "unchanged": unchanged,
+    }

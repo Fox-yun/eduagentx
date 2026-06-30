@@ -15,26 +15,26 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
-def _make_path(id="path-1", user_id="user-1", active_version_id="ver-1", status="active"):
+def _make_path(entity_id="path-1", user_id="user-1", active_version_id="ver-1", status="active"):
     p = MagicMock()
-    p.id = id
+    p.id = entity_id
     p.user_id = user_id
     p.active_version_id = active_version_id
     p.status = status
     return p
 
 
-def _make_version(id="ver-1", path_id="path-1", status="active"):
+def _make_version(entity_id="ver-1", path_id="path-1", status="active"):
     v = MagicMock()
-    v.id = id
+    v.id = entity_id
     v.path_id = path_id
     v.status = status
     return v
 
 
-def _make_node(id="node-1", version_id="ver-1"):
+def _make_node(entity_id="node-1", version_id="ver-1"):
     n = MagicMock()
-    n.id = id
+    n.id = entity_id
     n.version_id = version_id
     return n
 
@@ -148,7 +148,7 @@ class TestRequireNodeAccess:
         db = AsyncMock()
 
         path = _make_path(active_version_id="ver-1")
-        version = _make_version(id="ver-1")
+        version = _make_version(entity_id="ver-1")
         # Node query returns None because the node belongs to "ver-2",
         # not the active "ver-1" — the WHERE clause won't match.
         node = None

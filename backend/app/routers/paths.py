@@ -95,27 +95,46 @@ async def list_versions(
     }
 
 
-@router.post("/{path_id}/activate")
-async def activate_path(
+@router.get("/{path_id}/versions/{version_id}")
+async def get_version(
     path_id: str,
+    version_id: str,
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
-    """Activate the latest draft version of a path."""
+) -> dict[str, Any]:
+    """Get a specific version's full details."""
     service = PathService(db)
+    return await service.get_version_with_details(path_id, user.id, version_id)
 
-    # Get latest draft version
-    versions = await service.list_versions(path_id, user.id)
-    draft_versions = [v for v in versions if v.status in ("draft", "in_review")]
 
-    if not draft_versions:
-        from app.core.errors import ApiError
+@router.get("/{path_id}/versions/{version_id}/diff")
+async def get_version_diff(
+    path_id: str,
+    version_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Compute diff between active version and the specified version."""
+    service = PathService(db)
+    return await service.compute_version_diff(path_id, user.id, version_id)
 
-        raise ApiError(code="NO_DRAFT_VERSION", message="No draft version to activate", status_code=400)
 
-    latest_draft = draft_versions[0]
-    path = await service.activate_version(path_id, user.id, latest_draft.id)
-    return {"message": "Path activated", "path_id": path.id}
+@router.post("/{path_id}/versions/{version_id}/activate")
+async def activate_version(
+    path_id: str,
+    version_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Activate a specific version of a learning path.
+
+    The version must be in_review status.
+    Old active version is superseded atomically.
+    Learning progress is migrated by logical_key.
+    """
+    service = PathService(db)
+    path = await service.activate_version(path_id, user.id, version_id)
+    return {"message": "Version activated", "path_id": path.id, "version_id": version_id}
 
 
 @router.post("/{path_id}/revision-requests")

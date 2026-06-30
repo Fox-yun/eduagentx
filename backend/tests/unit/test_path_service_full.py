@@ -416,17 +416,13 @@ class TestPathServiceActivateVersion:
         async def execute_side_effect(query):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:  # get_path
+            if call_count == 1:  # FOR UPDATE path
                 return _mock_scalar_result(path)
             elif call_count == 2:  # get version
                 return _mock_scalar_result(version)
-            elif call_count == 3:  # CAS update
-                mock = MagicMock()
-                mock.rowcount = 1
-                return mock
-            elif call_count == 4 or call_count == 5:  # _initialize_node_statuses: get nodes
+            elif call_count == 3 or call_count == 4:  # _initialize_node_statuses: get nodes
                 return _mock_scalars([])
-            elif call_count == 6:  # update goal
+            elif call_count == 5:  # update goal
                 return MagicMock()
             return _mock_scalar_result(None)
 
@@ -497,7 +493,8 @@ class TestPathServiceActivateVersion:
         assert exc_info.value.code == "INVALID_STATUS"
 
     @pytest.mark.asyncio
-    async def test_activate_version_cas_conflict(self):
+    async def test_activate_version_supersedes_old_active(self):
+        """New activation supersedes the old active version."""
         from app.services.path import PathService
 
         db = AsyncMock()
@@ -507,6 +504,7 @@ class TestPathServiceActivateVersion:
         db.add_all = MagicMock()
         svc = PathService(db)
         path = _make_path(active_version_id="old-ver")
+        old_version = _make_version(id="old-ver", status="active")
         version = _make_version(status="draft")
 
         call_count = 0
@@ -514,21 +512,24 @@ class TestPathServiceActivateVersion:
         async def execute_side_effect(query):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count == 1:  # FOR UPDATE path
                 return _mock_scalar_result(path)
-            elif call_count == 2:
+            elif call_count == 2:  # get target version
                 return _mock_scalar_result(version)
-            elif call_count == 3:  # CAS update with 0 rowcount
-                mock = MagicMock()
-                mock.rowcount = 0
-                return mock
+            elif call_count == 3:  # get old active version
+                return _mock_scalar_result(old_version)
+            elif call_count == 4 or call_count == 5:  # _initialize_node_statuses: get nodes
+                return _mock_scalars([])
+            elif call_count == 6:  # update goal
+                return MagicMock()
             return _mock_scalar_result(None)
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        with pytest.raises(ApiError) as exc_info:
-            await svc.activate_version("path-1", "user-1", "ver-1")
-        assert exc_info.value.code == "PATH_VERSION_CONFLICT"
+        result = await svc.activate_version("path-1", "user-1", "ver-1")
+        assert result is path
+        assert old_version.status == "superseded"
+        assert version.status == "active"
 
 
 class TestPathServiceInitializeNodeStatuses:

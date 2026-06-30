@@ -1541,3 +1541,38 @@ npm run build
 - [x] 日志不泄露敏感信息
 
 ### 下一步：Phase 3.3 — Path Revision 完整闭环
+
+### 当前阶段：Phase 3.3 — Path Revision 完整闭环 ✅ 已完成
+
+#### 3.3-A：修订领域模型与 Worker
+- [x] Revision 状态机常量 (ALLOWED_REVISION_TRANSITIONS)
+- [x] Version 状态机常量 (ALLOWED_VERSION_TRANSITIONS)
+- [x] `validate_revision_transition()` / `validate_version_transition()`
+- [x] 增强 DAG 校验 (strict 模式：重复边、estimated_minutes、logical_key 唯一)
+- [x] `compute_node_diff()` — 基于 logical_key 的节点差异计算
+- [x] Migration 014: `logical_key` 列 + source_version_id NOT NULL + 索引
+- [x] `create_revision_request()` FOR UPDATE + 去重 (pending/running 检测)
+- [x] 改进幂等键包含 source_version_id
+- [x] RevisedPathPlan Pydantic schema (RevisedStage/RevisedNode/RevisedEdge)
+- [x] Worker 双事务模式 (Transaction A→LLM→Transaction B)
+- [x] Transaction B 验证 revision 仍为 running (FOR UPDATE)
+- [x] LLM Fallback 模板修订
+
+#### 3.3-B：版本激活、Diff 与 Progress Migration
+- [x] `activate_version()` 使用 FOR UPDATE 原子操作
+- [x] 旧 Active Version → superseded
+- [x] `_migrate_progress()` — 基于 logical_key 的进度迁移
+- [x] 完全继承 (相同 logical_key, 保留 mastery/completed)
+- [x] `compute_version_diff()` API
+- [x] `get_version_with_details()` API
+- [x] `GET /{path_id}/versions/{version_id}` 端点
+- [x] `GET /{path_id}/versions/{version_id}/diff` 端点
+- [x] `POST /{path_id}/versions/{version_id}/activate` 端点
+
+#### 3.3-C：测试覆盖
+- [x] PathService 激活测试 (成功/未找到/状态无效/旧版本废弃)
+- [x] 现有 674 测试全部通过
+- [x] Migration 014 round-trip (013→014→013→head)
+- [x] Ruff check/format 全部通过
+
+### 下一步：Phase 3.4 — Unit Content & Lecture

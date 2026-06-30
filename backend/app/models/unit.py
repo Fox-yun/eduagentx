@@ -159,3 +159,25 @@ class AssessmentAnswer(Base):
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points_earned: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class LearningLecture(Base):
+    """Independent lecture content for a learning node.
+
+    Lecture is versioned independently from unit content so it can be
+    regenerated without affecting the unit content version.
+    """
+
+    __tablename__ = "learning_lectures"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    path_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_paths.id"), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True, unique=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_generated")
+    content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

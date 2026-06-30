@@ -162,6 +162,23 @@ class UnitService:
         )
         active_lecture_task = lecture_task_result.scalar_one_or_none()
 
+        # Load lecture from independent model (fallback to legacy unit JSON)
+        lecture_data: dict[str, object] | None = content_data.get("lecture")
+        try:
+            from app.models.unit import LearningLecture as LecModel
+
+            lec_result = await self.db.execute(
+                select(LecModel).where(
+                    LecModel.node_id == node_id,
+                    LecModel.user_id == user_id,
+                )
+            )
+            lec_row = lec_result.scalar_one_or_none()
+            if lec_row and lec_row.content:
+                lecture_data = lec_row.content
+        except Exception:
+            pass  # Fallback to legacy content_data.get("lecture")
+
         return {
             "unit_id": content.id,
             "path_id": content.path_id,
@@ -179,7 +196,7 @@ class UnitService:
             "summary": content_data.get("summary"),
             "references": content_data.get("references", []),
             "error": content_data.get("error"),
-            "lecture": content_data.get("lecture"),
+            "lecture": lecture_data,
             "active_lecture_task_id": active_lecture_task.id if active_lecture_task else None,
         }
 

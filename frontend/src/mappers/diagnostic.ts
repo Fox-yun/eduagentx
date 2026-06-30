@@ -8,6 +8,7 @@ export function mapDiagnosticDto(dto: DiagnosticQuizDto): DiagnosticQuizModel {
   return {
     diagnosticId: dto.diagnostic_id,
     goalId: dto.goal_id,
+    attemptId: dto.attempt_id,
     status: dto.status,
     questions: dto.questions.map(mapDiagnosticQuestion),
     savedAnswers: dto.saved_answers,
@@ -27,17 +28,19 @@ export function mapDiagnosticDto(dto: DiagnosticQuizDto): DiagnosticQuizModel {
 function mapDiagnosticQuestion(q: DiagnosticQuizDto["questions"][number]): DiagnosticQuestionModel {
   const base: DiagnosticQuestionModel = {
     questionId: q.question_id,
-    type: q.type,
+    type: q.question_type,
     prompt: q.prompt,
     required: q.required ?? true,
+    dimension: q.dimension,
+    maxScore: q.max_score,
     answer: q.answer,
   };
 
-  if (q.type === "single_choice" || q.type === "multiple_choice") {
+  if (q.question_type === "single_choice" || q.question_type === "multiple_choice") {
     base.options = q.options;
   }
 
-  if (q.type === "code_text") {
+  if (q.question_type === "code_text") {
     base.language = q.language;
     base.codeSnippet = q.code_snippet;
   }

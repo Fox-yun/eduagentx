@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // ------------------------------------------------------------------
-// Diagnostic Question types — discriminated union on "type"
+// Diagnostic Question types — discriminated union on "question_type"
 // ------------------------------------------------------------------
 
 const DiagnosticOptionSchema = z.object({
@@ -11,27 +11,33 @@ const DiagnosticOptionSchema = z.object({
 
 const SingleChoiceQuestionSchema = z.object({
   question_id: z.string(),
-  type: z.literal("single_choice"),
+  question_type: z.literal("single_choice"),
   prompt: z.string(),
   required: z.boolean().optional().default(true),
   options: z.array(DiagnosticOptionSchema).min(2),
+  dimension: z.string().optional(),
+  max_score: z.number().positive().optional(),
   answer: z.string().nullable(),
 });
 
 const MultipleChoiceQuestionSchema = z.object({
   question_id: z.string(),
-  type: z.literal("multiple_choice"),
+  question_type: z.literal("multiple_choice"),
   prompt: z.string(),
   required: z.boolean().optional().default(true),
   options: z.array(DiagnosticOptionSchema).min(2),
+  dimension: z.string().optional(),
+  max_score: z.number().positive().optional(),
   answer: z.array(z.string()).nullable(),
 });
 
 const ShortAnswerQuestionSchema = z.object({
   question_id: z.string(),
-  type: z.literal("short_answer"),
+  question_type: z.literal("short_answer"),
   prompt: z.string(),
   required: z.boolean().optional().default(true),
+  dimension: z.string().optional(),
+  max_score: z.number().positive().optional(),
   answer: z.string().nullable(),
 });
 
@@ -41,15 +47,17 @@ const ShortAnswerQuestionSchema = z.object({
  */
 const CodeTextQuestionSchema = z.object({
   question_id: z.string(),
-  type: z.literal("code_text"),
+  question_type: z.literal("code_text"),
   prompt: z.string(),
   required: z.boolean().optional().default(true),
   language: z.string().optional().default("plaintext"),
   code_snippet: z.string(),
+  dimension: z.string().optional(),
+  max_score: z.number().positive().optional(),
   answer: z.string().nullable(),
 });
 
-export const DiagnosticQuestionSchema = z.discriminatedUnion("type", [
+export const DiagnosticQuestionSchema = z.discriminatedUnion("question_type", [
   SingleChoiceQuestionSchema,
   MultipleChoiceQuestionSchema,
   ShortAnswerQuestionSchema,
@@ -91,11 +99,12 @@ export type DiagnosticResult = z.infer<typeof DiagnosticResultSchema>;
 export const DiagnosticQuizDtoSchema = z.object({
   diagnostic_id: z.string(),
   goal_id: z.string(),
-  status: z.enum(["pending", "in_progress", "submitted", "failed"]),
+  attempt_id: z.string(),
+  status: z.enum(["draft", "submitted", "grading", "completed", "failed"]),
   questions: z.array(DiagnosticQuestionSchema),
   saved_answers: z.record(z.string(), DiagnosticSavedAnswerSchema),
   result: DiagnosticResultSchema,
-  next_step: z.enum(["generating", "review", "active"]).nullable(),
+  next_step: z.enum(["diagnostic", "generating", "review", "active"]).nullable(),
 });
 
 export type DiagnosticQuizDto = z.infer<typeof DiagnosticQuizDtoSchema>;
@@ -112,6 +121,8 @@ export interface DiagnosticQuestionModel {
   options?: Array<{ value: string; label: string }>;
   language?: string;
   codeSnippet?: string;
+  dimension?: string;
+  maxScore?: number;
   answer: string | string[] | null;
 }
 
@@ -126,9 +137,10 @@ export interface DiagnosticResultModel {
 export interface DiagnosticQuizModel {
   diagnosticId: string;
   goalId: string;
-  status: "pending" | "in_progress" | "submitted" | "failed";
+  attemptId: string;
+  status: "draft" | "submitted" | "grading" | "completed" | "failed";
   questions: DiagnosticQuestionModel[];
   savedAnswers: Record<string, string | string[] | null>;
   result: DiagnosticResultModel | null;
-  nextStep: "generating" | "review" | "active" | null;
+  nextStep: "diagnostic" | "generating" | "review" | "active" | null;
 }

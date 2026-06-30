@@ -1,6 +1,7 @@
 """Database models."""
 
 from app.models.clarification import ClarificationAnswer, ClarificationQuestion, ClarificationSet
+from app.models.diagnostic import DiagnosticAnswer, DiagnosticAttempt, DiagnosticQuestion, DiagnosticResult
 from app.models.goal import LearningGoal
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from app.models.path import (
@@ -33,6 +34,11 @@ __all__ = [
     # Goals
     "LearningGoal",
     "Recommendation",
+    # Diagnostic
+    "DiagnosticQuestion",
+    "DiagnosticAttempt",
+    "DiagnosticAnswer",
+    "DiagnosticResult",
     # Tasks
     "BackgroundTask",
     "TaskEvent",

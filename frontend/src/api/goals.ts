@@ -92,16 +92,18 @@ export async function getDiagnostic(goalId: string, signal?: AbortSignal): Promi
 
 export async function submitDiagnostic(
   goalId: string,
-  answers: Record<string, any>
-): Promise<{ nextStep: "generating"; activeTaskId: string }> {
+  attemptId: string,
+  answers: Array<{ question_id: string; answer: any }>
+): Promise<{ attemptId: string; status: string; taskId: string }> {
   const res = await apiRequest(`/learning-goals/${goalId}/diagnostic/submit`, {
     method: "POST",
-    body: { answers },
+    body: { attempt_id: attemptId, answers },
     schema: DiagnosticSubmitResponseSchema,
   });
 
   return {
-    nextStep: res.next_step,
-    activeTaskId: res.active_task_id,
+    attemptId: res.attempt_id,
+    status: res.status,
+    taskId: res.task_id,
   };
 }

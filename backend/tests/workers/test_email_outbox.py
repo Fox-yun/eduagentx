@@ -65,6 +65,16 @@ async def test_email_outbox_failure_retains_encrypted_payload(db_session, monkey
     db_session.add(event)
     await db_session.commit()
 
+    # Reset any leftover events from previous tests
+    from sqlalchemy import update as sa_update
+
+    await db_session.execute(
+        sa_update(OutboxEvent)
+        .where(OutboxEvent.id != event_id, OutboxEvent.status == "pending")
+        .values(status="failed")
+    )
+    await db_session.commit()
+
     # Publish pending outbox
     await publish_pending_outbox()
 

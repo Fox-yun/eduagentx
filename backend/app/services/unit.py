@@ -404,6 +404,107 @@ class UnitService:
             return 1
         return max(v.version_number for v in content.versions) + 1
 
+    async def get_mind_map(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+    ) -> dict[str, object]:
+        """Generate a mind map tree from existing unit content.
+
+        Returns a hierarchical tree structure and Mermaid markdown.
+        Does NOT use LLM — derived deterministically from content.
+        """
+        from sqlalchemy.orm import selectinload
+
+        result = await self.db.execute(
+            select(LearningUnitContent)
+            .options(selectinload(LearningUnitContent.versions))
+            .where(
+                LearningUnitContent.path_id == path_id,
+                LearningUnitContent.node_id == node_id,
+                LearningUnitContent.user_id == user_id,
+            )
+        )
+        content = result.scalar_one_or_none()
+        if not content:
+            raise ApiError(code="CONTENT_NOT_FOUND", message="No content found for this node", status_code=404)
+
+        # Get content data from active version or legacy
+        if content.active_version_id and content.versions:
+            active_version = next(
+                (v for v in content.versions if v.id == content.active_version_id), None
+            )
+            content_data = active_version.content if active_version and active_version.content else (content.content or {})
+        else:
+            content_data = content.content or {}
+
+        title = content_data.get("introduction", "").strip("# \n").split("\n")[0] if content_data.get("introduction") else "未知节点"
+        objectives = content_data.get("objectives", [])
+        sections = content_data.get("sections", [])
+
+        # Build hierarchical tree
+        tree: list[dict[str, object]] = [
+            {"id": "root", "label": title, "children": []}
+        ]
+
+        # Objectives branch
+        obj_branch: dict[str, object] = {"id": "objectives", "label": "学习目标", "children": []}
+        for i, obj in enumerate(objectives):
+            obj_branch["children"].append({"id": f"obj-{i}", "label": obj, "children": []})
+        if objectives:
+            tree[0]["children"].append(obj_branch)
+
+        # Sections branch
+        for sec in sections:
+            sec_title = sec.get("title", "未命名章节")
+            sec_branch: dict[str, object] = {
+                "id": f"sec-{sec.get('order', 0)}",
+                "label": sec_title,
+                "children": [],
+            }
+            tree[0]["children"].append(sec_branch)
+
+        # Generate Mermaid mindmap
+        mermaid_lines = ["mindmap", f"  root(({title}))"]
+        if objectives:
+            mermaid_lines.append("    学习目标")
+            for obj in objectives:
+                mermaid_lines.append(f"      {obj[:60]}")
+        for sec in sections:
+            sec_title = sec.get("title", "章节")
+            mermaid_lines.append(f"     {sec_title}")
+            # Extract key points from section content (first line)
+            sec_content = sec.get("content", "")
+            first_line = sec_content.split("\n")[0].strip("# *")[:60] if sec_content else ""
+            if first_line:
+                mermaid_lines.append(f"      {first_line}")
+
+        return {
+            "tree": tree,
+            "mermaid": "\n".join(mermaid_lines),
+            "node_id": node_id,
+        }
+
+    async def generate_quiz_bank(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+    ) -> dict[str, object]:
+        """Start a quiz bank generation task."""
+        from app.services.task import TaskService
+
+        task_service = TaskService(self.db)
+        task = await task_service.create_task(
+            user_id=user_id,
+            task_type="learning_assessment_generation",
+            target_type="node",
+            target_id=node_id,
+            target_metadata={"path_id": path_id},
+        )
+        return {"next_step": "generating", "active_task_id": task.id}
+
     async def create_assessment(
         self,
         path_id: str,

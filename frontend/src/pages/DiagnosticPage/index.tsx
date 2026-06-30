@@ -43,7 +43,15 @@ export function DiagnosticPage() {
   });
 
   const { mutate: submitAnswers } = useMutation({
-    mutationFn: (answersToSubmit: Record<string, string | string[] | null>) => submitDiagnostic(goalId || "", answersToSubmit),
+    mutationFn: (answersToSubmit: Record<string, string | string[] | null>) => {
+      const attemptId = quizData?.attemptId;
+      if (!attemptId) throw new Error("Missing attempt ID");
+      const answerList = Object.entries(answersToSubmit).map(([question_id, answer]) => ({
+        question_id,
+        answer,
+      }));
+      return submitDiagnostic(goalId || "", attemptId, answerList);
+    },
     onMutate: () => {
       setPageState("submitting");
     },
@@ -51,7 +59,7 @@ export function DiagnosticPage() {
       setPageState("completed");
       toast("诊断结果提交成功，即将开始生成学习路径...", "success");
       navigationTimerRef.current = setTimeout(() => {
-        navigate(`${appRoutes.goalGenerating(goalId || "")}?task=${result.activeTaskId}`);
+        navigate(`${appRoutes.goalGenerating(goalId || "")}?task=${result.taskId}`);
       }, 1500);
     },
     onError: (err: any) => {

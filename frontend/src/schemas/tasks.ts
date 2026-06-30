@@ -26,6 +26,7 @@ export const TaskTypeSchema = z.enum([
   "learning_path_adaptation",
   "knowledge_index",
   "knowledge_reindex",
+  "learning_lecture_generation",
 ]);
 
 export type TaskType = z.infer<typeof TaskTypeSchema>;

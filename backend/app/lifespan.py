@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
 import structlog
@@ -25,18 +26,45 @@ async def lifespan(app: object) -> AsyncGenerator[None, None]:
     settings = get_settings()
     logger.info("starting_up", env=settings.app_env)
 
-    # Initialize database engine
-    get_engine()
-    logger.info("database_initialized")
+    # Initialize database engine (graceful failure)
+    try:
+        get_engine()
+        logger.info("database_initialized")
+    except Exception as e:
+        logger.warning("database_init_failed", error=str(e))
 
-    # Initialize Redis
-    get_redis()
-    logger.info("redis_initialized")
+    # Initialize Redis (graceful failure)
+    try:
+        get_redis()
+        logger.info("redis_initialized")
+    except Exception as e:
+        logger.warning("redis_init_failed", error=str(e))
+
+    # In development mode, start inline outbox poller (bypasses Celery)
+    inline_stop: asyncio.Event | None = None
+    inline_task: asyncio.Task | None = None
+    if settings.app_env == "development":
+        try:
+            from app.workers.inline_runner import run_inline_outbox_poller
+
+            inline_stop = asyncio.Event()
+            inline_task = asyncio.create_task(run_inline_outbox_poller(inline_stop))
+            logger.info("inline_task_runner_started")
+        except Exception as e:
+            logger.warning("inline_task_runner_failed", error=str(e))
 
     yield
 
     # Shutdown
     logger.info("shutting_down")
-    await close_database()
-    await close_redis()
+    if inline_stop is not None:
+        inline_stop.set()
+    if inline_task is not None:
+        inline_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await inline_task
+    with suppress(Exception):
+        await close_database()
+    with suppress(Exception):
+        await close_redis()
     logger.info("shutdown_complete")

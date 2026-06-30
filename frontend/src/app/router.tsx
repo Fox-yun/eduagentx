@@ -96,6 +96,7 @@ const PathGeneratingPage = lazy(() => import("../pages/PathGeneratingPage").then
 const PathReviewPage = lazy(() => import("../pages/PathReviewPage").then(m => ({ default: m.PathReviewPage })));
 const LearningPathPage = lazy(() => import("../pages/LearningPathPage").then(m => ({ default: m.LearningPathPage })));
 const UnitLearningPage = lazy(() => import("../pages/UnitLearningPage").then(m => ({ default: m.UnitLearningPage })));
+const AssessmentPage = lazy(() => import("../pages/AssessmentPage").then(m => ({ default: m.AssessmentPage })));
 const KnowledgePage = lazy(() => import("../pages/KnowledgePage").then(m => ({ default: m.KnowledgePage })));
 const TasksPage = lazy(() => import("../pages/TasksPage").then(m => ({ default: m.TasksPage })));
 const ProfileSettingsPage = lazy(() => import("../pages/ProfileSettingsPage").then(m => ({ default: m.ProfileSettingsPage })));
@@ -158,6 +159,10 @@ export function AppRouter() {
                   <Route path="/goals/:goalId/generating" element={wrapLazy(PathGeneratingPage)} />
                   <Route path="/learning-paths/:pathId/review" element={wrapLazy(PathReviewPage)} />
                   <Route path="/learning-paths/:pathId" element={wrapLazy(LearningPathPage)} />
+                  <Route
+                    path="/learning-paths/:pathId/nodes/:nodeId/assessment"
+                    element={wrapLazy(AssessmentPage)}
+                  />
                   <Route
                     path="/learning-paths/:pathId/nodes/:nodeId"
                     element={wrapLazy(UnitLearningPage)}

@@ -81,6 +81,7 @@ class UserService:
             profile.timezone = timezone
 
         await self.db.flush()
+        await self.db.commit()
         return await self.get_profile(user_id)
 
     async def complete_onboarding(
@@ -118,4 +119,5 @@ class UserService:
         user.onboarding_completed_at = utc_now()
 
         await self.db.flush()
+        await self.db.commit()
         return await self.get_profile(user_id)

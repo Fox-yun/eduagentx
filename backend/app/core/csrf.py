@@ -17,7 +17,10 @@ CSRF_EXEMPT_PATHS: frozenset[str] = frozenset(
         "/api/auth/csrf",
         "/api/auth/register",
         "/api/auth/login",
-        "/api/auth/refresh",
+        "/api/auth/verify-email",
+        "/api/auth/resend-verification",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
         "/health/live",
         "/health/ready",
         "/docs",
@@ -53,6 +56,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Skip if path starts with exempt prefixes
         if request.url.path.startswith("/health"):
+            return await call_next(request)
+
+        # Skip E2E test routes (protected by X-E2E-Token instead)
+        # Only exempt when E2E routes are actually enabled
+        is_e2e_request = (
+            settings.app_env == "test" and settings.enable_e2e_routes and request.url.path.startswith("/api/__e2e__/")
+        )
+        if is_e2e_request:
             return await call_next(request)
 
         # Get CSRF token from cookie

@@ -52,15 +52,13 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency that provides a database session."""
-    factory = get_session_factory()
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    """FastAPI dependency that provides a database session.
+
+    The session does NOT auto-commit. Services must call
+    ``await db.commit()`` explicitly after successful writes.
+    """
+    async with get_session_factory()() as session:
+        yield session
 
 
 async def check_database_connection() -> bool:

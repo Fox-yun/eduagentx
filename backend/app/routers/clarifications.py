@@ -82,10 +82,13 @@ async def get_clarifications(
     await service.get_goal(goal_id, user.id)
 
     result = await db.execute(
-        select(ClarificationSet).where(
+        select(ClarificationSet)
+        .where(
             ClarificationSet.goal_id == goal_id,
             ClarificationSet.status == "active",
         )
+        .order_by(ClarificationSet.created_at.desc())
+        .limit(1)
     )
     clar_set = result.scalar_one_or_none()
 
@@ -107,6 +110,7 @@ async def get_clarifications(
             )
             db.add(question)
         await db.flush()
+        await db.commit()
 
     questions_result = await db.execute(
         select(ClarificationQuestion)
@@ -148,10 +152,13 @@ async def submit_clarifications(
     goal = await service.get_goal(goal_id, user.id)
 
     result = await db.execute(
-        select(ClarificationSet).where(
+        select(ClarificationSet)
+        .where(
             ClarificationSet.goal_id == goal_id,
             ClarificationSet.status == "active",
         )
+        .order_by(ClarificationSet.created_at.desc())
+        .limit(1)
     )
     clar_set = result.scalar_one_or_none()
 
@@ -189,6 +196,7 @@ async def submit_clarifications(
         await service.transition_goal(goal_id, user.id, "diagnosing")
 
     await db.flush()
+    await db.commit()
 
     return {
         "next_step": "diagnostic",

@@ -18,7 +18,7 @@ export async function layoutGraph(
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "DOWN", // Layout top to bottom
+      "elk.direction": "RIGHT", // Layout left to right
       "elk.spacing.nodeNode": "90", // Spacing between nodes on same layer
       "elk.layered.spacing.nodeNodeBetweenLayers": "170", // Spacing between layers
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",

@@ -4,7 +4,7 @@
 !.env.example
 
 # Cookies and tokens
-cookies.txt
+cookies*.txt
 
 # Database files
 *.db
@@ -13,16 +13,21 @@ cookies.txt
 data/
 !data/.gitkeep
 
+# Archives and office docs
+*.xlsx
+*.xls
+*.zip
+
 # Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Testing and coverage
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Testing and coverage
 .coverage
 coverage.xml
 htmlcov/
@@ -32,6 +37,15 @@ htmlcov/
 dist/
 build/
 *.whl
+
+# Node
+node_modules/
+playwright-report/
+test-results/
+
+# Virtual environments
+.venv/
+venv/
 
 # IDE
 .vscode/
@@ -57,3 +71,4 @@ frontend/.env.*
 # Runtime logs
 logs/
 *.log
+*.tsbuildinfo

@@ -20,6 +20,29 @@ class RevisionRequest(BaseModel):
     revision_request: str
 
 
+@router.get("/")
+async def list_paths(
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """List all learning paths for the current user."""
+    service = PathService(db)
+    items = await service.list_user_paths(user.id)
+    return {"items": items, "total": len(items)}
+
+
+@router.delete("/{path_id}")
+async def delete_path(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Delete (archive) a learning path."""
+    service = PathService(db)
+    await service.delete_path(path_id, user.id)
+    return {"status": "deleted"}
+
+
 @router.get("/{path_id}")
 async def get_path(
     path_id: str,

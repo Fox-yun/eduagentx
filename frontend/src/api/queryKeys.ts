@@ -12,6 +12,8 @@ export const queryKeys = {
 
   resume: () => ["learning", "resume"] as const,
 
+  paths: () => ["learning-paths"] as const,
+
   goal: (goalId: string) => ["learning-goal", goalId] as const,
 
   diagnostic: (goalId: string) => ["diagnostic", goalId] as const,

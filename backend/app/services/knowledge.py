@@ -84,6 +84,7 @@ class KnowledgeService:
         )
         self.db.add(doc)
         await self.db.flush()
+        await self.db.commit()
         return doc
 
     async def get_document(
@@ -177,6 +178,7 @@ class KnowledgeService:
         doc.status = "deleted"
         doc.operation_status = "idle"
         await self.db.flush()
+        await self.db.commit()
 
     async def update_document_status(
         self,
@@ -205,6 +207,7 @@ class KnowledgeService:
             doc.error = error
 
         await self.db.flush()
+        await self.db.commit()
         return doc
 
     async def add_chunks(
@@ -239,6 +242,7 @@ class KnowledgeService:
             created_chunks.append(chunk)
 
         await self.db.flush()
+        await self.db.commit()
         return created_chunks
 
     async def search(

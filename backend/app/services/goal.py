@@ -52,6 +52,7 @@ class GoalService:
         )
         self.db.add(goal)
         await self.db.flush()
+        await self.db.commit()
 
         return {
             "goal": goal,
@@ -141,6 +142,7 @@ class GoalService:
                 setattr(goal, key, value)
 
         await self.db.flush()
+        await self.db.commit()
         return goal
 
     async def transition_goal(
@@ -163,8 +165,12 @@ class GoalService:
         goal.status = target_status
         if task_id:
             goal.active_task_id = task_id
+        elif target_status in ("ready", "active", "completed"):
+            # Clear stale task reference when goal reaches a stable state
+            goal.active_task_id = None
 
         await self.db.flush()
+        await self.db.commit()
         return goal
 
     async def delete_goal(self, goal_id: str, user_id: str) -> None:
@@ -172,3 +178,4 @@ class GoalService:
         goal = await self.get_goal(goal_id, user_id)
         goal.status = "archived"
         await self.db.flush()
+        await self.db.commit()

@@ -30,6 +30,7 @@ export function mapLearningGoal(dto: LearningGoalDto): LearningGoalModel {
     status: dto.status,
     nextStep: dto.next_step,
     activeTaskId: dto.active_task_id,
+    currentPathId: dto.current_path_id || null,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };

@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
 
     # Include routers
     from app.routers.auth import router as auth_router
+    from app.routers.chat import router as chat_router
     from app.routers.clarifications import router as clarifications_router
     from app.routers.diagnostics import router as diagnostics_router
     from app.routers.goals import router as goals_router
@@ -89,7 +90,25 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
     app.include_router(paths_router, prefix="/api/learning-paths", tags=["paths"])
     app.include_router(units_router, prefix="/api/learning-paths", tags=["units"])
+    app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+
+    # Assessment submit uses a different prefix than other unit routes
+    from app.routers.units import submit_assessment
+
+    app.add_api_route(
+        "/api/assessments/{assessment_id}/submit",
+        submit_assessment,
+        methods=["POST"],
+        tags=["units"],
+    )
+
     app.include_router(knowledge_router, prefix="/api/knowledge", tags=["knowledge"])
+
+    # E2E test routes — only with explicit opt-in via Settings AND test environment
+    if settings.app_env == "test" and settings.enable_e2e_routes:
+        from app.routers.e2e import router as e2e_router
+
+        app.include_router(e2e_router)
 
     return app
 

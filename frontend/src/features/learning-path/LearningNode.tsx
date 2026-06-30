@@ -136,14 +136,14 @@ export function LearningNode({ id, data }: LearningNodeProps) {
       {/* React Flow Connection Handles */}
       <Handle
         type="target"
-        position={Position.Top}
-        id="target-top"
+        position={Position.Left}
+        id="target-left"
         className="w-1.5 h-1.5 !bg-border-strong border-none pointer-events-none"
       />
       <Handle
         type="source"
-        position={Position.Bottom}
-        id="source-bottom"
+        position={Position.Right}
+        id="source-right"
         className="w-1.5 h-1.5 !bg-border-strong border-none pointer-events-none"
       />
     </div>

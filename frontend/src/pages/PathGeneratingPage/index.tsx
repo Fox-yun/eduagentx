@@ -51,6 +51,17 @@ export function PathGeneratingPage() {
     }
   }, [taskStatus, pathId, navigate, toast, queryClient, goalId]);
 
+  // Fallback: if goal already reached "ready" or "active" but task stream missed the event,
+  // check goal status periodically and navigate via current_path_id
+  useEffect(() => {
+    if (goalData?.status === "ready" && goalData?.currentPathId) {
+      navigate(appRoutes.pathReview(goalData.currentPathId), { replace: true });
+    }
+    if (goalData?.status === "active" && goalData?.currentPathId) {
+      navigate(appRoutes.learningPath(goalData.currentPathId), { replace: true });
+    }
+  }, [goalData?.status, goalData?.currentPathId, navigate]);
+
   const handleRetry = () => {
     // Navigate back to edit target goal or refresh
     navigate(appRoutes.goalCreate());
@@ -98,6 +109,24 @@ export function PathGeneratingPage() {
                     已自动切换至后台进度轮询模式
                   </span>
                 )}
+              </div>
+
+              {/* Cancel / Back during loading */}
+              <div className="flex justify-between items-center border-t border-border/60 pt-4">
+                <button
+                  onClick={handleRetry}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-border hover:bg-page text-xs font-semibold text-ink transition-colors cursor-pointer"
+                >
+                  <CornerUpLeft className="h-3.5 w-3.5 text-muted" />
+                  返回修改目标
+                </button>
+                <button
+                  onClick={() => navigate(appRoutes.home())}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
+                >
+                  返回首页
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
           )}

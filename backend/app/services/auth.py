@@ -26,9 +26,18 @@ from app.core.security import (
     validate_password_strength,
     verify_password,
 )
+from app.models.outbox import OutboxEvent
 from app.models.user import AuthAuditLog, AuthSession, RefreshToken, User, UserProfile, VerificationToken
+from app.services.email import encrypt_email_payload
 
 logger = structlog.get_logger()
+
+
+def _safe_int_setting(settings_obj: Any, name: str, default: int) -> int:
+    val = getattr(settings_obj, name, default)
+    if isinstance(val, (int, float)):
+        return int(val)
+    return default
 
 
 class AuthService:
@@ -49,20 +58,27 @@ class AuthService:
         validate_password_strength(password)
 
         email_normalized = normalize_email(email)
+        settings = get_settings()
 
         # Check for existing user
         existing = await self.db.execute(select(User).where(User.email_normalized == email_normalized))
         if existing.scalar_one_or_none():
             raise ApiError(code="EMAIL_EXISTS", message="An account with this email already exists", status_code=409)
 
-        # Create user
+        # Email auto verify setting
+        email_auto_verify_val = getattr(settings, "email_auto_verify", False)
+        if isinstance(email_auto_verify_val, bool):
+            auto_verify = email_auto_verify_val
+        else:
+            auto_verify = settings.app_env in ("development", "test")
         user = User(
             id=str(uuid.uuid4()),
             email=email.strip(),
             email_normalized=email_normalized,
             display_name=display_name.strip(),
             password_hash=hash_password(password),
-            status=UserStatus.PENDING_VERIFICATION.value,
+            status=UserStatus.ACTIVE.value if auto_verify else UserStatus.PENDING_VERIFICATION.value,
+            email_verified_at=utc_now() if auto_verify else None,
         )
         self.db.add(user)
 
@@ -70,27 +86,233 @@ class AuthService:
         profile = UserProfile(user_id=user.id)
         self.db.add(profile)
 
-        # Create verification token
-        token = generate_token()
-        verification = VerificationToken(
-            id=str(uuid.uuid4()),
-            user_id=user.id,
-            purpose="email_verification",
-            token_hash=hash_token(token),
-            expires_at=utc_now() + timedelta(hours=24),
-        )
-        self.db.add(verification)
+        # Create verification token & outbox event
+        token = None
+        if not auto_verify:
+            import secrets
 
-        # Audit log
-        self._add_audit_log(user.id, "register", ip_address, user_agent)
+            token = secrets.token_urlsafe(32)
+            verify_ttl = _safe_int_setting(settings, "email_verification_ttl_seconds", 86400)
+            verification = VerificationToken(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                purpose="email_verification",
+                token_hash=hash_token(token),
+                expires_at=utc_now() + timedelta(seconds=verify_ttl),
+            )
+            self.db.add(verification)
 
+            outbox_event = OutboxEvent(
+                id=str(uuid.uuid4()),
+                event_type="email.verification.send",
+                aggregate_type="User",
+                aggregate_id=user.id,
+                payload={
+                    "recipient": user.email,
+                    "to_name": user.display_name,
+                    "encrypted_data": encrypt_email_payload({"token": token, "user_id": user.id}),
+                },
+            )
+            self.db.add(outbox_event)
+
+        # Flush to persist user before adding audit log (FK constraint)
         await self.db.flush()
+
+        # Audit log (after user exists in DB)
+        self._add_audit_log(user.id, "register", ip_address, user_agent)
+        await self.db.flush()
+        await self.db.commit()
 
         return {
             "user": user,
             "verification_token": token,
-            "next_step": "verify_email",
+            "next_step": "login" if auto_verify else "verify_email",
         }
+
+    async def resend_verification(
+        self,
+        user_id: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, str]:
+        """Resend email verification for pending user."""
+        import secrets
+
+        from app.core.rate_limit import check_rate_limit
+
+        settings = get_settings()
+        user_result = await self.db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        if user and user.status == UserStatus.PENDING_VERIFICATION.value and user.email_verified_at is None:
+            await check_rate_limit("resend_verification", user.email, max_requests=1, window_seconds=60)
+
+            await self.db.execute(
+                update(VerificationToken)
+                .where(
+                    VerificationToken.user_id == user.id,
+                    VerificationToken.purpose == "email_verification",
+                    VerificationToken.used_at.is_(None),
+                )
+                .values(used_at=utc_now())
+            )
+
+            token = secrets.token_urlsafe(32)
+            verify_ttl = _safe_int_setting(settings, "email_verification_ttl_seconds", 86400)
+            verification = VerificationToken(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                purpose="email_verification",
+                token_hash=hash_token(token),
+                expires_at=utc_now() + timedelta(seconds=verify_ttl),
+            )
+            self.db.add(verification)
+
+            outbox_event = OutboxEvent(
+                id=str(uuid.uuid4()),
+                event_type="email.verification.send",
+                aggregate_type="User",
+                aggregate_id=user.id,
+                payload={
+                    "recipient": user.email,
+                    "to_name": user.display_name,
+                    "encrypted_data": encrypt_email_payload({"token": token, "user_id": user.id}),
+                },
+            )
+            self.db.add(outbox_event)
+            self._add_audit_log(user.id, "verification_resent", ip_address, user_agent)
+            await self.db.flush()
+            await self.db.commit()
+
+        return {"message": "If an account exists and requires verification, a new verification email has been sent"}
+
+    async def request_password_reset(
+        self,
+        email: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, str]:
+        """Request a password reset email. Does not leak email existence."""
+        import secrets
+
+        from app.core.rate_limit import check_rate_limit
+
+        email_norm = normalize_email(email)
+        await check_rate_limit("forgot_password", email_norm, max_requests=1, window_seconds=60)
+        settings = get_settings()
+
+        user_result = await self.db.execute(select(User).where(User.email_normalized == email_norm))
+        user = user_result.scalar_one_or_none()
+
+        if user and user.status not in (UserStatus.DELETED.value, UserStatus.DISABLED.value):
+            await self.db.execute(
+                update(VerificationToken)
+                .where(
+                    VerificationToken.user_id == user.id,
+                    VerificationToken.purpose == "password_reset",
+                    VerificationToken.used_at.is_(None),
+                )
+                .values(used_at=utc_now())
+            )
+
+            token = secrets.token_urlsafe(32)
+            reset_ttl = _safe_int_setting(settings, "password_reset_ttl_seconds", 1800)
+            reset_token_record = VerificationToken(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                purpose="password_reset",
+                token_hash=hash_token(token),
+                expires_at=utc_now() + timedelta(seconds=reset_ttl),
+            )
+            self.db.add(reset_token_record)
+
+            outbox_event = OutboxEvent(
+                id=str(uuid.uuid4()),
+                event_type="email.password_reset.send",
+                aggregate_type="User",
+                aggregate_id=user.id,
+                payload={
+                    "recipient": user.email,
+                    "to_name": user.display_name,
+                    "encrypted_data": encrypt_email_payload({"token": token, "user_id": user.id}),
+                },
+            )
+            self.db.add(outbox_event)
+            self._add_audit_log(user.id, "password_reset_requested", ip_address, user_agent)
+            await self.db.flush()
+            await self.db.commit()
+
+        return {"message": "If an account exists, a password reset email has been sent"}
+
+    async def reset_password(
+        self,
+        token: str,
+        new_password: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """Reset user password using token and revoke all existing sessions."""
+        from app.core.rate_limit import check_rate_limit
+
+        if ip_address:
+            await check_rate_limit("reset_password_ip", ip_address, max_requests=20, window_seconds=3600)
+
+        validate_password_strength(new_password)
+        token_h = hash_token(token)
+
+        result = await self.db.execute(
+            select(VerificationToken)
+            .where(
+                VerificationToken.token_hash == token_h,
+                VerificationToken.purpose == "password_reset",
+                VerificationToken.used_at.is_(None),
+            )
+            .with_for_update()
+        )
+        verification = result.scalar_one_or_none()
+
+        if not verification or verification.expires_at < utc_now():
+            raise ApiError(code="INVALID_TOKEN", message="Invalid or expired reset token", status_code=400)
+
+        verification.used_at = utc_now()
+
+        user_result = await self.db.execute(select(User).where(User.id == verification.user_id))
+        user = user_result.scalar_one_or_none()
+        if not user or user.status in (UserStatus.DELETED.value, UserStatus.DISABLED.value):
+            raise ApiError(code="USER_NOT_FOUND", message="User account is unavailable", status_code=400)
+
+        user.password_hash = hash_password(new_password)
+        if user.status == UserStatus.LOCKED.value:
+            user.status = UserStatus.ACTIVE.value
+            user.failed_login_count = 0
+            user.locked_until = None
+
+        now = utc_now()
+        sessions_result = await self.db.execute(
+            select(AuthSession.id).where(
+                AuthSession.user_id == user.id,
+                AuthSession.revoked_at.is_(None),
+            )
+        )
+        session_ids = [row[0] for row in sessions_result.all()]
+        if session_ids:
+            await self.db.execute(
+                update(RefreshToken)
+                .where(
+                    RefreshToken.session_id.in_(session_ids),
+                    RefreshToken.revoked_at.is_(None),
+                )
+                .values(revoked_at=now, revoke_reason="password_reset")
+            )
+        await self.db.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+            .values(revoked_at=now, revoke_reason="password_reset")
+        )
+
+        self._add_audit_log(user.id, "password_reset_success", ip_address, user_agent)
+        await self.db.flush()
+        await self.db.commit()
 
     async def verify_email(self, token: str) -> User:
         """Verify a user's email address."""
@@ -125,6 +347,7 @@ class AuthService:
 
         self._add_audit_log(user.id, "email_verified")
         await self.db.flush()
+        await self.db.commit()
 
         return user
 
@@ -134,8 +357,14 @@ class AuthService:
         password: str,
         ip_address: str | None = None,
         user_agent: str | None = None,
+        remember_me: bool = False,
     ) -> dict[str, Any]:
-        """Authenticate a user and create a session."""
+        """Authenticate a user and create a session.
+
+        Args:
+            remember_me: If True, use persistent session (30 days).
+                        If False, use short session (24 hours).
+        """
         email_normalized = normalize_email(email)
 
         result = await self.db.execute(select(User).where(User.email_normalized == email_normalized))
@@ -151,7 +380,9 @@ class AuthService:
                     user.status = UserStatus.LOCKED.value
                     self._add_audit_log(user.id, "account_locked", ip_address, user_agent)
                 self._add_audit_log(user.id, "login_failed", ip_address, user_agent)
-            await self.db.flush()
+                # Commit security side-effect before raising error
+                await self.db.flush()
+                await self.db.commit()
             raise ApiError(code="INVALID_CREDENTIALS", message="Invalid email or password", status_code=401)
 
         # Check account status
@@ -183,6 +414,10 @@ class AuthService:
         family_id = str(uuid.uuid4())
         refresh_token = generate_token()
 
+        # Persistent session (remember_me) uses full refresh TTL;
+        # short session uses 24 hours
+        session_ttl = settings.refresh_token_ttl_seconds if remember_me else 86400
+
         session = AuthSession(
             id=str(uuid.uuid4()),
             user_id=user.id,
@@ -191,9 +426,12 @@ class AuthService:
             token_family_id=family_id,
             user_agent=user_agent,
             ip_address=ip_address,
-            expires_at=utc_now() + timedelta(seconds=settings.refresh_token_ttl_seconds),
+            expires_at=utc_now() + timedelta(seconds=session_ttl),
         )
         self.db.add(session)
+
+        # Flush session before adding refresh token (FK constraint)
+        await self.db.flush()
 
         # Create refresh token record
         now = utc_now()
@@ -204,7 +442,7 @@ class AuthService:
             token_hash=hash_token(refresh_token),
             jti=jti,
             issued_at=now,
-            expires_at=now + timedelta(seconds=settings.refresh_token_ttl_seconds),
+            expires_at=now + timedelta(seconds=session_ttl),
         )
         self.db.add(refresh_token_record)
 
@@ -214,6 +452,7 @@ class AuthService:
 
         self._add_audit_log(user.id, "login_success", ip_address, user_agent, session.id)
         await self.db.flush()
+        await self.db.commit()
 
         return {
             "user": user,
@@ -263,8 +502,9 @@ class AuthService:
 
         # Check for reuse detection - if token was already used, it's a reuse attack
         if token_record.used_at is not None:
-            # Token reuse detected! Revoke entire token family
+            # Token reuse detected! Revoke entire token family and commit before raising
             await self._handle_token_reuse(token_record)
+            await self.db.commit()
             raise ApiError(code="REFRESH_TOKEN_REUSE", message="Token reuse detected", status_code=401)
 
         # Get the session
@@ -315,6 +555,7 @@ class AuthService:
 
         self._add_audit_log(session.user_id, "refresh", ip_address, user_agent, session.id)
         await self.db.flush()
+        await self.db.commit()
 
         return {
             "access_token": access_token,
@@ -357,6 +598,7 @@ class AuthService:
             session.revoke_reason = "logout"
             self._add_audit_log(user_id, "logout", ip_address, user_agent, session_id)
             await self.db.flush()
+            await self.db.commit()
 
     async def logout_all(
         self,
@@ -395,6 +637,7 @@ class AuthService:
         )
         self._add_audit_log(user_id, "logout_all", ip_address, user_agent)
         await self.db.flush()
+        await self.db.commit()
 
     async def _handle_token_reuse(self, token_record: RefreshToken) -> None:
         """Handle detected token reuse by revoking the entire token family.

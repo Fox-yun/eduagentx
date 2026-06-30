@@ -5,6 +5,9 @@ import {
   AssessmentModel,
   AssessmentSubmitResponseDto,
   AssessmentSubmitResultModel,
+  PracticeSetDto,
+  PracticeQuestionModel,
+  LectureModel,
 } from "../schemas/units";
 
 export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
@@ -84,6 +87,57 @@ export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
     })),
     content: content.trim() || null,
     error: dto.error || null,
+    lecture: mapLecture((dto as any).lecture),
+    activeLectureTaskId: (dto as any).active_lecture_task_id || null,
+  };
+}
+
+function mapLecture(lectureData: any): LectureModel | null {
+  if (!lectureData) return null;
+
+  // Build combined lecture markdown
+  let lectureContent = "";
+  if (lectureData.introduction) {
+    lectureContent += `${lectureData.introduction}\n\n`;
+  }
+  if (lectureData.sections?.length > 0) {
+    const sortedSections = [...lectureData.sections].sort((a: any, b: any) => a.order - b.order);
+    sortedSections.forEach((sec: any) => {
+      lectureContent += `# ${sec.title}\n\n${sec.content}\n\n`;
+    });
+  }
+  if (lectureData.key_takeaways?.length > 0) {
+    lectureContent += `## 核心要点\n\n`;
+    lectureData.key_takeaways.forEach((t: string) => {
+      lectureContent += `* ${t}\n`;
+    });
+    lectureContent += `\n`;
+  }
+  if (lectureData.common_mistakes?.length > 0) {
+    lectureContent += `## 常见误区\n\n`;
+    lectureData.common_mistakes.forEach((m: any) => {
+      lectureContent += `### ❌ ${m.mistake}\n${m.explanation}\n\n`;
+    });
+  }
+  if (lectureData.summary) {
+    lectureContent += `## 总结\n\n${lectureData.summary}\n\n`;
+  }
+
+  return {
+    introduction: lectureData.introduction || null,
+    sections: (lectureData.sections || []).map((s: any) => ({
+      sectionId: s.section_id,
+      title: s.title,
+      content: s.content,
+      order: s.order,
+    })),
+    keyTakeaways: lectureData.key_takeaways || [],
+    commonMistakes: (lectureData.common_mistakes || []).map((m: any) => ({
+      mistake: m.mistake,
+      explanation: m.explanation,
+    })),
+    summary: lectureData.summary || null,
+    content: lectureContent.trim() || null,
   };
 }
 
@@ -95,14 +149,14 @@ export function mapAssessment(dto: AssessmentDto): AssessmentModel {
     nodeId: dto.node_id,
     status: dto.status,
     questions: dto.questions.map((q) => {
-      const base: { id: string; type: typeof q.type; text: string; options?: string[]; language?: string; codeSnippet?: string } = {
+      const base: { id: string; type: typeof q.type; text: string; options?: {value: string; label: string}[]; language?: string; codeSnippet?: string } = {
         id: q.question_id,
         type: q.type,
         text: q.prompt,
       };
 
       if (q.type === "single_choice" || q.type === "multiple_choice") {
-        base.options = q.options.map((o) => typeof o === "string" ? o : o.value);
+        base.options = q.options.map((o) => typeof o === "string" ? {value: o, label: o} : {value: o.value, label: o.label});
       }
 
       if (q.type === "code_text") {
@@ -131,4 +185,16 @@ export function mapAssessmentSubmitResponse(
     feedback: dto.feedback || null,
     masteryDelta: dto.mastery_delta || null,
   };
+}
+
+export function mapPracticeQuestions(dto: PracticeSetDto): PracticeQuestionModel[] {
+  return dto.questions.map((q) => ({
+    id: q.question_id,
+    type: q.type as PracticeQuestionModel["type"],
+    text: q.prompt,
+    options: q.options
+      ? q.options.map((o) => (typeof o === "string" ? {value: o, label: o} : {value: o.value, label: o.label}))
+      : undefined,
+    correctAnswer: q.correct_answer || null,
+  }));
 }

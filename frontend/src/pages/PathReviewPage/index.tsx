@@ -3,9 +3,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLearningPath, activateLearningPath, submitPathRevision } from "../../api/paths";
 import { getLearningGoal } from "../../api/goals";
+import { getTask } from "../../api/tasks";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
 import { useTaskStream } from "../../api/taskStream";
+import { isTerminalTaskStatus } from "../../features/tasks/taskEventPolicy";
 import { useToast } from "../../components/feedback/Toast";
 import { AppShell } from "../../components/layout/AppShell";
 import { LearningGraph } from "../../features/learning-path/LearningGraph";
@@ -51,8 +53,20 @@ export function PathReviewPage() {
     enabled: !!pathData?.goalId,
   });
 
+  // Verify the goal's activeTaskId is actually still running.
+  // After path generation completes, the goal may still reference the old task.
+  const goalActiveTaskId = goalData?.activeTaskId || null;
+  const { data: goalTaskStatus } = useQuery({
+    queryKey: ["task-status-check", goalActiveTaskId],
+    queryFn: ({ signal }) => getTask(goalActiveTaskId!, signal),
+    enabled: !!goalActiveTaskId && !localActiveTaskId,
+    staleTime: 10_000,
+  });
+  const isGoalTaskTerminal = goalTaskStatus ? isTerminalTaskStatus(goalTaskStatus.status) : false;
+
   // Task stream connection (handles both newly started and recovered tasks)
-  const activeTaskId = localActiveTaskId || goalData?.activeTaskId || null;
+  // Ignore goalData.activeTaskId if that task is already terminal
+  const activeTaskId = localActiveTaskId || (isGoalTaskTerminal ? null : goalActiveTaskId) || null;
 
   const {
     progress,
@@ -61,6 +75,9 @@ export function PathReviewPage() {
     status: taskStatus,
     error: taskError,
   } = useTaskStream(activeTaskId);
+
+  // Only treat as "task running" when active + not yet terminal
+  const isTaskRunning = !!activeTaskId && !isTerminalTaskStatus(taskStatus);
 
   // If a regeneration task finishes successfully, reset activeTaskId and refetch graph
   useEffect(() => {
@@ -79,6 +96,10 @@ export function PathReviewPage() {
     onSuccess: () => {
       toast("学习路径已成功激活！", "success");
       queryClient.invalidateQueries({ queryKey: queryKeys.resume() });
+      if (pathData?.goalId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.goal(pathData.goalId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.paths() });
       navigate(appRoutes.home());
     },
     onError: (err: any) => {
@@ -163,7 +184,7 @@ export function PathReviewPage() {
           <div className="flex items-center gap-2.5">
             <button
               onClick={() => navigate(appRoutes.goalCreate())}
-              disabled={isActivating || !!activeTaskId}
+              disabled={isActivating || isTaskRunning}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-page text-xs font-semibold text-ink transition-colors cursor-pointer disabled:opacity-50"
             >
               <CornerUpLeft className="h-3.5 w-3.5 text-muted" />
@@ -171,7 +192,7 @@ export function PathReviewPage() {
             </button>
             <button
               onClick={() => setIsRevisionOpen(true)}
-              disabled={isActivating || !!activeTaskId}
+              disabled={isActivating || isTaskRunning}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 hover:bg-primary-soft/10 text-xs font-semibold text-primary transition-colors cursor-pointer disabled:opacity-50"
             >
               <FileEdit className="h-3.5 w-3.5 text-primary" />
@@ -179,7 +200,7 @@ export function PathReviewPage() {
             </button>
             <button
               onClick={() => performActivate()}
-              disabled={isActivating || !!activeTaskId}
+              disabled={isActivating || isTaskRunning}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-50"
             >
               {isActivating ? (
@@ -257,7 +278,7 @@ export function PathReviewPage() {
         </div>
 
         {/* Task stream active regenerating overlay */}
-        {!!activeTaskId && (
+        {isTaskRunning && (
           <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
             <div className="w-full max-w-xl bg-panel border border-border rounded-2xl shadow-card p-6 flex flex-col gap-5 select-none">
               <div className="flex flex-col gap-1 border-b border-border/60 pb-3">

@@ -93,12 +93,32 @@ export const PathVersionDtoSchema = z.object({
 
 export const PathVersionListDtoSchema = createCursorPageSchema(PathVersionDtoSchema);
 
+export const PathListItemDtoSchema = z.object({
+  path_id: z.string(),
+  goal_id: z.string(),
+  title: z.string(),
+  status: z.string(),
+  progress: z.number().int().min(0).max(100),
+  completed_nodes: z.number().int().nonnegative(),
+  total_nodes: z.number().int().nonnegative(),
+  estimated_minutes: z.number().int().nonnegative(),
+  created_at: IsoDateTimeSchema,
+  updated_at: IsoDateTimeSchema,
+});
+
+export const PathListResponseDtoSchema = z.object({
+  items: z.array(PathListItemDtoSchema),
+  total: z.number().int().nonnegative(),
+});
+
 export type StageDto = z.infer<typeof StageDtoSchema>;
 export type LearningNodeDto = z.infer<typeof LearningNodeDtoSchema>;
 export type LearningEdgeDto = z.infer<typeof LearningEdgeDtoSchema>;
 export type LearningPathDto = z.infer<typeof LearningPathDtoSchema>;
 export type PathVersionDto = z.infer<typeof PathVersionDtoSchema>;
 export type PathVersionListDto = z.infer<typeof PathVersionListDtoSchema>;
+export type PathListItemDto = z.infer<typeof PathListItemDtoSchema>;
+export type PathListResponseDto = z.infer<typeof PathListResponseDtoSchema>;
 
 export interface StageModel {
   stageId: string;
@@ -120,4 +140,17 @@ export interface PathVersionModel {
   criticScore: number | null;
   createdAt: string;
   activatedAt: string | null;
+}
+
+export interface PathListItem {
+  pathId: string;
+  goalId: string;
+  title: string;
+  status: string;
+  progress: number;
+  completedNodes: number;
+  totalNodes: number;
+  estimatedMinutes: number;
+  createdAt: string;
+  updatedAt: string;
 }

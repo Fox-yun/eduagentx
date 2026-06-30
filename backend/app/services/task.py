@@ -65,6 +65,7 @@ class TaskService:
         await self._publish_to_outbox(task)
 
         await self.db.flush()
+        await self.db.commit()
         return task
 
     async def get_task(self, task_id: str, user_id: str) -> BackgroundTask:
@@ -157,39 +158,19 @@ class TaskService:
                 status_code=400,
             )
 
-        task.status = target_status
-        if progress is not None:
-            task.progress = progress
-        if stage is not None:
-            task.current_stage = stage
-        if message is not None:
-            task.message = message
-        if result is not None:
-            task.result = result
-        if error_code is not None:
-            task.error_code = error_code
-        if error_message is not None:
-            task.error_message = error_message
+        from app.workers.task_runtime import update_task_status as _transition_task
 
-        # Set timestamps for terminal states
-        if target_status in TERMINAL_TASK_STATUSES:
-            task.completed_at = utc_now()
-        if target_status == TaskStatus.RUNNING.value:
-            task.started_at = utc_now()
-
-        # Get next sequence number
-        seq_result = await self.db.execute(
-            select(func.max(TaskEvent.sequence_number)).where(TaskEvent.task_id == task_id)
+        return await _transition_task(
+            self.db,
+            task_id,
+            target_status,
+            progress=progress,
+            stage=stage,
+            message=message,
+            result=result,
+            error_code=error_code,
+            error_message=error_message,
         )
-        next_seq = (seq_result.scalar() or 0) + 1
-
-        # Determine event type
-        event_type = self._status_to_event_type(target_status)
-
-        await self._add_event(task_id, next_seq, event_type, target_status, task.progress, task.message, task.result)
-
-        await self.db.flush()
-        return task
 
     async def cancel_task(self, task_id: str, user_id: str) -> BackgroundTask:
         """Request task cancellation."""
@@ -245,14 +226,25 @@ class TaskService:
         return event
 
     async def _publish_to_outbox(self, task: BackgroundTask) -> None:
-        """Publish task to outbox for worker pickup."""
-        try:
-            from app.core.redis import get_redis
+        """Write outbox event for reliable delivery via outbox publisher.
 
-            redis = get_redis()
-            await redis.lpush("task:pending", task.id)
-        except Exception:
-            logger.warning("outbox_publish_failed", task_id=task.id, exc_info=True)
+        The event is written in the same transaction as the task creation,
+        ensuring no task is lost even if the broker is temporarily unavailable.
+        """
+        import json
+
+        from app.models.outbox import OutboxEvent
+
+        outbox = OutboxEvent(
+            id=str(uuid.uuid4()),
+            event_type="task.execute",
+            aggregate_type="BackgroundTask",
+            aggregate_id=task.id,
+            payload=json.dumps({"task_id": task.id, "task_type": task.task_type}),
+            status="pending",
+        )
+        self.db.add(outbox)
+        logger.info("outbox_event_created", task_id=task.id, task_type=task.task_type)
 
     def _status_to_event_type(self, status: str) -> str:
         """Map task status to event type."""

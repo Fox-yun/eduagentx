@@ -48,7 +48,7 @@ test.describe("Real HTTP Token Refresh E2E Tests", () => {
     await page.waitForURL("**/");
 
     // 2. Expire token and reset counters on server
-    await page.request.post("http://127.0.0.1:8000/__test__/expire-access");
+    await page.request.post("http://127.0.0.1:8001/__test__/expire-access");
 
     // 3. Simultaneously fire multiple business API requests which will receive 401 and trigger refresh
     const result = await page.evaluate(async () => {
@@ -66,7 +66,7 @@ test.describe("Real HTTP Token Refresh E2E Tests", () => {
     expect(result.success).toBe(true);
 
     // 4. Verify refresh-count on server is exactly 1
-    const r = await page.request.get("http://127.0.0.1:8000/__test__/refresh-count");
+    const r = await page.request.get("http://127.0.0.1:8001/__test__/refresh-count");
     const d = await r.json();
     const count = d.count;
 

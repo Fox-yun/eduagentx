@@ -31,6 +31,7 @@ class TaskType(enum.StrEnum):
     LEARNING_PATH_ADAPTATION = "learning_path_adaptation"
     KNOWLEDGE_INDEX = "knowledge_index"
     KNOWLEDGE_REINDEX = "knowledge_reindex"
+    LEARNING_LECTURE_GENERATION = "learning_lecture_generation"
 
 
 class TaskEventType(enum.StrEnum):

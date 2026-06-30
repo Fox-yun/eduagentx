@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install
 COPY pyproject.toml .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip \
+    && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple ".[worker]"
 
 # Stage 2: Production image
 FROM python:3.12-slim
@@ -32,8 +32,8 @@ COPY app/ app/
 COPY alembic/ alembic/
 COPY alembic.ini .
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser
+# Create non-root user and set permissions
+RUN useradd --create-home --shell /bin/bash appuser && chown -R appuser:appuser /app
 USER appuser
 
 # Health check

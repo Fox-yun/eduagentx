@@ -1,6 +1,6 @@
 import http from "http";
 
-const PORT = 8000;
+const PORT = 8001;
 
 // Simple cookie parser helper
 function parseCookies(cookieHeader) {
@@ -149,6 +149,28 @@ const server = http.createServer((req, res) => {
         email_verified: true,
         onboarding_completed: true,
         status: "active",
+      }));
+      return;
+    }
+
+    // 3b. POST /api/auth/register
+    if (path === "/api/auth/register" && method === "POST") {
+      if (!parsedBody.email || !parsedBody.password || !parsedBody.display_name) {
+        sendError(res, 400, "BAD_REQUEST", "email, password, display_name required");
+        return;
+      }
+      // In mock, always auto-verify → next_step=login
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        next_step: "login",
+        user: {
+          user_id: `user-${Date.now()}`,
+          display_name: parsedBody.display_name,
+          email: parsedBody.email,
+          email_verified: true,
+          onboarding_completed: false,
+          status: "active",
+        },
       }));
       return;
     }

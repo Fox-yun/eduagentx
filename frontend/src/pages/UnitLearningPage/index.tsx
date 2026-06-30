@@ -8,10 +8,10 @@ import {
   getUnitContent,
   generateUnitContent,
   regenerateUnitContent,
-  createAssessment,
-  submitAssessment,
+  createPractice,
 } from "../../api/units";
-import type { AssessmentModel, AssessmentSubmitResultModel } from "../../schemas/units";
+import type { PracticeQuestionModel } from "../../schemas/units";
+import { sendTutorQuestion, type ChatMessage } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
 import { useTaskStream } from "../../api/taskStream";
@@ -28,8 +28,10 @@ import {
   CheckCircle,
   RotateCcw,
   ArrowLeft,
-  Lightbulb,
-  X,
+  PenTool,
+  RefreshCw,
+  MessageCircle,
+  Send,
 } from "lucide-react";
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -45,12 +47,18 @@ export function UnitLearningPage() {
   const [localActiveTaskId, setLocalActiveTaskId] = useState<string | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferenceText, setPreferenceText] = useState("");
-  
-  // Assessment state
-  const [quizOpen, setQuizOpen] = useState(false);
-  const [activeAssessment, setActiveAssessment] = useState<AssessmentModel | null>(null);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, string | string[] | null>>({});
-  const [assessmentResult, setAssessmentResult] = useState<AssessmentSubmitResultModel | null>(null);
+
+  // Practice state
+  const [practiceQuestions, setPracticeQuestions] = useState<PracticeQuestionModel[]>([]);
+  const [practiceAnswers, setPracticeAnswers] = useState<Record<string, string | string[] | null>>({});
+  const [practiceRevealed, setPracticeRevealed] = useState<Record<string, boolean>>({});
+  const [practiceOpen, setPracticeOpen] = useState(false);
+
+  // Tutor Q&A state
+  const [tutorOpen] = useState(true);
+  const [tutorInput, setTutorInput] = useState("");
+  const [tutorMessages, setTutorMessages] = useState<ChatMessage[]>([]);
+  const tutorEndRef = React.useRef<HTMLDivElement>(null);
 
   // Queries
   const { data: pathData } = useQuery({
@@ -118,57 +126,66 @@ export function UnitLearningPage() {
     },
   });
 
-  // Create Assessment mutation
-  const { mutate: performCreateAssessment, isPending: isCreatingAssessment } = useMutation({
-    mutationFn: () => createAssessment(pathId || "", nodeId || ""),
-    onSuccess: (res) => {
-      setActiveAssessment(res);
-      setQuizAnswers({});
-      setAssessmentResult(null);
-      setQuizOpen(true);
+  // Practice mutation
+  const { mutate: performLoadPractice, isPending: isLoadingPractice } = useMutation({
+    mutationFn: () => createPractice(pathId || "", nodeId || ""),
+    onSuccess: (questions) => {
+      setPracticeQuestions(questions);
+      setPracticeAnswers({});
+      setPracticeRevealed({});
+      setPracticeOpen(true);
     },
     onError: (err: unknown) => {
-      toast(getErrorMessage(err, "创建通关评估失败，请重试"), "error");
+      toast(getErrorMessage(err, "加载练习题失败，请重试"), "error");
     },
   });
 
-  // Submit Assessment mutation
-  const { mutate: performSubmitAssessment, isPending: isSubmittingAssessment } = useMutation({
-    mutationFn: (answers: Record<string, string | string[] | null>) =>
-      submitAssessment(activeAssessment?.assessmentId || "", answers),
-    onSuccess: (res) => {
-      setAssessmentResult(res);
-      toast(res.passed ? "恭喜，您已成功通关此节点！" : "评估未通过，建议重新学习本单元", res.passed ? "success" : "error");
-      queryClient.invalidateQueries({ queryKey: queryKeys.path(pathId || "") });
-      queryClient.invalidateQueries({ queryKey: queryKeys.resume() });
+  // Tutor Q&A mutation
+  const { mutate: performAskTutor, isPending: isTutorLoading } = useMutation({
+    mutationFn: (question: string) => sendTutorQuestion(pathId || "", nodeId || "", question),
+    onSuccess: (reply) => {
+      setTutorMessages((prev) => [...prev, reply]);
+      setTutorInput("");
     },
     onError: (err: unknown) => {
-      toast(getErrorMessage(err, "提交评估失败，请重试"), "error");
+      setTutorMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `抱歉，答疑出现错误：${getErrorMessage(err, "请重试")}` },
+      ]);
     },
   });
+
+  // Auto-scroll tutor messages
+  useEffect(() => {
+    tutorEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [tutorMessages, isTutorLoading]);
+
+  const handleTutorSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = tutorInput.trim();
+    if (!q) return;
+    setTutorMessages((prev) => [...prev, { role: "user", content: q }]);
+    performAskTutor(q);
+  };
+
+  const handlePracticeAnswer = (questionId: string, value: string) => {
+    setPracticeAnswers((prev) => ({ ...prev, [questionId]: value }));
+    setPracticeRevealed((prev) => ({ ...prev, [questionId]: true }));
+  };
+
+  const handlePracticeCheckbox = (questionId: string, option: string, checked: boolean) => {
+    const current = Array.isArray(practiceAnswers[questionId]) ? (practiceAnswers[questionId] as string[]) : [];
+    const next = checked ? [...current, option] : current.filter((o) => o !== option);
+    setPracticeAnswers((prev) => ({ ...prev, [questionId]: next }));
+  };
+
+  const handlePracticeMultiReveal = (questionId: string) => {
+    setPracticeRevealed((prev) => ({ ...prev, [questionId]: true }));
+  };
 
   const handlePreferencesSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     performRegenerate(preferenceText);
-  };
-
-  const handleQuizAnswerChange = (questionId: string, value: string | string[] | null) => {
-    setQuizAnswers((prev) => ({ ...prev, [questionId]: value }));
-  };
-
-  const handleQuizCheckboxChange = (questionId: string, option: string, checked: boolean) => {
-    const current = Array.isArray(quizAnswers[questionId]) ? (quizAnswers[questionId] as string[]) : [];
-    if (checked) {
-      setQuizAnswers((prev) => ({ ...prev, [questionId]: [...current, option] }));
-    } else {
-      setQuizAnswers((prev) => ({ ...prev, [questionId]: current.filter((o) => o !== option) }));
-    }
-  };
-
-  const handleQuizSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeAssessment) return;
-    performSubmitAssessment(quizAnswers);
   };
 
   if (unitStatus === "pending") {
@@ -211,7 +228,10 @@ export function UnitLearningPage() {
   return (
     <AppShell title={nodeObj?.title} courseName={pathData?.title}>
       <div className="flex-grow flex flex-col min-h-0 bg-page select-none overflow-y-auto font-sans items-center justify-start relative">
-        <div className="w-full max-w-4xl p-6 sm:p-8 md:p-12 flex flex-col gap-6">
+        <div className={`w-full p-6 sm:p-8 md:p-12 flex gap-6 ${tutorOpen ? "max-w-7xl" : "max-w-4xl flex-col"}`}>
+
+          {/* Left column: main content */}
+          <div className={`flex flex-col gap-6 ${tutorOpen ? "flex-1 min-w-0" : ""}`}>
           
           {/* Breadcrumb Navigation Header */}
           <div className="flex items-center justify-between border-b border-border/60 pb-4">
@@ -365,34 +385,235 @@ export function UnitLearningPage() {
                 </div>
               </article>
 
+              {/* Practice Section */}
+              {practiceOpen && (practiceQuestions.length > 0 || isLoadingPractice) && (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-6 flex flex-col gap-5">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <PenTool className="h-4 w-4 text-primary" />
+                      <h3 className="text-sm font-bold text-ink font-serif-cn">练习题</h3>
+                      <span className="text-[10px] text-muted">（即时反馈，可重复练习）</span>
+                    </div>
+                    <button
+                      onClick={() => performLoadPractice()}
+                      disabled={isLoadingPractice}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border hover:bg-page text-[10px] font-semibold text-muted cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isLoadingPractice ? "animate-spin" : ""}`} />
+                      换一批题目
+                    </button>
+                  </div>
+
+                  {/* Loading state for new questions */}
+                  {isLoadingPractice && (
+                    <div className="flex flex-col items-center justify-center gap-3 py-10">
+                      <div className="w-8 h-8 rounded-full border-3 border-primary-soft border-t-primary animate-spin" />
+                      <p className="text-xs text-muted font-semibold animate-pulse">新题目生成中...</p>
+                      <p className="text-[10px] text-muted-soft">智能体正在根据节点内容编写练习题</p>
+                    </div>
+                  )}
+
+                  {/* Question list — hidden during loading */}
+                  {!isLoadingPractice && practiceQuestions.map((q, idx) => {
+                    const revealed = practiceRevealed[q.id];
+                    const ans = practiceAnswers[q.id];
+
+                    return (
+                      <div key={q.id} className="p-4 bg-page/35 border border-border rounded-xl flex flex-col gap-3">
+                        <div className="text-xs font-bold text-ink flex items-start gap-1.5 leading-relaxed">
+                          <span className="text-primary font-mono">{idx + 1}.</span>
+                          <span>{q.text}</span>
+                        </div>
+
+                        {q.type === "single_choice" && q.options && (
+                          <div className="flex flex-col gap-2 pl-4">
+                            {q.options.map((option) => {
+                              const selected = ans === option.value;
+                              const optionCorrect = revealed && q.correctAnswer === option.value;
+                              const optionWrong = revealed && selected && !optionCorrect;
+                              return (
+                                <label
+                                  key={option.value}
+                                  className={`flex items-center gap-2.5 text-xs cursor-pointer font-medium rounded-lg px-2 py-1 transition-colors ${
+                                    optionCorrect ? "bg-success/10 text-success" :
+                                    optionWrong ? "bg-danger/10 text-danger" :
+                                    selected ? "bg-primary-soft/20" : "text-ink"
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`practice-${q.id}`}
+                                    value={option.value}
+                                    checked={selected}
+                                    onChange={() => handlePracticeAnswer(q.id, option.value)}
+                                    disabled={revealed}
+                                    className="w-4 h-4 text-primary focus:ring-primary border-border bg-panel"
+                                  />
+                                  {option.label}
+                                  {optionCorrect && <CheckCircle className="h-3.5 w-3.5 text-success ml-auto" />}
+                                  {optionWrong && <AlertCircle className="h-3.5 w-3.5 text-danger ml-auto" />}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {q.type === "multiple_choice" && q.options && (
+                          <div className="flex flex-col gap-2 pl-4">
+                            {q.options.map((option) => {
+                              const isChecked = Array.isArray(ans) && ans.includes(option.value);
+                              return (
+                                <label key={option.value} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => handlePracticeCheckbox(q.id, option.value, e.target.checked)}
+                                    disabled={revealed}
+                                    className="w-4 h-4 rounded text-primary focus:ring-primary border-border bg-panel"
+                                  />
+                                  {option.label}
+                                </label>
+                              );
+                            })}
+                            {!revealed && (
+                              <button
+                                onClick={() => handlePracticeMultiReveal(q.id)}
+                                className="self-start mt-1 px-3 py-1 text-[10px] font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary-soft/10 cursor-pointer"
+                              >
+                                查看答案
+                              </button>
+                            )}
+                            {revealed && q.correctAnswer && (
+                              <p className="text-[10px] text-success mt-1">
+                                ✅ 正确答案：{JSON.parse(q.correctAnswer).join(", ")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {q.type === "short_answer" && (
+                          <div className="pl-4 flex flex-col gap-2">
+                            <textarea
+                              rows={3}
+                              placeholder="请在此输入您的解答..."
+                              value={typeof ans === "string" ? ans : ""}
+                              onChange={(e) => setPracticeAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                              className="w-full px-3 py-2 bg-panel border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y"
+                            />
+                            {!revealed && (
+                              <button
+                                onClick={() => handlePracticeMultiReveal(q.id)}
+                                className="self-start px-3 py-1 text-[10px] font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary-soft/10 cursor-pointer"
+                              >
+                                查看参考思路
+                              </button>
+                            )}
+                            {revealed && (
+                              <p className="text-[10px] text-muted italic">💡 这是开放性题目，请结合自己的理解作答。</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Action buttons at bottom */}
               <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/60 pt-4">
-                <button
-                  onClick={() => setPreferencesOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border hover:bg-panel-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
-                >
-                  <RotateCcw className="h-3.5 w-3.5 text-muted" />
-                  提交偏好重新生成
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPreferencesOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border hover:bg-panel-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 text-muted" />
+                    提交偏好重新生成
+                  </button>
+                  <button
+                    onClick={() => performLoadPractice()}
+                    disabled={isLoadingPractice}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-primary/40 hover:bg-primary-soft/10 text-xs font-semibold text-primary transition-colors cursor-pointer"
+                  >
+                    {isLoadingPractice ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <PenTool className="h-3.5 w-3.5" />
+                    )}
+                    练习题
+                  </button>
+                </div>
 
                 <button
-                  onClick={() => performCreateAssessment()}
-                  disabled={isCreatingAssessment}
+                  onClick={() => navigate(appRoutes.assessment(pathId || "", nodeId || ""))}
                   className="inline-flex items-center gap-1.5 px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
                 >
-                  {isCreatingAssessment ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      正在创建评估...
-                    </>
-                  ) : (
-                    <>
-                      开始通关评估
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
+                  开始通关评估 (≥10题)
+                  <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
+
+            </div>
+          )}
+          </div>
+          {/* End left column */}
+
+          {/* Right sidebar: Tutor Q&A */}
+          {tutorOpen && (
+            <div className="w-[360px] shrink-0 bg-panel border border-border rounded-2xl shadow-card flex flex-col sticky top-6 max-h-[calc(100vh-120px)]">
+              <div className="flex items-center gap-2 px-5 py-4 border-b border-border/60 shrink-0">
+                <MessageCircle className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-bold text-ink font-serif-cn">答疑辅导</h3>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto flex flex-col gap-3 p-5 min-h-0">
+                {tutorMessages.length === 0 && (
+                  <div className="text-center py-8 text-xs text-muted">
+                    <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                    <p>关于「{nodeObj?.title || "本知识点"}」有什么疑问？</p>
+                    <p className="text-[10px] mt-1.5 leading-relaxed">例如：能举个具体例子吗？<br/>和前置节点有什么关联？</p>
+                  </div>
+                )}
+
+                {tutorMessages.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[90%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-white rounded-br-md" : "bg-page border border-border text-ink rounded-bl-md"}`}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p> }}>
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ))}
+
+                {isTutorLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-page border border-border px-3.5 py-2.5 rounded-2xl rounded-bl-md flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                      <span className="text-[11px] text-muted animate-pulse">思考中...</span>
+                    </div>
+                  </div>
+                )}
+                <div ref={tutorEndRef} />
+              </div>
+
+              {/* Input */}
+              <form onSubmit={handleTutorSubmit} className="flex gap-2 p-4 border-t border-border/60 shrink-0">
+                <input
+                  type="text"
+                  value={tutorInput}
+                  onChange={(e) => setTutorInput(e.target.value)}
+                  placeholder="输入你的问题..."
+                  disabled={isTutorLoading}
+                  className="flex-1 px-3 py-2.5 bg-page border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={!tutorInput.trim() || isTutorLoading}
+                  className="inline-flex items-center gap-1 px-3.5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold shadow transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </form>
             </div>
           )}
 
@@ -445,192 +666,6 @@ export function UnitLearningPage() {
         </div>
       )}
 
-      {/* Quiz Modal / Assessment Overlay */}
-      {quizOpen && activeAssessment && (
-        <div className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-6 overflow-y-auto select-none">
-          <div className="w-full max-w-2xl bg-panel border border-border rounded-2xl shadow-card p-8 flex flex-col gap-6 my-8 animate-scale-up">
-            
-            {/* Header */}
-            <div className="flex flex-col gap-1 border-b border-border/60 pb-4 relative">
-              <span className="text-[10px] font-bold text-primary flex items-center gap-1">
-                <Sparkles className="h-3.5 w-3.5" />
-                通关评测 (Node Assessment)
-              </span>
-              <h3 className="text-lg font-serif-cn font-bold text-ink">
-                测试挑战：{nodeObj?.title}
-              </h3>
-              {!assessmentResult && (
-                <button
-                  onClick={() => setQuizOpen(false)}
-                  className="absolute right-0 top-0 p-1.5 rounded-lg hover:bg-panel-soft text-muted hover:text-ink cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            {/* Quiz Body form */}
-            {!assessmentResult ? (
-              <form onSubmit={handleQuizSubmit} className="flex flex-col gap-6">
-                {activeAssessment.questions.map((q, index: number) => {
-                  const currentAns = quizAnswers[q.id];
-
-                  return (
-                    <div key={q.id} className="p-4 bg-page/35 border border-border rounded-xl flex flex-col gap-3">
-                      <div className="text-xs font-bold text-ink flex items-start gap-1.5 leading-relaxed">
-                        <span className="text-primary font-mono">{index + 1}.</span>
-                        <span>{q.text}</span>
-                      </div>
-
-                      {/* 1. Single Choice */}
-                      {q.type === "single_choice" && q.options && (
-                        <div className="flex flex-col gap-2 pl-4">
-                          {q.options.map((option: string) => (
-                            <label key={option} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
-                              <input
-                                type="radio"
-                                name={q.id}
-                                value={option}
-                                checked={currentAns === option}
-                                onChange={() => handleQuizAnswerChange(q.id, option)}
-                                disabled={isSubmittingAssessment}
-                                className="w-4 h-4 text-primary focus:ring-primary border-border bg-panel"
-                              />
-                              {option}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* 2. Multiple Choice */}
-                      {q.type === "multiple_choice" && q.options && (
-                        <div className="flex flex-col gap-2 pl-4">
-                          {q.options.map((option: string) => {
-                            const isChecked = Array.isArray(currentAns) && currentAns.includes(option);
-                            return (
-                              <label key={option} className="flex items-center gap-2.5 text-xs text-ink cursor-pointer font-medium">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={(e) => handleQuizCheckboxChange(q.id, option, e.target.checked)}
-                                  disabled={isSubmittingAssessment}
-                                  className="w-4 h-4 rounded text-primary focus:ring-primary border-border bg-panel"
-                                />
-                                {option}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* 3. Short Answer */}
-                      {q.type === "short_answer" && (
-                        <div className="pl-4">
-                          <textarea
-                            rows={3}
-                            placeholder="请在此输入您的解答说明..."
-                            value={currentAns || ""}
-                            onChange={(e) => handleQuizAnswerChange(q.id, e.target.value)}
-                            disabled={isSubmittingAssessment}
-                            className="w-full px-3 py-2 bg-panel border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Submit button */}
-                <div className="flex justify-end pt-3 border-t border-border/60">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingAssessment || activeAssessment.questions.length === 0}
-                    className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmittingAssessment ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        正在提交评估...
-                      </>
-                    ) : (
-                      <>
-                        提交评估答案
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              // Quiz Results State
-              <div className="flex flex-col gap-6">
-                <div
-                  className={`p-5 rounded-2xl border flex items-start gap-4 ${
-                    assessmentResult.passed
-                      ? "bg-success/5 border-success/20 text-success"
-                      : "bg-danger/5 border-danger/20 text-danger"
-                  }`}
-                >
-                  <div className="p-2 rounded-lg bg-panel shrink-0 shadow-sm">
-                    {assessmentResult.passed ? (
-                      <CheckCircle className="h-7 w-7 text-success" />
-                    ) : (
-                      <AlertCircle className="h-7 w-7 text-danger" />
-                    )}
-                  </div>
-
-                  <div className="flex-1 flex flex-col gap-1">
-                    <div className="flex items-baseline justify-between">
-                      <h4 className="text-sm font-bold text-ink">
-                        {assessmentResult.passed ? "通关评估已通过！" : "未能完成本次通关"}
-                      </h4>
-                      <span className="text-lg font-mono font-bold">
-                        得分为 {assessmentResult.score} / 100
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-muted leading-relaxed mt-1">
-                      {assessmentResult.passed
-                        ? "您已掌握该节点的关键概念，节点已解锁，继续探索后面的更高 Level 吧！"
-                        : "评估未能达标（需 60 分以上）。请重新阅读单元讲解或在图谱上复习相关前置内容。"}
-                    </p>
-
-                    {assessmentResult.masteryDelta !== null && assessmentResult.masteryDelta !== 0 && (
-                      <span className="text-xs font-semibold font-mono text-primary flex items-center gap-1 mt-2">
-                        <Lightbulb className="h-4.5 w-4.5" />
-                        掌握度已更新：{assessmentResult.masteryDelta > 0 ? `+${assessmentResult.masteryDelta}` : assessmentResult.masteryDelta}%
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* AI Review feedback text */}
-                <div className="p-5 bg-page/35 border border-border rounded-2xl flex flex-col gap-2">
-                  <span className="text-[10px] font-bold text-primary uppercase tracking-wider">智能体学习反馈</span>
-                  <p className="text-xs text-ink leading-relaxed select-text font-serif-cn whitespace-pre-wrap">
-                    {assessmentResult.feedback || "AI 智能体未给出具体评价，请继续前行！"}
-                  </p>
-                </div>
-
-                {/* Close results / navigation back to path */}
-                <div className="flex justify-end pt-3 border-t border-border/60">
-                  <button
-                    onClick={() => {
-                      setQuizOpen(false);
-                      setAssessmentResult(null);
-                      navigate(appRoutes.learningPath(pathId || ""));
-                    }}
-                    className="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl shadow cursor-pointer transition-all"
-                  >
-                    完成并返回图谱
-                  </button>
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
     </AppShell>
   );
 }

@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import uuid
 from collections import deque
-from datetime import datetime
-from typing import TYPE_CHECKING
+from datetime import datetime  # noqa: TC003
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.core.errors import ApiError
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 
 def generate_uuid() -> str:
@@ -137,7 +133,8 @@ def validate_dag(nodes: list[dict[str, str]], edges: list[dict[str, str]]) -> No
     if not nodes:
         raise ApiError(code="INVALID_DAG", message="Path must have at least one node", status_code=400)
 
-    node_ids = {n["id"] for n in nodes}
+    raw_ids = [n.get("id") or n.get("node_id") for n in nodes]
+    node_ids: set[str] = {nid for nid in raw_ids if nid is not None}
 
     # Check unique node IDs
     if len(node_ids) != len(nodes):

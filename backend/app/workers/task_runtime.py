@@ -1,4 +1,8 @@
-"""Task runtime utilities for worker tasks."""
+"""Task runtime utilities for worker tasks.
+
+Single source of truth for task state transitions and event creation.
+Both routers and workers must use ``update_task_status`` / ``transition_task``.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +27,13 @@ async def update_task_status(
     error_code: str | None = None,
     error_message: str | None = None,
 ) -> BackgroundTask:
-    """Update task status and create event atomically."""
+    """Update task status and create event atomically using UPDATE … RETURNING.
+
+    The sequence number is incremented in the database with
+    ``UPDATE … RETURNING``, eliminating race conditions between concurrent
+    writers.  The task update and event insertion happen in the same
+    transaction.
+    """
     result_query = await db.execute(select(BackgroundTask).where(BackgroundTask.id == task_id))
     task = result_query.scalar_one_or_none()
 
@@ -52,19 +62,21 @@ async def update_task_status(
     # Update heartbeat
     task.heartbeat_at = datetime.now(UTC)
 
-    # Atomic sequence number increment
-    await db.execute(
+    # Atomic sequence number increment with RETURNING
+    seq_result = await db.execute(
         update(BackgroundTask)
         .where(BackgroundTask.id == task_id)
         .values(next_event_sequence=BackgroundTask.next_event_sequence + 1)
+        .returning(BackgroundTask.next_event_sequence)
     )
-    await db.refresh(task, ["next_event_sequence"])
+    next_sequence = seq_result.scalar_one()
+    sequence = next_sequence - 1  # The sequence for this event
 
     event_type = _status_to_event_type(target_status)
     event = TaskEvent(
         id=str(uuid.uuid4()),
         task_id=task_id,
-        sequence_number=task.next_event_sequence - 1,
+        sequence_number=sequence,
         event_type=event_type,
         status=target_status,
         progress=task.progress,
@@ -74,7 +86,8 @@ async def update_task_status(
     )
     db.add(event)
 
-    await db.flush()
+    # Commit immediately so SSE stream can see the event in real-time
+    await db.commit()
     return task
 
 
@@ -125,4 +138,5 @@ async def recover_stale_tasks(db: AsyncSession) -> list[str]:
             task.completed_at = datetime.now(UTC)
 
     await db.flush()
+    await db.commit()
     return recovered_ids

@@ -9,6 +9,7 @@ export const appRoutes = {
   pathReview: (pathId: string) => `/learning-paths/${pathId}/review`,
   learningPath: (pathId: string) => `/learning-paths/${pathId}`,
   learningUnit: (pathId: string, nodeId: string) => `/learning-paths/${pathId}/nodes/${nodeId}`,
+  assessment: (pathId: string, nodeId: string) => `/learning-paths/${pathId}/nodes/${nodeId}/assessment`,
 };
 
 export const routes = {

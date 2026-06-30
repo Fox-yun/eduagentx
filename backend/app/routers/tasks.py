@@ -145,8 +145,10 @@ async def stream_task_events(
         try:
             # Format: task_id:sequence_number
             parts = last_event_id.split(":")
-            if len(parts) == 2:
-                after_sequence = int(parts[1])
+            if len(parts) == 2 and parts[0] == task_id:
+                seq = int(parts[1])
+                if seq >= 0:
+                    after_sequence = seq
         except (ValueError, IndexError):
             pass
 
@@ -165,8 +167,7 @@ async def stream_task_events(
         for event in events:
             sse_data = _event_to_sse(event)
             yield f"id: {sse_data['event_id']}\n"
-            yield f"event: {sse_data['type']}\n"
-            yield f"data: {json.dumps(sse_data)}\n\n"
+            yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
 
             # If task is in terminal state, close after sending events
             if event.status in TERMINAL_TASK_STATUSES:
@@ -185,24 +186,13 @@ async def stream_task_events(
             await asyncio.sleep(1.0)
             heartbeat_count += 1
 
-            # Send heartbeat every 15 seconds
+            # Send heartbeat every 15 seconds (SSE comment, not a data event)
             if heartbeat_count >= 15:
-                heartbeat_data = {
-                    "event_id": f"{task_id}:heartbeat",
-                    "task_id": task_id,
-                    "type": "heartbeat",
-                    "status": task_state["status"],
-                    "progress": task_state["progress"],
-                    "stage": task_state["stage"],
-                    "message": None,
-                    "result": None,
-                    "timestamp": to_iso_string(task_state["created_at"]),
-                }
-                yield "event: heartbeat\n"
-                yield f"data: {json.dumps(heartbeat_data)}\n\n"
+                yield ": heartbeat\n\n"
                 heartbeat_count = 0
 
             # Check for new events with a fresh session
+            new_events = []
             async with session_factory() as gen_db:
                 gen_service = TaskService(gen_db)
                 new_events = await gen_service.get_task_events(task_id, last_seq)
@@ -225,8 +215,7 @@ async def stream_task_events(
                 for event in new_events:
                     sse_data = _event_to_sse(event)
                     yield f"id: {sse_data['event_id']}\n"
-                    yield f"event: {sse_data['type']}\n"
-                    yield f"data: {json.dumps(sse_data)}\n\n"
+                    yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
 
                     last_seq = event.sequence_number
 

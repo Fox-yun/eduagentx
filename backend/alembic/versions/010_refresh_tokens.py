@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers
 revision = "010"
-down_revision = "009"
+down_revision = "009_task_worker"
 branch_labels = None
 depends_on = None
 
@@ -42,8 +42,6 @@ def upgrade() -> None:
     # Create indexes for efficient queries
     op.create_index("ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"], unique=True)
     op.create_index("ix_refresh_tokens_jti", "refresh_tokens", ["jti"], unique=True)
-    op.create_index("ix_refresh_tokens_token_family_id", "refresh_tokens", ["token_family_id"])
-    op.create_index("ix_refresh_tokens_session_id", "refresh_tokens", ["session_id"])
     op.create_index("ix_refresh_tokens_expires_at", "refresh_tokens", ["expires_at"])
 
 

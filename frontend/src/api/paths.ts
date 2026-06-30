@@ -3,6 +3,8 @@ import {
   LearningPathDtoSchema,
   PathVersionModel,
   PathVersionListDtoSchema,
+  PathListResponseDtoSchema,
+  PathListItem,
 } from "../schemas/paths";
 import { LearningPathModel } from "../features/learning-path/types";
 import { mapLearningPath, mapPathVersion } from "../mappers/paths";
@@ -56,4 +58,31 @@ export async function getPathVersions(pathId: string): Promise<CursorPage<PathVe
     nextCursor: dtos.next_cursor,
     total: dtos.total,
   };
+}
+
+export async function listPaths(signal?: AbortSignal): Promise<PathListItem[]> {
+  const res = await apiRequest("/learning-paths", {
+    method: "GET",
+    schema: PathListResponseDtoSchema,
+    signal,
+  });
+  return res.items.map((dto) => ({
+    pathId: dto.path_id,
+    goalId: dto.goal_id,
+    title: dto.title,
+    status: dto.status,
+    progress: dto.progress,
+    completedNodes: dto.completed_nodes,
+    totalNodes: dto.total_nodes,
+    estimatedMinutes: dto.estimated_minutes,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  }));
+}
+
+export async function deletePath(pathId: string): Promise<void> {
+  await apiRequest(`/learning-paths/${pathId}`, {
+    method: "DELETE",
+    schema: z.unknown(),
+  });
 }

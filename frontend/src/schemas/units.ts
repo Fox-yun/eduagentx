@@ -26,7 +26,7 @@ export const UnitContentDtoSchema = z.object({
   path_version: z.number().int().positive(),
   node_id: z.string(),
   content_version: z.number().int().positive(),
-  status: z.enum(["generating", "ready", "failed"]),
+  status: z.enum(["not_generated", "generating", "ready", "failed"]),
   active_task_id: z.string().nullable(),
   introduction: z.string().nullable(),
   objectives: z.array(z.string()),
@@ -35,6 +35,8 @@ export const UnitContentDtoSchema = z.object({
   summary: z.string().nullable(),
   references: z.array(UnitReferenceDtoSchema),
   error: z.string().nullable(),
+  lecture: z.any().nullable().optional(),
+  active_lecture_task_id: z.string().nullable().optional(),
 });
 
 export type UnitContentDto = z.infer<typeof UnitContentDtoSchema>;
@@ -75,6 +77,29 @@ export interface UnitContentModel {
   references: UnitReferenceModel[];
   content: string | null; // Mapped combined markdown
   error: string | null;
+  lecture: LectureModel | null;
+  activeLectureTaskId: string | null;
+}
+
+export interface LectureSectionModel {
+  sectionId: string;
+  title: string;
+  content: string;
+  order: number;
+}
+
+export interface LectureCommonMistake {
+  mistake: string;
+  explanation: string;
+}
+
+export interface LectureModel {
+  introduction: string | null;
+  sections: LectureSectionModel[];
+  keyTakeaways: string[];
+  commonMistakes: LectureCommonMistake[];
+  summary: string | null;
+  content: string | null; // Combined markdown for rendering
 }
 
 // Assessment DTO & Models
@@ -138,11 +163,16 @@ export const AssessmentDtoSchema = z.object({
 
 export type AssessmentDto = z.infer<typeof AssessmentDtoSchema>;
 
+export interface AssessmentQuestionOption {
+  value: string;
+  label: string;
+}
+
 export interface AssessmentQuestionModel {
   id: string;
   type: "single_choice" | "multiple_choice" | "short_answer" | "code_text";
   text: string;
-  options?: string[];
+  options?: AssessmentQuestionOption[];
   language?: string;
   codeSnippet?: string;
 }
@@ -177,4 +207,28 @@ export interface AssessmentSubmitResultModel {
   passed: boolean;
   feedback: string | null;
   masteryDelta: number | null;
+}
+
+// Practice question set (repeatable, not scored)
+export const PracticeQuestionDtoSchema = z.object({
+  question_id: z.string(),
+  type: z.string(),
+  prompt: z.string(),
+  options: z.array(z.union([z.string(), z.object({ value: z.string(), label: z.string() })])).nullable().optional(),
+  correct_answer: z.string().nullable().optional(),
+});
+
+export const PracticeSetDtoSchema = z.object({
+  node_id: z.string(),
+  questions: z.array(PracticeQuestionDtoSchema),
+});
+
+export type PracticeSetDto = z.infer<typeof PracticeSetDtoSchema>;
+
+export interface PracticeQuestionModel {
+  id: string;
+  type: "single_choice" | "multiple_choice" | "short_answer";
+  text: string;
+  options?: AssessmentQuestionOption[];
+  correctAnswer: string | null;
 }

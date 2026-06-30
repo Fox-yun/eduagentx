@@ -6,7 +6,7 @@ import json
 import uuid
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.datetime import to_iso_string, utc_now
@@ -21,6 +21,7 @@ from app.models.path import (
     LearningStage,
     validate_dag,
 )
+from app.models.progress import LearningProgress
 
 logger = structlog.get_logger()
 
@@ -59,7 +60,7 @@ class PathService:
         version = result.scalar_one_or_none()
 
         if not version:
-            return self._format_path(path, None, [], [], [])
+            return await self._format_path(path, None, [], [], [])
 
         # Get stages
         stages_result = await self.db.execute(
@@ -77,7 +78,7 @@ class PathService:
         edges_result = await self.db.execute(select(LearningEdge).where(LearningEdge.version_id == version.id))
         edges = list(edges_result.scalars().all())
 
-        return self._format_path(path, version, stages, nodes, edges)
+        return await self._format_path(path, version, stages, nodes, edges)
 
     async def create_path_version(
         self,
@@ -119,6 +120,9 @@ class PathService:
             estimated_total_minutes=total_minutes,
         )
         self.db.add(version)
+
+        # Flush version before creating child records (FK constraint)
+        await self.db.flush()
 
         # Create stages
         stage_id_map = {}
@@ -169,7 +173,13 @@ class PathService:
             )
             self.db.add(edge)
 
+        # Flush so nodes/edges are visible to subsequent queries
         await self.db.flush()
+
+        # Mark root nodes (no prerequisites) as available even in draft phase
+        await self._initialize_node_statuses(version.id)
+
+        await self.db.commit()
         return version
 
     async def activate_version(
@@ -224,6 +234,7 @@ class PathService:
         )
 
         await self.db.flush()
+        await self.db.commit()
 
         # Refresh path
         await self.db.refresh(path)
@@ -246,6 +257,7 @@ class PathService:
         )
         self.db.add(request)
         await self.db.flush()
+        await self.db.commit()
         return request
 
     async def list_versions(
@@ -282,7 +294,7 @@ class PathService:
                 node.status = "available"
             # Others remain "locked"
 
-    def _format_path(
+    async def _format_path(
         self,
         path: LearningPath,
         version: LearningPathVersion | None,
@@ -291,10 +303,16 @@ class PathService:
         edges: list,
     ) -> dict:
         """Format path data for API response."""
+        # Use goal title as the path title (the user's original requirement)
+        goal_title = ""
+        if path.goal_id:
+            goal_result = await self.db.execute(select(LearningGoal.title).where(LearningGoal.id == path.goal_id))
+            goal_title = goal_result.scalar() or ""
+        title = goal_title or (version.summary if version else "")
         return {
             "path_id": path.id,
             "goal_id": path.goal_id,
-            "title": version.summary if version else "",
+            "title": title,
             "description": None,
             "version": version.version_number if version else 1,
             "active_version": version.version_number if version else 1,
@@ -345,3 +363,86 @@ class PathService:
             "created_at": to_iso_string(path.created_at),
             "updated_at": to_iso_string(path.updated_at),
         }
+
+    async def list_user_paths(self, user_id: str) -> list[dict]:
+        """List all non-archived learning paths for a user with progress stats."""
+        result = await self.db.execute(
+            select(LearningPath)
+            .where(LearningPath.user_id == user_id, LearningPath.status != "archived")
+            .order_by(LearningPath.updated_at.desc())
+        )
+        paths = list(result.scalars().all())
+
+        items = []
+        for path in paths:
+            # Get the active version to find title and node counts
+            title = ""
+            total_nodes = 0
+            estimated_minutes = 0
+
+            # Prefer goal title (the user's original requirement)
+            if path.goal_id:
+                goal_result = await self.db.execute(select(LearningGoal.title).where(LearningGoal.id == path.goal_id))
+                title = goal_result.scalar() or ""
+
+            if path.active_version_id:
+                ver_result = await self.db.execute(
+                    select(LearningPathVersion).where(LearningPathVersion.id == path.active_version_id)
+                )
+                version = ver_result.scalar_one_or_none()
+                if version:
+                    if not title:
+                        title = version.summary or ""
+                    estimated_minutes = version.estimated_total_minutes
+
+                    count_result = await self.db.execute(
+                        select(func.count()).select_from(LearningNode).where(LearningNode.version_id == version.id)
+                    )
+                    total_nodes = count_result.scalar() or 0
+
+            # Count completed nodes
+            completed_result = await self.db.execute(
+                select(func.count())
+                .select_from(LearningProgress)
+                .where(
+                    LearningProgress.user_id == user_id,
+                    LearningProgress.path_id == path.id,
+                    LearningProgress.status == "completed",
+                )
+            )
+            completed_nodes = completed_result.scalar() or 0
+            progress = int((completed_nodes / total_nodes * 100) if total_nodes > 0 else 0)
+
+            items.append(
+                {
+                    "path_id": path.id,
+                    "goal_id": path.goal_id,
+                    "title": title,
+                    "status": path.status,
+                    "progress": progress,
+                    "completed_nodes": completed_nodes,
+                    "total_nodes": total_nodes,
+                    "estimated_minutes": estimated_minutes,
+                    "created_at": to_iso_string(path.created_at),
+                    "updated_at": to_iso_string(path.updated_at),
+                }
+            )
+
+        return items
+
+    async def delete_path(self, path_id: str, user_id: str) -> None:
+        """Soft-delete a path by archiving it and its associated goal."""
+        path = await self.get_path(path_id, user_id)
+
+        # Archive the associated goal if it references this path
+        goal_result = await self.db.execute(select(LearningGoal).where(LearningGoal.id == path.goal_id))
+        goal = goal_result.scalar_one_or_none()
+        if goal and goal.current_path_id == path_id and goal.status != "archived":
+            goal.status = "archived"
+            goal.updated_at = utc_now()
+
+        # Archive the path
+        path.status = "archived"
+        path.updated_at = utc_now()
+
+        await self.db.commit()

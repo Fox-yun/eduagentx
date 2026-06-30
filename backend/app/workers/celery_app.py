@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from celery import Celery  # type: ignore[import-not-found]
+from celery import Celery  # type: ignore[import-untyped]
 
 from app.config import get_settings
 

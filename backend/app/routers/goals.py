@@ -54,6 +54,7 @@ class GoalResponse(BaseModel):
     status: str
     next_step: str | None
     active_task_id: str | None
+    current_path_id: str | None
     created_at: str
     updated_at: str
 
@@ -76,6 +77,7 @@ def _goal_to_response(goal: Any) -> GoalResponse:
         status=goal.status,
         next_step=_get_next_step(goal.status),
         active_task_id=goal.active_task_id,
+        current_path_id=goal.current_path_id,
         created_at=to_iso_string(goal.created_at) or "",
         updated_at=to_iso_string(goal.updated_at) or "",
     )

@@ -184,6 +184,9 @@ describe("DTO Schema Mappers", () => {
     expect(model.assessmentId).toBe(dto.assessment_id);
     expect(model.questions[0].id).toBe("q-1");
     expect(model.questions[0].text).toBe("Question prompt");
-    expect(model.questions[0].options).toEqual(["val1", "val2"]);
+    expect(model.questions[0].options).toEqual([
+      { value: "val1", label: "Label 1" },
+      { value: "val2", label: "Label 2" },
+    ]);
   });
 });

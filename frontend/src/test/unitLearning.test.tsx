@@ -80,7 +80,6 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
     );
 
     // 2. Mock content endpoints
-    let generateCalled = false;
     let getCallCount = 0;
 
     server.use(
@@ -119,7 +118,6 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
       }),
 
       http.post("/api/learning-paths/path-123/nodes/node-555/content", () => {
-        generateCalled = true;
         return HttpResponse.json({
           next_step: "generating",
           active_task_id: "task-unit-999",
@@ -223,35 +221,13 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
     expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
     expect(screen.getByText("主动学习可以极大地节省标注成本。")).toBeInTheDocument();
 
-    // Click Quiz/Assessment Button
-    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估" });
+    // Click Quiz/Assessment Button — should navigate to assessment page
+    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估 (≥10题)" });
     fireEvent.click(startQuizBtn);
 
-    // Verify quiz modal renders questions
-    expect(await screen.findByText("测试挑战：主动学习与样本筛选策略")).toBeInTheDocument();
-    expect(screen.getByText("主动学习的目标是什么？")).toBeInTheDocument();
-
-    // Choose the correct answer
-    const optionRadio = screen.getByLabelText("减少总标注成本");
-    fireEvent.click(optionRadio);
-
-    // Submit Quiz
-    const submitQuizBtn = screen.getByRole("button", { name: "提交评估答案" });
-    fireEvent.click(submitQuizBtn);
-
-    // Verify result feedback renders
-    expect(await screen.findByText("得分为 100 / 100")).toBeInTheDocument();
-    expect(screen.getByText("回答完全正确，做得好！")).toBeInTheDocument();
-    expect(screen.getByText("掌握度已更新：+25%")).toBeInTheDocument();
-
-    // Click Complete
-    const completeBtn = screen.getByRole("button", { name: "完成并返回图谱" });
-    fireEvent.click(completeBtn);
-
-    expect(generateCalled).toBe(true);
-
+    // Verify navigation to assessment page
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/path-123");
+      expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/path-123/nodes/node-555/assessment");
     });
   });
 
@@ -423,40 +399,14 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
       timestamp: new Date().toISOString(),
     });
 
-    // 2. Click Quiz/Assessment Button
+    // 2. Click Quiz/Assessment Button — should navigate to assessment page
     expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
-    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估" });
+    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估 (≥10题)" });
     fireEvent.click(startQuizBtn);
 
-    // Verify quiz modal renders questions
-    expect(await screen.findByText("测试挑战：主动学习与样本筛选策略")).toBeInTheDocument();
-    expect(screen.getByText("请勾选所有主动学习采样方法：")).toBeInTheDocument();
-
-    // Choose multiple options
-    const opt1 = screen.getByLabelText("不确定性采样");
-    const opt2 = screen.getByLabelText("多样性采样");
-    fireEvent.click(opt1);
-    fireEvent.click(opt2);
-
-    // Textarea input
-    const shortAnswerTextarea = screen.getByPlaceholderText("请在此输入您的解答说明...");
-    fireEvent.change(shortAnswerTextarea, { target: { value: "It bias to outlier nodes." } });
-
-    // Submit Quiz
-    const submitQuizBtn = screen.getByRole("button", { name: "提交评估答案" });
-    fireEvent.click(submitQuizBtn);
-
-    // Verify result feedback renders failed state
-    expect(await screen.findByText("未能完成本次通关")).toBeInTheDocument();
-    expect(screen.getByText("得分为 40 / 100")).toBeInTheDocument();
-    expect(screen.getByText("评估未通过，得分较低。")).toBeInTheDocument();
-
-    // Click Complete
-    const completeBtn = screen.getByRole("button", { name: "完成并返回图谱" });
-    fireEvent.click(completeBtn);
-
+    // Verify navigation to assessment page
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/path-123");
+      expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/path-123/nodes/node-555/assessment");
     });
   });
 

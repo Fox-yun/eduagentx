@@ -71,7 +71,7 @@ export function TopBar({ title, courseName }: TopBarProps) {
           <>
             <ChevronRight className="h-4 w-4 text-subtle" />
             <div className="flex items-center gap-2">
-              <span className="text-xs bg-primary-soft text-primary px-2 py-0.5 rounded font-medium">
+              <span className="text-xs bg-primary-soft text-primary px-2 py-0.5 rounded font-medium max-w-[200px] truncate">
                 {courseName || "课程"}
               </span>
               <span className="text-sm font-medium text-ink">

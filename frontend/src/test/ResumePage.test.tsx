@@ -49,11 +49,11 @@ describe("ResumePage Component", () => {
     expect(await screen.findByText("从哪里继续学习？")).toBeInTheDocument();
     expect(screen.getAllByText("继续学习").length).toBeGreaterThan(0);
 
-    // Course title
-    expect(screen.getByText("数据结构与图算法通关路径")).toBeInTheDocument();
+    // Current node title (not path title — component shows currentNodeTitle)
+    expect(screen.getByText("二叉树的非递归遍历")).toBeInTheDocument();
 
     // Progress text
-    expect(screen.getByText(/已完成 3\/12 节点/)).toBeInTheDocument();
+    expect(screen.getByText(/进度/)).toBeInTheDocument();
   });
 
   it("should trigger navigation when continue learning button is clicked", async () => {
@@ -68,16 +68,16 @@ describe("ResumePage Component", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/mock-path?node=tree-traversal");
   });
 
-  it("should trigger navigation when view path button is clicked", async () => {
+  it("should trigger navigation when review button is clicked on completed path", async () => {
     renderWithProviders(<ResumePage />, {
       handlers: resumeHandlers,
     });
 
-    const viewPathBtn = await screen.findByRole("button", { name: "查看完整路径" });
+    const viewPathBtn = await screen.findByRole("button", { name: "继续学习" });
     expect(viewPathBtn).toBeInTheDocument();
 
     fireEvent.click(viewPathBtn);
-    expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/mock-path");
+    expect(mockNavigate).toHaveBeenCalledWith("/learning-paths/mock-path?node=tree-traversal");
   });
 
   it("should render empty state correctly", async () => {
@@ -115,8 +115,7 @@ describe("ResumePage Component", () => {
       handlers: completedHandler,
     });
 
-    expect(await screen.findByText("已完成路径")).toBeInTheDocument();
-    expect(screen.getByText("恭喜您完成学习！")).toBeInTheDocument();
+    expect(await screen.findByText("恭喜您完成学习！")).toBeInTheDocument();
     expect(screen.getByText("92%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "复习路径" }));

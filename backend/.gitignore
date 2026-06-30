@@ -4,7 +4,7 @@
 !.env.example
 
 # Cookies and tokens
-cookies.txt
+cookies*.txt
 
 # Database files
 *.db

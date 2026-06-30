@@ -1,4 +1,8 @@
-"""Final verification script for Backend Phase 3."""
+"""Comprehensive verification script for EduAgentX Backend.
+
+Runs all quality gates: lint, format, type check, unit tests with coverage,
+and integration tests.
+"""
 
 from __future__ import annotations
 
@@ -23,8 +27,11 @@ def main() -> int:
     checks = [
         ("Ruff lint", "ruff check ."),
         ("Ruff format", "ruff format --check ."),
-        ("Unit tests", "python -m pytest tests/unit -v"),
-        ("OpenAPI verification", "python scripts/verify_openapi.py"),
+        (
+            "Unit tests + coverage",
+            "python -m pytest tests/unit --cov=app --cov-branch --cov-fail-under=85 --tb=short -q",
+        ),
+        ("Integration tests", "python -m pytest tests/integration --tb=short -q"),
     ]
 
     failed = []
@@ -44,7 +51,7 @@ def main() -> int:
         return 1
 
     print("\nALL CHECKS PASSED")
-    print("\nBackend Phase 3: Production Ready")
+    print("\nBackend: Production Ready")
     return 0
 
 

@@ -51,6 +51,7 @@ export const LearningGoalDtoSchema = z.object({
   ]),
   next_step: z.enum(["clarify", "diagnostic", "generating", "review", "active"]).nullable(),
   active_task_id: z.string().nullable(),
+  current_path_id: z.string().nullable().optional(),
   created_at: IsoDateTimeSchema,
   updated_at: IsoDateTimeSchema,
 });
@@ -79,6 +80,7 @@ export interface LearningGoalModel {
     | "failed";
   nextStep: "clarify" | "diagnostic" | "generating" | "review" | "active" | null;
   activeTaskId: string | null;
+  currentPathId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -161,6 +163,7 @@ export const ClarifyResponseSchema = z.object({
 });
 
 export const DiagnosticSubmitResponseSchema = z.object({
-  next_step: z.literal("generating"),
-  active_task_id: z.string(),
+  attempt_id: z.string(),
+  status: z.string(),
+  task_id: z.string(),
 });

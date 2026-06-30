@@ -1,0 +1,706 @@
+"""Comprehensive unit tests for PathService."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.core.errors import ApiError
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_path(**overrides):
+    """Create a mock LearningPath."""
+    p = MagicMock()
+    p.id = overrides.get("id", "path-1")
+    p.user_id = overrides.get("user_id", "user-1")
+    p.goal_id = overrides.get("goal_id", "goal-1")
+    p.active_version_id = overrides.get("active_version_id")
+    p.status = overrides.get("status", "draft")
+    p.created_at = overrides.get("created_at", datetime.now(UTC))
+    p.updated_at = overrides.get("updated_at", datetime.now(UTC))
+    return p
+
+
+def _make_version(**overrides):
+    """Create a mock LearningPathVersion."""
+    v = MagicMock()
+    v.id = overrides.get("id", "ver-1")
+    v.path_id = overrides.get("path_id", "path-1")
+    v.version_number = overrides.get("version_number", 1)
+    v.status = overrides.get("status", "draft")
+    v.summary = overrides.get("summary", "Test summary")
+    v.estimated_total_minutes = overrides.get("estimated_total_minutes", 120)
+    v.activated_at = overrides.get("activated_at")
+    return v
+
+
+def _make_node(**overrides):
+    """Create a mock LearningNode."""
+    n = MagicMock()
+    n.id = overrides.get("id", "node-1")
+    n.version_id = overrides.get("version_id", "ver-1")
+    n.stage_id = overrides.get("stage_id")
+    n.title = overrides.get("title", "Test Node")
+    n.description = overrides.get("description", "desc")
+    n.node_order = overrides.get("node_order", 1)
+    n.level = overrides.get("level", 1)
+    n.difficulty = overrides.get("difficulty", "beginner")
+    n.estimated_minutes = overrides.get("estimated_minutes", 30)
+    n.status = overrides.get("status", "locked")
+    n.mastery = overrides.get("mastery", 0.0)
+    n.content_status = overrides.get("content_status", "not_generated")
+    n.learning_outcomes = overrides.get("learning_outcomes", '["outcome1"]')
+    n.assessment_strategy = overrides.get("assessment_strategy")
+    n.generation_reason = overrides.get("generation_reason")
+    return n
+
+
+def _make_edge(**overrides):
+    """Create a mock LearningEdge."""
+    e = MagicMock()
+    e.id = overrides.get("id", "edge-1")
+    e.version_id = overrides.get("version_id", "ver-1")
+    e.source_node_id = overrides.get("source_node_id", "node-1")
+    e.target_node_id = overrides.get("target_node_id", "node-2")
+    return e
+
+
+def _make_stage(**overrides):
+    """Create a mock LearningStage."""
+    s = MagicMock()
+    s.id = overrides.get("id", "stage-1")
+    s.version_id = overrides.get("version_id", "ver-1")
+    s.title = overrides.get("title", "Stage 1")
+    s.description = overrides.get("description", "desc")
+    s.stage_order = overrides.get("stage_order", 1)
+    s.outcome = overrides.get("outcome", "outcome")
+    return s
+
+
+def _mock_scalar_result(value):
+    """Create a mock result with scalar_one_or_none returning value."""
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = value
+    return r
+
+
+def _mock_scalars(items):
+    """Create a mock result with scalars().all() returning items."""
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = items
+    return r
+
+
+def _mock_scalar(value):
+    """Create a mock result with scalar() returning value."""
+    r = MagicMock()
+    r.scalar.return_value = value
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestPathServiceGetPath:
+    @pytest.mark.asyncio
+    async def test_get_path_found(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+        db.execute = AsyncMock(return_value=_mock_scalar_result(path))
+
+        result = await svc.get_path("path-1", "user-1")
+        assert result is path
+
+    @pytest.mark.asyncio
+    async def test_get_path_not_found(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        db.execute = AsyncMock(return_value=_mock_scalar_result(None))
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.get_path("nonexistent", "user-1")
+        assert exc_info.value.code == "PATH_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_get_path_wrong_user(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        db.execute = AsyncMock(return_value=_mock_scalar_result(None))
+
+        with pytest.raises(ApiError):
+            await svc.get_path("path-1", "wrong-user")
+
+
+class TestPathServiceGetPathWithDetails:
+    @pytest.mark.asyncio
+    async def test_returns_formatted_path_with_version(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id="ver-1")
+        version = _make_version()
+        stages = [_make_stage()]
+        nodes = [_make_node(stage_id="stage-1")]
+        edges = [_make_edge()]
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # get_path
+                return _mock_scalar_result(path)
+            elif call_count == 2:  # version query
+                return _mock_scalar_result(version)
+            elif call_count == 3:  # stages
+                return _mock_scalars(stages)
+            elif call_count == 4:  # nodes
+                return _mock_scalars(nodes)
+            elif call_count == 5:  # edges
+                return _mock_scalars(edges)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        result = await svc.get_path_with_details("path-1", "user-1")
+        assert result["path_id"] == "path-1"
+        assert result["status"] == "draft"
+        assert len(result["nodes"]) == 1
+        assert len(result["stages"]) == 1
+        assert len(result["edges"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_path_with_no_version(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id=None)
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar_result(None)  # no version
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        result = await svc.get_path_with_details("path-1", "user-1")
+        assert result["nodes"] == []
+        assert result["stages"] == []
+        assert result["edges"] == []
+
+
+class TestPathServiceCreatePathVersion:
+    @pytest.mark.asyncio
+    async def test_creates_version_with_dag(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # get_path
+                return _mock_scalar_result(path)
+            elif call_count == 2:  # get next version number
+                return _mock_scalar(None)  # no previous version
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with patch("app.services.path.validate_dag"):
+            version = await svc.create_path_version(
+                path_id="path-1",
+                user_id="user-1",
+                stages=[{"title": "Stage 1", "stage_order": 1, "stage_id": "s1"}],
+                nodes=[
+                    {"title": "Node 1", "node_id": "n1", "stage_id": "s1", "estimated_minutes": 30, "node_order": 1},
+                    {"title": "Node 2", "node_id": "n2", "stage_id": "s1", "estimated_minutes": 40, "node_order": 2},
+                ],
+                edges=[{"source_node_id": "n1", "target_node_id": "n2"}],
+                summary="Test summary",
+            )
+            assert version is not None
+            assert db.add.call_count >= 3  # version + 2 stages? + nodes + edges
+            assert db.flush.call_count >= 2
+            db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_creates_version_no_previous(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar(None)  # no previous version
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with patch("app.services.path.validate_dag"):
+            version = await svc.create_path_version(
+                path_id="path-1",
+                user_id="user-1",
+                stages=[],
+                nodes=[{"title": "Node 1", "node_id": "n1", "estimated_minutes": 30}],
+                edges=[],
+            )
+            assert version.version_number == 1
+
+    @pytest.mark.asyncio
+    async def test_creates_version_with_previous(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar(3)  # previous version 3
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with patch("app.services.path.validate_dag"):
+            version = await svc.create_path_version(
+                path_id="path-1",
+                user_id="user-1",
+                stages=[],
+                nodes=[{"title": "Node 1", "node_id": "n1", "estimated_minutes": 30}],
+                edges=[],
+            )
+            assert version.version_number == 4
+
+    @pytest.mark.asyncio
+    async def test_dag_validation_called(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar(None)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with patch("app.services.path.validate_dag") as mock_dag:
+            await svc.create_path_version(
+                path_id="path-1",
+                user_id="user-1",
+                stages=[],
+                nodes=[{"title": "N1", "node_id": "n1", "estimated_minutes": 30}],
+                edges=[],
+            )
+            mock_dag.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_path_not_found_raises(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        db.execute = AsyncMock(return_value=_mock_scalar_result(None))
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.create_path_version("bad-path", "user-1", [], [], [])
+        assert exc_info.value.code == "PATH_NOT_FOUND"
+
+
+class TestPathServiceActivateVersion:
+    @pytest.mark.asyncio
+    async def test_activate_version_success(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id=None, status="draft")
+        version = _make_version(status="draft")
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # get_path
+                return _mock_scalar_result(path)
+            elif call_count == 2:  # get version
+                return _mock_scalar_result(version)
+            elif call_count == 3:  # CAS update
+                mock = MagicMock()
+                mock.rowcount = 1
+                return mock
+            elif call_count == 4 or call_count == 5:  # _initialize_node_statuses: get nodes
+                return _mock_scalars([])
+            elif call_count == 6:  # update goal
+                return MagicMock()
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        result = await svc.activate_version("path-1", "user-1", "ver-1")
+        assert result is path
+        assert version.status == "active"
+        assert version.activated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_activate_version_not_found(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar_result(None)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.activate_version("path-1", "user-1", "bad-ver")
+        assert exc_info.value.code == "VERSION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_activate_version_invalid_status(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+        version = _make_version(status="active")  # already active
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar_result(version)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.activate_version("path-1", "user-1", "ver-1")
+        assert exc_info.value.code == "INVALID_STATUS"
+
+    @pytest.mark.asyncio
+    async def test_activate_version_cas_conflict(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id="old-ver")
+        version = _make_version(status="draft")
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalar_result(version)
+            elif call_count == 3:  # CAS update with 0 rowcount
+                mock = MagicMock()
+                mock.rowcount = 0
+                return mock
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.activate_version("path-1", "user-1", "ver-1")
+        assert exc_info.value.code == "PATH_VERSION_CONFLICT"
+
+
+class TestPathServiceInitializeNodeStatuses:
+    @pytest.mark.asyncio
+    async def test_root_nodes_become_available(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+
+        node1 = _make_node(id="node-1")
+        node2 = _make_node(id="node-2")
+        edge = _make_edge(source_node_id="node-1", target_node_id="node-2")
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalars([node1, node2])
+            elif call_count == 2:
+                return _mock_scalars([edge])
+            return _mock_scalars([])
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        await svc._initialize_node_statuses("ver-1")
+        assert node1.status == "available"
+        assert node2.status == "locked"
+
+    @pytest.mark.asyncio
+    async def test_no_edges_all_roots(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+
+        node1 = _make_node(id="node-1")
+        node2 = _make_node(id="node-2")
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalars([node1, node2])
+            elif call_count == 2:
+                return _mock_scalars([])
+            return _mock_scalars([])
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        await svc._initialize_node_statuses("ver-1")
+        assert node1.status == "available"
+        assert node2.status == "available"
+
+
+class TestPathServiceRevisionRequest:
+    @pytest.mark.asyncio
+    async def test_create_revision_request(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        result = await svc.create_revision_request("path-1", "user-1", "Please revise")
+        assert result is not None
+        assert result.revision_request == "Please revise"
+        db.add.assert_called()
+        db.commit.assert_awaited()
+
+
+class TestPathServiceListVersions:
+    @pytest.mark.asyncio
+    async def test_list_versions(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        svc = PathService(db)
+        path = _make_path()
+        versions = [_make_version(version_number=i) for i in range(1, 4)]
+
+        call_count = 0
+
+        async def execute_side_effect(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_scalar_result(path)
+            elif call_count == 2:
+                return _mock_scalars(versions)
+            return _mock_scalar_result(None)
+
+        db.execute = AsyncMock(side_effect=execute_side_effect)
+
+        result = await svc.list_versions("path-1", "user-1")
+        assert len(result) == 3
+
+
+class TestPathServiceFormatPath:
+    @pytest.mark.asyncio
+    async def test_format_path_with_version(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        mock_res = MagicMock()
+        mock_res.scalar.return_value = "Python 编程基础"
+        db.execute.return_value = mock_res
+        svc = PathService(db)
+        path = _make_path()
+        version = _make_version()
+        node = _make_node(stage_id="stage-1")
+        edge = _make_edge(source_node_id="node-0", target_node_id="node-1")
+        stage = _make_stage(id="stage-1")
+
+        result = await svc._format_path(path, version, [stage], [node], [edge])
+        assert result["path_id"] == "path-1"
+        assert result["version"] == 1
+        assert len(result["nodes"]) == 1
+        assert len(result["stages"]) == 1
+        assert result["stages"][0]["node_ids"] == ["node-1"]
+
+    @pytest.mark.asyncio
+    async def test_format_path_no_version(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        db.add = MagicMock()
+        db.add_all = MagicMock()
+        mock_res = MagicMock()
+        mock_res.scalar.return_value = ""
+        db.execute.return_value = mock_res
+        svc = PathService(db)
+        path = _make_path()
+
+        result = await svc._format_path(path, None, [], [], [])
+        assert result["title"] == ""
+        assert result["total_estimated_minutes"] == 0
+        assert result["nodes"] == []

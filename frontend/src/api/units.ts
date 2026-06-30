@@ -6,11 +6,14 @@ import {
   AssessmentModel,
   AssessmentSubmitResponseSchema,
   AssessmentSubmitResultModel,
+  PracticeSetDtoSchema,
+  PracticeQuestionModel,
 } from "../schemas/units";
 import {
   mapUnitContent,
   mapAssessment,
   mapAssessmentSubmitResponse,
+  mapPracticeQuestions,
 } from "../mappers/units";
 import { z } from "zod";
 
@@ -44,6 +47,8 @@ export async function getUnitContent(
         references: [],
         content: null,
         error: null,
+        lecture: null,
+        activeLectureTaskId: null,
       };
     }
     throw err;
@@ -85,6 +90,20 @@ export async function regenerateUnitContent(
   };
 }
 
+export async function generateLecture(
+  pathId: string,
+  nodeId: string
+): Promise<{ nextStep: "generating"; activeTaskId: string }> {
+  const res = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/content/lecture`, {
+    method: "POST",
+    schema: GenerateContentResponseSchema,
+  });
+  return {
+    nextStep: res.next_step,
+    activeTaskId: res.active_task_id,
+  };
+}
+
 export async function createAssessment(
   pathId: string,
   nodeId: string
@@ -92,6 +111,7 @@ export async function createAssessment(
   const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/assessments`, {
     method: "POST",
     schema: AssessmentDtoSchema,
+    timeoutMs: 120000,  // LLM generation can take 30-60s
   });
   return mapAssessment(dto);
 }
@@ -104,6 +124,19 @@ export async function submitAssessment(
     method: "POST",
     body: { answers },
     schema: AssessmentSubmitResponseSchema,
+    timeoutMs: 120000,  // LLM grading for short answers can take 30-60s
   });
   return mapAssessmentSubmitResponse(dto);
+}
+
+export async function createPractice(
+  pathId: string,
+  nodeId: string
+): Promise<PracticeQuestionModel[]> {
+  const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/practice`, {
+    method: "POST",
+    schema: PracticeSetDtoSchema,
+    timeoutMs: 120000,  // LLM generation can take 30-60s
+  });
+  return mapPracticeQuestions(dto);
 }

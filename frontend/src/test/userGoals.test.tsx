@@ -120,7 +120,7 @@ describe("Onboarding & Goals Workflows", () => {
       questions: [
         {
           question_id: "q-lang",
-          type: "single_choice",
+          question_type: "single_choice",
           prompt: "你想学哪个语言的库？",
           required: true,
           options: [
@@ -131,7 +131,7 @@ describe("Onboarding & Goals Workflows", () => {
         },
         {
           question_id: "q-topics",
-          type: "multiple_choice",
+          question_type: "multiple_choice",
           prompt: "主要学习哪些主题？",
           required: true,
           options: [
@@ -226,7 +226,7 @@ describe("Onboarding & Goals Workflows", () => {
       questions: [
         {
           question_id: "q-lang",
-          type: "single_choice",
+          question_type: "single_choice",
           prompt: "你想学哪个语言的库？",
           required: true,
           options: [{ value: "Python", label: "Python" }],
@@ -270,7 +270,7 @@ describe("Onboarding & Goals Workflows", () => {
           questions: [
             {
               question_id: "q-lang",
-              type: "single_choice",
+              question_type: "single_choice",
               prompt: "你想学哪个语言的库？",
               required: true,
               options: [{ value: "Python", label: "Python" }],
@@ -300,12 +300,13 @@ describe("Onboarding & Goals Workflows", () => {
   it("should render DiagnosticPage questions and submit successfully with all question types and navigation", async () => {
     const mockDiagnostic = {
       diagnostic_id: "diag-111",
+      attempt_id: "attempt-1",
       goal_id: "goal-111",
-      status: "pending",
+      status: "draft",
       questions: [
         {
           question_id: "d-q1",
-          type: "single_choice",
+          question_type: "single_choice",
           prompt: "二叉树的前序遍历顺序是？",
           options: [
             { value: "根左右", label: "根左右" },
@@ -315,7 +316,7 @@ describe("Onboarding & Goals Workflows", () => {
         },
         {
           question_id: "d-q2",
-          type: "multiple_choice",
+          question_type: "multiple_choice",
           prompt: "哪些是常用的排序算法？",
           options: [
             { value: "quick", label: "快速排序" },
@@ -325,13 +326,13 @@ describe("Onboarding & Goals Workflows", () => {
         },
         {
           question_id: "d-q3",
-          type: "short_answer",
+          question_type: "short_answer",
           prompt: "请简述什么是闭包？",
           answer: null,
         },
         {
           question_id: "d-q4",
-          type: "code_text",
+          question_type: "code_text",
           prompt: "补全以下代码？",
           language: "javascript",
           code_snippet: "function add(a, b) { return a + b; }",
@@ -340,7 +341,7 @@ describe("Onboarding & Goals Workflows", () => {
       ],
       saved_answers: {},
       result: null,
-      next_step: "generating",
+      next_step: "diagnostic",
     };
 
     let submittedAns: any = null;
@@ -352,8 +353,9 @@ describe("Onboarding & Goals Workflows", () => {
         const body = (await request.json()) as any;
         submittedAns = body.answers;
         return HttpResponse.json({
-          next_step: "generating",
-          active_task_id: "task-999",
+          attempt_id: "attempt-1",
+          status: "grading",
+          task_id: "task-999",
         });
       })
     );
@@ -401,21 +403,26 @@ describe("Onboarding & Goals Workflows", () => {
       expect(submittedAns).not.toBeNull();
     });
 
-    expect(submittedAns["d-q1"]).toBe("根左右");
-    expect(submittedAns["d-q2"]).toEqual(["quick", "bubble"]);
-    expect(submittedAns["d-q3"]).toBe("闭包是一个函数");
-    expect(submittedAns["d-q4"]).toBe("return a + b;");
+    expect(submittedAns[0].question_id).toBe("d-q1");
+    expect(submittedAns[0].answer).toBe("根左右");
+    expect(submittedAns[1].question_id).toBe("d-q2");
+    expect(submittedAns[1].answer).toEqual(["quick", "bubble"]);
+    expect(submittedAns[2].question_id).toBe("d-q3");
+    expect(submittedAns[2].answer).toBe("闭包是一个函数");
+    expect(submittedAns[3].question_id).toBe("d-q4");
+    expect(submittedAns[3].answer).toBe("return a + b;");
   });
 
   it("should support skipping the diagnostic quiz", async () => {
     const mockDiagnostic = {
       diagnostic_id: "diag-111",
+      attempt_id: "attempt-1",
       goal_id: "goal-111",
-      status: "pending",
+      status: "draft",
       questions: [
         {
           question_id: "d-q1",
-          type: "single_choice",
+          question_type: "single_choice",
           prompt: "二叉树的前序遍历顺序是？",
           options: [
             { value: "根左右", label: "根左右" },
@@ -426,7 +433,7 @@ describe("Onboarding & Goals Workflows", () => {
       ],
       saved_answers: {},
       result: null,
-      next_step: "generating",
+      next_step: "diagnostic",
     };
 
     let submittedAns: any = null;
@@ -438,8 +445,9 @@ describe("Onboarding & Goals Workflows", () => {
         const body = (await request.json()) as any;
         submittedAns = body.answers;
         return HttpResponse.json({
-          next_step: "generating",
-          active_task_id: "task-999",
+          attempt_id: "attempt-1",
+          status: "grading",
+          task_id: "task-999",
         });
       })
     );
@@ -457,7 +465,7 @@ describe("Onboarding & Goals Workflows", () => {
     await waitFor(() => {
       expect(submittedAns).not.toBeNull();
     });
-    expect(submittedAns).toEqual({});
+    expect(submittedAns).toEqual([]);
   });
 
   it("should show error screen and allow refetching", async () => {
@@ -470,12 +478,13 @@ describe("Onboarding & Goals Workflows", () => {
         }
         return HttpResponse.json({
           diagnostic_id: "diag-111",
+      attempt_id: "attempt-1",
           goal_id: "goal-111",
-          status: "pending",
+          status: "draft",
           questions: [
             {
               question_id: "d-q1",
-              type: "single_choice",
+              question_type: "single_choice",
               prompt: "二叉树的前序遍历顺序是？",
               options: [
                 { value: "根左右", label: "根左右" },
@@ -486,7 +495,7 @@ describe("Onboarding & Goals Workflows", () => {
           ],
           saved_answers: {},
           result: null,
-          next_step: "generating",
+          next_step: "diagnostic",
         });
       })
     );

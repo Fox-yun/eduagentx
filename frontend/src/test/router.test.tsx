@@ -20,7 +20,6 @@ describe("Router Integration & Navigation", () => {
     // Verify main header on ResumePage
     expect(await screen.findByText("从哪里继续学习？")).toBeInTheDocument();
     expect(screen.getAllByText("继续学习").length).toBeGreaterThan(0);
-    expect(screen.getByText("查看完整路径")).toBeInTheDocument();
   });
 
   it("should render NotFoundPage on unknown/invalid routes", async () => {

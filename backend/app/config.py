@@ -67,6 +67,49 @@ class Settings(BaseSettings):
         description="Log level",
     )
 
+    # E2E testing
+    enable_e2e_routes: bool = Field(
+        default=False,
+        description="Enable E2E test-only routes. Requires APP_ENV=test.",
+    )
+    e2e_token: str | None = Field(
+        default=None,
+        description="Token required for E2E test routes. Only used when APP_ENV=test and ENABLE_E2E_ROUTES=true.",
+    )
+
+    # LLM / AI Agent
+    llm_api_base: str = Field(
+        default="https://api.siliconflow.cn/v1",
+        description="OpenAI-compatible API base URL",
+    )
+    llm_api_key: str = Field(
+        default="",
+        description="API key for LLM provider",
+    )
+    llm_model: str = Field(
+        default="deepseek-ai/DeepSeek-V4-Pro",
+        description="Model name for LLM calls",
+    )
+
+    # Email & SMTP Settings
+    smtp_host: str | None = Field(default=None, description="SMTP server host")
+    smtp_port: int = Field(default=1025, description="SMTP server port")
+    smtp_username: str | None = Field(default=None, description="SMTP username")
+    smtp_password: str | None = Field(default=None, description="SMTP password")
+    smtp_use_tls: bool = Field(default=False, description="Use SSL/TLS for SMTP connection")
+    smtp_start_tls: bool = Field(default=False, description="Use STARTTLS for SMTP connection")
+    smtp_timeout_seconds: float = Field(default=10.0, description="SMTP timeout in seconds")
+    smtp_from_email: str = Field(default="noreply@eduagentx.local", description="Sender email address")
+    smtp_from_name: str = Field(default="EduAgentX", description="Sender display name")
+    public_frontend_url: str = Field(default="http://127.0.0.1:8081", description="Public frontend URL for links")
+    email_verification_ttl_seconds: int = Field(default=86400, description="Verification token TTL")
+    password_reset_ttl_seconds: int = Field(default=1800, description="Password reset token TTL")
+    email_auto_verify: bool = Field(default=False, description="Auto verify email in development")
+    email_outbox_encryption_key: str = Field(
+        default="dev-email-outbox-encryption-key-32b=",
+        description="AEAD key for outbox payload encryption",
+    )
+
     @model_validator(mode="after")
     def validate_production(self) -> Settings:
         """Validate production-specific settings."""

@@ -102,6 +102,7 @@ async def change_password(
 
     user.password_hash = hash_password(body.new_password)
     await db.flush()
+    await db.commit()
 
     return {"message": "Password changed successfully"}
 

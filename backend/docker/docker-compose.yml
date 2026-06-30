@@ -9,11 +9,13 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U eduagentx"]
+      test: ["CMD-SHELL", "pg_isready -U eduagentx -d eduagentx"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
   redis:
     image: redis:7-alpine
@@ -24,8 +26,32 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      timeout: 5s
-      retries: 5
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: eduagentx-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    command:
+      - alembic
+      - upgrade
+      - head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   backend:
     build:
@@ -33,18 +59,260 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://eduagentx:eduagentx@postgres:5432/eduagentx
-      REDIS_URL: redis://redis:6379/0
-      APP_SECRET_KEY: dev-secret-key-change-in-production
+    restart: unless-stopped
+    env_file:
+      - .env.docker
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:
       - ../app:/app/app
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import urllib.request;
+          urllib.request.urlopen(
+            'http://127.0.0.1:8000/health/ready',
+            timeout=3
+          )"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=2
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout 5 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app
+      - beat
+      - --loglevel=INFO
+      - -s
+      - /tmp/celerybeat-schedule
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import asyncio; asyncio.run(asyncio.sleep(0))' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  outbox-publisher:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    command:
+      - python
+      - -m
+      - app.workers.outbox_publisher
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import asyncio; asyncio.run(asyncio.sleep(0))' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1/health >/dev/null || exit 1
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  backend-e2e:
+    profiles:
+      - e2e
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://eduagentx:eduagentx@postgres:5432/eduagentx_e2e
+      REDIS_URL: redis://redis:6379/15
+      APP_SECRET_KEY: e2e-test-secret-key-at-least-32-chars
+      ENABLE_E2E_ROUTES: "true"
+      E2E_TOKEN: "e2e-test-token-change-me"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: noreply@eduagentx.local
+      SMTP_FROM_NAME: EduAgentX
+      PUBLIC_FRONTEND_URL: http://127.0.0.1:5175
+      EMAIL_VERIFICATION_TTL_SECONDS: "86400"
+      PASSWORD_RESET_TTL_SECONDS: "1800"
+      EMAIL_OUTBOX_ENCRYPTION_KEY: e2e-encryption-key-min-32-chars-long-for-test
+    depends_on:
+      migrate-e2e:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+
+  migrate-e2e:
+    profiles:
+      - e2e
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://eduagentx:eduagentx@postgres:5432/eduagentx_e2e
+      REDIS_URL: redis://redis:6379/15
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  celery-worker-e2e:
+    profiles:
+      - e2e
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: celery -A app.workers.celery_app worker --loglevel=INFO --concurrency=1
+    restart: unless-stopped
+    environment:
+      APP_ENV: test
+      ENABLE_E2E_ROUTES: "true"
+      E2E_TOKEN: "e2e-test-token-change-me"
+      DATABASE_URL: postgresql+asyncpg://eduagentx:eduagentx@postgres:5432/eduagentx_e2e
+      REDIS_URL: redis://redis:6379/15
+      APP_SECRET_KEY: e2e-test-secret-key-at-least-32-chars
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: noreply@eduagentx.local
+      SMTP_FROM_NAME: EduAgentX
+      PUBLIC_FRONTEND_URL: http://127.0.0.1:5175
+      EMAIL_VERIFICATION_TTL_SECONDS: "86400"
+      PASSWORD_RESET_TTL_SECONDS: "1800"
+      EMAIL_OUTBOX_ENCRYPTION_KEY: e2e-encryption-key-min-32-chars-long-for-test
+    depends_on:
+      migrate-e2e:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout 5 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  outbox-publisher-e2e:
+    profiles:
+      - e2e
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import asyncio
+        from app.workers.outbox_publisher import publish_pending_outbox
+        async def loop():
+            while True:
+                try:
+                    n = await publish_pending_outbox()
+                    if n > 0:
+                        print(f'Published {n} events')
+                except Exception as e:
+                    print(f'Publisher error: {e}')
+                await asyncio.sleep(2)
+        asyncio.run(loop())
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://eduagentx:eduagentx@postgres:5432/eduagentx_e2e
+      REDIS_URL: redis://redis:6379/15
+      APP_SECRET_KEY: e2e-test-secret-key-at-least-32-chars
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: noreply@eduagentx.local
+      SMTP_FROM_NAME: EduAgentX
+      EMAIL_OUTBOX_ENCRYPTION_KEY: e2e-encryption-key-min-32-chars-long-for-test
+    depends_on:
+      migrate-e2e:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../app:/app/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import asyncio; asyncio.run(asyncio.sleep(0))' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
 volumes:
   pgdata:

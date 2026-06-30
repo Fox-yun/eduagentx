@@ -75,12 +75,13 @@ class ResumeService:
         # Check for active state
         if goal.status == "active" and goal.current_path_id:
             current_node = path_stats.get("current_node")
+            current_node_dict = current_node if isinstance(current_node, dict) else None
             return {
                 "type": "active",
                 "path_id": goal.current_path_id,
                 "path_title": goal.title,
-                "current_node_id": current_node["id"] if current_node else "",
-                "current_node_title": current_node["title"] if current_node else "",
+                "current_node_id": current_node_dict["id"] if current_node_dict else "",
+                "current_node_title": current_node_dict["title"] if current_node_dict else "",
                 "completed_nodes": path_stats.get("completed_nodes", 0),
                 "total_nodes": path_stats.get("total_nodes", 0),
                 "progress": path_stats.get("progress", 0),
@@ -104,9 +105,7 @@ class ResumeService:
     async def _get_path_stats(self, path_id: str, user_id: str) -> dict[str, object]:
         """Compute real path statistics from the database."""
         # Get active version
-        path_result = await self.db.execute(
-            select(LearningPath).where(LearningPath.id == path_id)
-        )
+        path_result = await self.db.execute(select(LearningPath).where(LearningPath.id == path_id))
         path = path_result.scalar_one_or_none()
         if not path or not path.active_version_id:
             return {}
@@ -121,7 +120,9 @@ class ResumeService:
 
         # Count completed nodes
         completed_result = await self.db.execute(
-            select(func.count()).select_from(LearningProgress).where(
+            select(func.count())
+            .select_from(LearningProgress)
+            .where(
                 LearningProgress.user_id == user_id,
                 LearningProgress.path_id == path_id,
                 LearningProgress.status == "completed",
@@ -141,9 +142,7 @@ class ResumeService:
         # Get current node (first non-completed node)
         current_node = None
         nodes_result = await self.db.execute(
-            select(LearningNode)
-            .where(LearningNode.version_id == version_id)
-            .order_by(LearningNode.node_order)
+            select(LearningNode).where(LearningNode.version_id == version_id).order_by(LearningNode.node_order)
         )
         for node in nodes_result.scalars().all():
             prog_result = await self.db.execute(

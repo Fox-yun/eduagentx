@@ -41,8 +41,12 @@ class UnitService:
         user_id: str,
     ) -> dict[str, object]:
         """Get unit content for a node."""
+        from sqlalchemy.orm import selectinload
+
         result = await self.db.execute(
-            select(LearningUnitContent).where(
+            select(LearningUnitContent)
+            .options(selectinload(LearningUnitContent.versions))
+            .where(
                 LearningUnitContent.path_id == path_id,
                 LearningUnitContent.node_id == node_id,
                 LearningUnitContent.user_id == user_id,
@@ -112,7 +116,21 @@ class UnitService:
                 "active_lecture_task_id": None,
             }
 
-        content_data = content.content or {}
+        # Prefer active version content, fall back to legacy column
+        if content.active_version_id and content.versions:
+            active_version = next(
+                (v for v in content.versions if v.id == content.active_version_id),
+                None,
+            )
+            if active_version and active_version.content:
+                content_data = active_version.content
+                content_version = active_version.version_number
+            else:
+                content_data = content.content or {}
+                content_version = content.version_number or 1
+        else:
+            content_data = content.content or {}
+            content_version = content.version_number or 1
 
         # Check for active lecture generation task
         from app.common.enums import TaskStatus
@@ -137,9 +155,9 @@ class UnitService:
             "path_id": content.path_id,
             "path_version": 1,
             "node_id": content.node_id,
-            "content_version": content.version_number,
+            "content_version": content_version,
             "status": content.status,
-            "active_task_id": None,
+            "active_task_id": content.active_task_id,
             "introduction": content_data.get("introduction"),
             "objectives": content_data.get("objectives", []),
             "sections": content_data.get("sections", []),

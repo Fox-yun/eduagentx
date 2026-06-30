@@ -6,8 +6,8 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -20,7 +20,11 @@ def generate_uuid() -> str:
 
 
 class LearningUnitContent(Base):
-    """Generated content for a learning node."""
+    """Generated content for a learning node — the root entity.
+
+    Each node has exactly one LearningUnitContent row (enforced by UNIQUE(node_id)).
+    Content versions are tracked in LearningUnitContentVersion.
+    """
 
     __tablename__ = "learning_unit_contents"
 
@@ -28,15 +32,67 @@ class LearningUnitContent(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     path_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_paths.id"), nullable=False, index=True)
     path_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_generated")
+    active_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("learning_unit_content_versions.id"), nullable=True
+    )
+    active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Legacy columns — kept for backward compatibility during C1 migration.
+    # Remove in a future migration after all reads use active_version.
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     citations: Mapped[list | None] = mapped_column(JSON, nullable=True)
     generation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Relationship to versions through unit_content_id FK
+    versions: Mapped[list[LearningUnitContentVersion]] = relationship(
+        "LearningUnitContentVersion",
+        back_populates="unit_content",
+        foreign_keys="LearningUnitContentVersion.unit_content_id",
+        lazy="selectin",
+    )
+
+
+class LearningUnitContentVersion(Base):
+    """A versioned snapshot of generated unit content."""
+
+    __tablename__ = "learning_unit_content_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    unit_content_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("learning_unit_contents.id"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="generating")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="llm")
+    quality_status: Mapped[str] = mapped_column(String(20), nullable=False, default="final")
+    content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    generation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("unit_content_id", "version_number", name="uq_version_per_content"),
+    )
+
+    unit_content: Mapped[LearningUnitContent] = relationship(
+        "LearningUnitContent",
+        back_populates="versions",
+        foreign_keys=[unit_content_id],
+        lazy="selectin",
     )
 
 

@@ -1,4 +1,5 @@
 """Integration tests for concurrent diagnostic submission with real PostgreSQL."""
+
 from __future__ import annotations
 
 import uuid
@@ -53,37 +54,56 @@ class TestDiagnosticConcurrency:
         gid = await _create_goal(db_session, uid)
 
         attempt_id = str(uuid.uuid4())
-        db_session.add(DiagnosticAttempt(
-            id=attempt_id, diagnostic_id=f"diag-{gid[:8]}", goal_id=gid,
-            user_id=uid, status="draft",
-        ))
+        db_session.add(
+            DiagnosticAttempt(
+                id=attempt_id,
+                diagnostic_id=f"diag-{gid[:8]}",
+                goal_id=gid,
+                user_id=uid,
+                status="draft",
+            )
+        )
         await db_session.commit()
 
         # Lock and transition
-        a1 = (await db_session.execute(
-            sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == attempt_id).with_for_update()
-        )).scalar_one()
+        a1 = (
+            await db_session.execute(
+                sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == attempt_id).with_for_update()
+            )
+        ).scalar_one()
         assert a1.status == "draft"
         a1.status = "grading"
-        db_session.add(BackgroundTask(
-            id=str(uuid.uuid4()), user_id=uid, task_type="diagnostic_grading",
-            status="pending", target_type="attempt", target_id=attempt_id,
-        ))
+        db_session.add(
+            BackgroundTask(
+                id=str(uuid.uuid4()),
+                user_id=uid,
+                task_type="diagnostic_grading",
+                status="pending",
+                target_type="attempt",
+                target_id=attempt_id,
+            )
+        )
         await db_session.commit()
 
         # Fresh read sees grading
-        a2 = (await db_session.execute(
-            sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == attempt_id)
-        )).scalar_one()
+        a2 = (
+            await db_session.execute(sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == attempt_id))
+        ).scalar_one()
         assert a2.status == "grading"
 
         # Only one grading task
-        tasks = (await db_session.execute(
-            sa_select(BackgroundTask).where(
-                BackgroundTask.task_type == "diagnostic_grading",
-                BackgroundTask.target_id == attempt_id,
+        tasks = (
+            (
+                await db_session.execute(
+                    sa_select(BackgroundTask).where(
+                        BackgroundTask.task_type == "diagnostic_grading",
+                        BackgroundTask.target_id == attempt_id,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(tasks) == 1
 
     @pytest.mark.asyncio
@@ -93,13 +113,23 @@ class TestDiagnosticConcurrency:
         gid = await _create_goal(db_session, uid)
 
         attempt_id = str(uuid.uuid4())
-        db_session.add(DiagnosticAttempt(
-            id=attempt_id, diagnostic_id=f"diag-{gid[:8]}", goal_id=gid,
-            user_id=uid, status="completed", grading_quality="final",
-        ))
+        db_session.add(
+            DiagnosticAttempt(
+                id=attempt_id,
+                diagnostic_id=f"diag-{gid[:8]}",
+                goal_id=gid,
+                user_id=uid,
+                status="completed",
+                grading_quality="final",
+            )
+        )
         task = BackgroundTask(
-            id=str(uuid.uuid4()), user_id=uid, task_type="diagnostic_grading",
-            status="pending", target_type="attempt", target_id=attempt_id,
+            id=str(uuid.uuid4()),
+            user_id=uid,
+            task_type="diagnostic_grading",
+            status="pending",
+            target_type="attempt",
+            target_id=attempt_id,
         )
         db_session.add(task)
         await db_session.commit()
@@ -113,16 +143,24 @@ class TestDiagnosticConcurrency:
         assert r2["status"] == "completed"
 
         # No results created
-        results = (await db_session.execute(
-            sa_select(DiagnosticResult).where(DiagnosticResult.attempt_id == attempt_id)
-        )).scalars().all()
+        results = (
+            (await db_session.execute(sa_select(DiagnosticResult).where(DiagnosticResult.attempt_id == attempt_id)))
+            .scalars()
+            .all()
+        )
         assert len(results) == 0
 
         # No path tasks created
-        path_tasks = (await db_session.execute(
-            sa_select(BackgroundTask).where(
-                BackgroundTask.task_type == "learning_path_generation",
-                BackgroundTask.target_id == gid,
+        path_tasks = (
+            (
+                await db_session.execute(
+                    sa_select(BackgroundTask).where(
+                        BackgroundTask.task_type == "learning_path_generation",
+                        BackgroundTask.target_id == gid,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(path_tasks) == 0

@@ -1,19 +1,18 @@
 """Integration tests for diagnostic submission with real PostgreSQL."""
+
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select as sa_select
+from sqlalchemy.exc import IntegrityError
 
 from app.models.diagnostic import DiagnosticAnswer, DiagnosticAttempt, DiagnosticResult
 from app.models.goal import LearningGoal
 from app.models.task import BackgroundTask
 from app.models.user import User
-from app.services.diagnostic_scoring import ScoredAnswer, aggregate_results
 
 
 async def _create_user(db_session, prefix: str) -> str:
@@ -220,7 +219,7 @@ class TestDiagnosticSubmission:
             grading_quality="final",
         )
         db_session.add(result2)
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
@@ -253,7 +252,7 @@ class TestDiagnosticSubmission:
             max_score=10.0,
         )
         db_session.add(ans2)
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
@@ -268,12 +267,8 @@ class TestDiagnosticSubmission:
 
         assert aid1 != aid2
 
-        a1 = (
-            await db_session.execute(sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == aid1))
-        ).scalar_one()
-        a2 = (
-            await db_session.execute(sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == aid2))
-        ).scalar_one()
+        a1 = (await db_session.execute(sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == aid1))).scalar_one()
+        a2 = (await db_session.execute(sa_select(DiagnosticAttempt).where(DiagnosticAttempt.id == aid2))).scalar_one()
         assert a1.user_id == uid1
         assert a2.user_id == uid2
         assert a1.goal_id == gid1

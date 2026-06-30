@@ -1,9 +1,8 @@
 """Contract tests for diagnostic API — verify DTO safety and field completeness."""
+
 from __future__ import annotations
 
 import json
-
-import pytest
 
 
 class TestDiagnosticQuestionDto:
@@ -82,6 +81,5 @@ class TestDiagnosticContract:
         """Unknown fields in submit body should be rejected."""
         for error in diagnostic_submit_validation_errors:
             assert any(
-                msg in str(error.get("msg", "")).lower()
-                for msg in ("extra", "unexpected", "unknown", "field")
+                msg in str(error.get("msg", "")).lower() for msg in ("extra", "unexpected", "unknown", "field")
             ), f"Validation error should mention extra/unknown field: {error}"

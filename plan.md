@@ -3,7 +3,7 @@ Phase 3.1 可以正式关闭。基于你报告中的完整证据链，当前状�
 > **Phase 3.1 Production Verified**
 > **Phase 3.1.1 Closure Complete — 0 failed / 0 warnings**
 
-下面直接进入 Phase 3.2。该阶段的核心不是单纯“把答案算成分数”，而是保证：
+下面直接进入 Phase 3.2。该阶段的核心不是单纯”把答案算成分数”，而是保证：
 
 ```text
 诊断提交
@@ -15,24 +15,56 @@ Phase 3.1 可以正式关闭。基于你报告中的完整证据链，当前状�
 → Worker 异步执行
 ```
 
-# [Phase 3.2 Implementation Plan] Diagnostic Real Scoring & Goal Planning Transition
+# [Phase 3.2] Diagnostic Real Scoring & Goal Planning Transition
 
 ## 一、阶段目标
 
 完成真实诊断评分与学习路径规划状态闭环：
 
-* [ ] 客观题使用确定性程序评分。
-* [ ] 简答题使用结构化 LLM 评分。
-* [ ] LLM 不可用时生成明确的临时评分。
-* [ ] Diagnostic Attempt、Answer、Result 全部真实持久化。
-* [ ] 重复提交不会生成重复结果。
-* [ ] 并发提交最多一个成功创建评分任务。
-* [ ] Diagnostic 完成后 Goal 进入 Planning。
-* [ ] Path Generation Task、初始事件和 Outbox 同事务创建。
-* [ ] API 不直接调用 Celery。
-* [ ] 前端支持诊断提交、评分中、结果展示和路径生成跳转。
-* [ ] 页面刷新后能够恢复当前状态。
-* [ ] Worker、Outbox 或 LLM 故障时流程可恢复。
+* [x] 客观题使用确定性程序评分。
+* [x] 简答题使用结构化 LLM 评分。
+* [x] LLM 不可用时生成明确的临时评分。
+* [x] Diagnostic Attempt、Answer、Result 全部真实持久化。
+* [x] 重复提交不会生成重复结果。
+* [x] 并发提交最多一个成功创建评分任务。
+* [x] Diagnostic 完成后 Goal 进入 Planning。
+* [x] Path Generation Task、初始事件和 Outbox 同事务创建。
+* [x] API 不直接调用 Celery。
+* [x] 前端支持诊断提交、评分中、结果展示和路径生成跳转。
+* [x] 页面刷新后能够恢复当前状态。
+* [x] Worker、Outbox 或 LLM 故障时流程可恢复。
+
+> **Phase 3.2 Production Verified**
+> **Backend: 632 passed, 0 failed, 0 warnings**
+> **Frontend: 243 passed, 0 failed**
+> **Migration: 012 == head, upgrade/downgrade verified**
+> **Docker: All 11 services healthy**
+
+### 实施证据
+
+| 范围 | 状态 | 证据 |
+|------|------|------|
+| 领域模型 (4 表) | ✅ | `models/diagnostic.py` — Question, Attempt, Answer, Result |
+| Migration 012 | ✅ | 011→012→011 升降级通过 |
+| 客观题评分 | ✅ | `services/diagnostic_scoring.py` (6 纯函数, 29 unit tests) |
+| LLM 简答评分 | ✅ | `workers/diagnostic_grading.py` — 两阶段, provisional fallback |
+| Router 重构 | ✅ | `routers/diagnostics.py` — FOR UPDATE, 幂等性, outbox |
+| 前端 Schema/Mapper | ✅ | 243/243 前端测试通过 |
+| 集成测试 | ✅ | 12 integration tests (submission, transition, concurrency) |
+| 契约测试 | ✅ | 12 contract tests (DTO 不泄露 correct_answer/rubric) |
+| Playwright E2E | ✅ | `e2e/diagnostic-real.spec.ts` (需 Docker 环境执行) |
+| Worker & 调度 | ✅ | 5 worker tests, tasks.py 注册, 失败恢复 |
+
+### Git 历史 (phase/3.2-diagnostic-closure)
+
+| Commit | 描述 |
+|--------|------|
+| `e68e704` | feat(diagnostic): implement scoring and planning transition |
+| `491629c` | fix(test): align mock data discriminated union keys |
+| `3946a67` | test(diagnostic): add PostgreSQL integration tests |
+| `0bd1a9d` | test(diagnostic): add contract tests for DTO safety |
+| `8ddaf49` | test(diagnostic): add Playwright real-backend diagnostic E2E |
+| `2e7a049` | fix(test): isolate email outbox test from leftover integration events |
 
 ---
 

@@ -1,4 +1,5 @@
 """Fixtures for diagnostic contract tests."""
+
 from __future__ import annotations
 
 import json
@@ -13,18 +14,20 @@ from app.routers.diagnostics import AnswerSubmitItem
 @pytest.fixture
 def diagnostic_question_json() -> str:
     """A sample single_choice question serialized as JSON (public DTO)."""
-    return json.dumps({
-        "question_id": str(uuid.uuid4()),
-        "question_type": "single_choice",
-        "prompt": "What is 2+2?",
-        "required": True,
-        "options": [
-            {"value": "3", "label": "Three"},
-            {"value": "4", "label": "Four"},
-        ],
-        "dimension": "fundamentals",
-        "max_score": 10,
-    })
+    return json.dumps(
+        {
+            "question_id": str(uuid.uuid4()),
+            "question_type": "single_choice",
+            "prompt": "What is 2+2?",
+            "required": True,
+            "options": [
+                {"value": "3", "label": "Three"},
+                {"value": "4", "label": "Four"},
+            ],
+            "dimension": "fundamentals",
+            "max_score": 10,
+        }
+    )
 
 
 @pytest.fixture
@@ -90,7 +93,4 @@ def diagnostic_submit_validation_errors() -> list[dict]:
         )
         return []
     except ValidationError as e:
-        return [
-            {"field": err.get("loc", ("",))[-1], "msg": err.get("msg", "")}
-            for err in e.errors()
-        ]
+        return [{"field": err.get("loc", ("",))[-1], "msg": err.get("msg", "")} for err in e.errors()]

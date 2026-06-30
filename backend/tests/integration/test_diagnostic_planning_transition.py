@@ -1,4 +1,5 @@
 """Integration tests for diagnostic → planning transition with real PostgreSQL."""
+
 from __future__ import annotations
 
 import uuid
@@ -10,8 +11,7 @@ from sqlalchemy import select as sa_select
 
 from app.models.diagnostic import DiagnosticAnswer, DiagnosticAttempt, DiagnosticResult
 from app.models.goal import LearningGoal
-from app.models.outbox import OutboxEvent
-from app.models.task import BackgroundTask, TaskEvent
+from app.models.task import BackgroundTask
 from app.models.user import User
 
 
@@ -45,9 +45,7 @@ async def _create_goal(db_session, user_id: str) -> str:
     return gid
 
 
-async def _setup_grading_attempt(
-    db_session, user_id: str, goal_id: str
-) -> tuple[str, str, list[dict]]:
+async def _setup_grading_attempt(db_session, user_id: str, goal_id: str) -> tuple[str, str, list[dict]]:
     """Create an attempt that looks like it's ready for grading completion."""
     attempt_id = str(uuid.uuid4())
     attempt = DiagnosticAttempt(
@@ -190,8 +188,8 @@ class TestDiagnosticPlanningTransition:
     @pytest.mark.asyncio
     async def test_provisional_grading_quality(self, db_session):
         """LLM failure produces provisional grading with fallback."""
-        from app.workers.diagnostic_grading import execute_diagnostic_grading
         from app.services.llm import LLMError
+        from app.workers.diagnostic_grading import execute_diagnostic_grading
 
         uid = await _create_user(db_session, "prov")
         gid = await _create_goal(db_session, uid)
@@ -237,9 +235,7 @@ class TestDiagnosticPlanningTransition:
             await execute_diagnostic_grading(db_session, task)
 
         # Re-run should be idempotent (already completed)
-        task2 = (
-            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id))
-        ).scalar_one()
+        task2 = (await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id))).scalar_one()
         result2 = await execute_diagnostic_grading(db_session, task2)
         assert result2["status"] == "completed"
 
@@ -260,11 +256,7 @@ class TestDiagnosticPlanningTransition:
 
         # Only one result
         results = (
-            (
-                await db_session.execute(
-                    sa_select(DiagnosticResult).where(DiagnosticResult.attempt_id == attempt_id)
-                )
-            )
+            (await db_session.execute(sa_select(DiagnosticResult).where(DiagnosticResult.attempt_id == attempt_id)))
             .scalars()
             .all()
         )
@@ -288,11 +280,7 @@ class TestDiagnosticPlanningTransition:
 
         # All answers have scores
         answers = (
-            (
-                await db_session.execute(
-                    sa_select(DiagnosticAnswer).where(DiagnosticAnswer.attempt_id == attempt_id)
-                )
-            )
+            (await db_session.execute(sa_select(DiagnosticAnswer).where(DiagnosticAnswer.attempt_id == attempt_id)))
             .scalars()
             .all()
         )

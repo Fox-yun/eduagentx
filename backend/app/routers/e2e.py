@@ -79,6 +79,7 @@ async def bootstrap_learning_session(
     Returns JSON with auth tokens and sets CSRF cookie.
     The caller can use these tokens directly in subsequent API calls.
     """
+    from app.config import get_settings
     from app.core.security import (
         create_access_token,
         generate_csrf_token,
@@ -87,8 +88,6 @@ async def bootstrap_learning_session(
         hash_password,
         hash_token,
     )
-
-    from app.config import get_settings
 
     uid = str(uuid.uuid4())[:8]
     email = f"e2e-bootstrap-{uid}@example.com"

@@ -73,8 +73,8 @@ class TestModelFieldConstraints:
         assert len(valid) == 3
 
     def test_content_status_values(self):
-        valid = {"not_generated", "generating", "ready", "failed"}
-        assert len(valid) == 4
+        valid = {"not_generated", "generating", "ready", "regenerating", "failed"}
+        assert len(valid) == 5
 
     def test_path_status_values(self):
         valid = {"generating", "draft", "active", "updating", "completed", "failed"}

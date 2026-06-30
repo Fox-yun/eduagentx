@@ -1608,24 +1608,31 @@ npm run build
 - [ ] 前端 typecheck / lint / test / contract / build 通过
 - [ ] Git 提交
 
-### 下一步：Phase 3.4-C1 — 版本模型与 Migration 015
+### 当前阶段：Phase 3.4-C1 — 版本模型与 Migration 015 ✅ 已完成
 
-- [ ] LearningUnitContentVersion 模型
-- [ ] LearningUnitContent.active_version_id
-- [ ] LearningUnitContent.active_task_id
-- [ ] Migration 015 创建顺序 (Version 表 → 字段 → FK)
-- [ ] 旧内容回填为 Version 1
-- [ ] Downgrade 验证
+- [x] LearningUnitContentVersion 模型 (generating/ready/failed/superseded)
+- [x] LearningUnitContent.active_version_id (FK → learning_unit_content_versions.id)
+- [x] LearningUnitContent.active_task_id
+- [x] LearningUnitContent.last_error_code / last_error_message
+- [x] LearningUnitContent.node_id → UNIQUE
+- [x] Migration 015: 创建版本表 → 添加字段 → 回填旧内容 → 添加 FK
+- [x] 回填规则: ready+content → V1; generating/regenerating+content → ready V1; 空/failed 不创建
+- [x] 读取优先使用 active_version.content，无版本时回退 legacy 列
+- [x] Migration round-trip (014→015→014→head)
+- [x] 遗留列 (content, version_number) 保留为兼容
+- [x] 605 passed, 0 回归
 
-### 下一步：Phase 3.4-C2 — 安全 Generate / Regenerate
+### 当前阶段：Phase 3.4-C2 — 安全 Generate / Regenerate ✅ 已完成
 
-- [ ] Generate 幂等 (已有 Ready 直接返回)
-- [ ] Regenerate 创建新 generating Version
-- [ ] 生成期间旧内容持续可读
-- [ ] 成功后原子切换 active_version_id
-- [ ] 失败后旧版本保留
-- [ ] Worker 双事务拆分 (Transaction A / LLM / Transaction B)
-- [ ] Integration Tests
+- [x] Generate 幂等 (已有 Ready 直接返回，已有 Task 返回相同 task_id)
+- [x] Regenerate 创建新 generating Version，保留 active_version_id
+- [x] GET content 返回 active_version_id + pending_version_id (regenerating 时)
+- [x] 成功后原子切换: 旧版本→superseded, 新版本→ready, active_version_id→新版本
+- [x] 失败后旧版本保留, 版本→failed, active_version_id 不变
+- [x] Worker 双事务拆分: Txn A(commit) → LLM → Txn B(FOR UPDATE + commit)
+- [x] Txn B 检查 Task 未取消 (CANCELLED → version→failed, 不激活)
+- [x] Fallback 内容也走 Txn B (保持原子切换)
+- [x] 3 worker tests updated (605 passed, 0 回归)
 
 ### 下一步：Phase 3.4-D — 文档资源
 

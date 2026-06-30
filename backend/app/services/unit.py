@@ -41,8 +41,12 @@ class UnitService:
         user_id: str,
     ) -> dict[str, object]:
         """Get unit content for a node."""
+        from sqlalchemy.orm import selectinload
+
         result = await self.db.execute(
-            select(LearningUnitContent).where(
+            select(LearningUnitContent)
+            .options(selectinload(LearningUnitContent.versions))
+            .where(
                 LearningUnitContent.path_id == path_id,
                 LearningUnitContent.node_id == node_id,
                 LearningUnitContent.user_id == user_id,
@@ -112,7 +116,33 @@ class UnitService:
                 "active_lecture_task_id": None,
             }
 
-        content_data = content.content or {}
+        # Prefer active version content, fall back to legacy column
+        content_version = 1
+        content_data: dict[str, Any] = {}
+        pending_version_id: str | None = None
+        if content.active_version_id and content.versions:
+            active_version = next(
+                (v for v in content.versions if v.id == content.active_version_id),
+                None,
+            )
+            if active_version and active_version.content:
+                content_data = active_version.content
+                content_version = active_version.version_number
+            else:
+                content_data = content.content or {}
+                content_version = content.version_number or 1
+        else:
+            content_data = content.content or {}
+            content_version = content.version_number or 1
+
+        # Find pending version during regeneration
+        if content.status == "regenerating" and content.active_task_id and content.versions:
+            pending = next(
+                (v for v in content.versions if v.status == "generating"),
+                None,
+            )
+            if pending:
+                pending_version_id = pending.id
 
         # Check for active lecture generation task
         from app.common.enums import TaskStatus
@@ -137,9 +167,11 @@ class UnitService:
             "path_id": content.path_id,
             "path_version": 1,
             "node_id": content.node_id,
-            "content_version": content.version_number,
+            "content_version": content_version,
             "status": content.status,
-            "active_task_id": None,
+            "active_task_id": content.active_task_id,
+            "active_version_id": content.active_version_id,
+            "pending_version_id": pending_version_id,
             "introduction": content_data.get("introduction"),
             "objectives": content_data.get("objectives", []),
             "sections": content_data.get("sections", []),
@@ -150,6 +182,210 @@ class UnitService:
             "lecture": content_data.get("lecture"),
             "active_lecture_task_id": active_lecture_task.id if active_lecture_task else None,
         }
+
+    async def _ensure_unit_content(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+        *,
+        for_update: bool = False,
+    ) -> LearningUnitContent | None:
+        """Get or create a LearningUnitContent row, optionally with row lock."""
+        from sqlalchemy.orm import selectinload
+
+        stmt = (
+            select(LearningUnitContent)
+            .options(selectinload(LearningUnitContent.versions))
+            .where(
+                LearningUnitContent.path_id == path_id,
+                LearningUnitContent.node_id == node_id,
+                LearningUnitContent.user_id == user_id,
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def generate_content(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+        path_version_id: str | None = None,
+    ) -> dict[str, object]:
+        """Start generating unit content. Idempotent if already ready or generating."""
+        from app.common.enums import TaskStatus
+        from app.models.task import BackgroundTask
+        from app.models.unit import LearningUnitContentVersion
+        from app.models.path import LearningPath
+
+        # Lock the unit content row
+        existing = await self._ensure_unit_content(path_id, node_id, user_id, for_update=True)
+
+        # If already ready with content, return existing (idempotent)
+        if existing and existing.status == "ready" and existing.active_version_id:
+            return {
+                "next_step": "ready",
+                "unit_content_id": existing.id,
+                "active_version_id": existing.active_version_id,
+                "active_task_id": None,
+            }
+
+        # Check for existing pending/running task
+        if existing and existing.active_task_id:
+            task_result = await self.db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == existing.active_task_id,
+                    BackgroundTask.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value]),
+                )
+            )
+            active_task = task_result.scalar_one_or_none()
+            if active_task:
+                return {
+                    "next_step": "generating",
+                    "active_task_id": active_task.id,
+                    "unit_content_id": existing.id,
+                    "version_id": None,
+                }
+
+        # Resolve path_version_id if not provided
+        if not path_version_id:
+            path_result = await self.db.execute(
+                select(LearningPath).where(LearningPath.id == path_id)
+            )
+            path = path_result.scalar_one_or_none()
+            path_version_id = path.active_version_id if path else None
+
+        # Create or update unit content row
+        version_id = str(uuid.uuid4())
+        unit_content_id = existing.id if existing else str(uuid.uuid4())
+
+        if not existing:
+            from app.models.unit import LearningUnitContent as UnitContentModel
+
+            uc = UnitContentModel(
+                id=unit_content_id,
+                user_id=user_id,
+                path_id=path_id,
+                path_version_id=path_version_id or "",
+                node_id=node_id,
+                status="generating",
+            )
+            self.db.add(uc)
+            await self.db.flush()
+
+        # Create generating version
+        version = LearningUnitContentVersion(
+            id=version_id,
+            unit_content_id=unit_content_id,
+            version_number=self._next_version_number(existing),
+            status="generating",
+            source="llm",
+            quality_status="final",
+        )
+        self.db.add(version)
+        await self.db.flush()
+
+        # Enqueue task via enqueue_task (no commit)
+        from app.services.task import TaskService
+
+        task_service = TaskService(self.db)
+        task = await task_service.enqueue_task(
+            user_id=user_id,
+            task_type="learning_unit_generation",
+            target_type="node",
+            target_id=node_id,
+            target_metadata={"path_id": path_id, "unit_content_version_id": version_id},
+        )
+
+        # Update unit content with task info
+        update_target = existing or uc  # type: ignore[possibly-undefined]
+        update_target.active_task_id = task.id
+        update_target.status = "generating"
+
+        await self.db.commit()
+
+        return {
+            "next_step": "generating",
+            "active_task_id": task.id,
+            "unit_content_id": unit_content_id,
+            "version_id": version_id,
+        }
+
+    async def regenerate_content(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+        preferences: str | None = None,
+    ) -> dict[str, object]:
+        """Regenerate unit content preserving the existing active version."""
+        from app.common.enums import TaskStatus
+        from app.models.task import BackgroundTask
+        from app.models.unit import LearningUnitContentVersion
+
+        # Lock the unit content row
+        existing = await self._ensure_unit_content(path_id, node_id, user_id, for_update=True)
+        if not existing:
+            raise ApiError(code="NO_CONTENT", message="Generate content first before regenerating", status_code=400)
+
+        # Check for existing pending/running task
+        if existing.active_task_id:
+            task_result = await self.db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == existing.active_task_id,
+                    BackgroundTask.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value]),
+                )
+            )
+            active_task = task_result.scalar_one_or_none()
+            if active_task:
+                return {"next_step": "generating", "active_task_id": active_task.id}
+
+        # Create new generating version (keep existing active_version_id)
+        version_id = str(uuid.uuid4())
+        version = LearningUnitContentVersion(
+            id=version_id,
+            unit_content_id=existing.id,
+            version_number=self._next_version_number(existing),
+            status="generating",
+            source="llm",
+            quality_status="final",
+        )
+        self.db.add(version)
+        await self.db.flush()
+
+        # Enqueue task
+        from app.services.task import TaskService
+
+        task_service = TaskService(self.db)
+        metadata: dict[str, Any] = {"path_id": path_id, "unit_content_version_id": version_id}
+        if preferences:
+            metadata["preferences"] = preferences
+
+        task = await task_service.enqueue_task(
+            user_id=user_id,
+            task_type="learning_unit_generation",
+            target_type="node",
+            target_id=node_id,
+            target_metadata=metadata,
+        )
+
+        # Update unit content
+        existing.active_task_id = task.id
+        existing.status = "regenerating"
+
+        await self.db.commit()
+
+        return {"next_step": "generating", "active_task_id": task.id, "version_id": version_id}
+
+    @staticmethod
+    def _next_version_number(content: LearningUnitContent | None) -> int:
+        """Determine the next version number."""
+        if not content or not content.versions:
+            return 1
+        return max(v.version_number for v in content.versions) + 1
 
     async def create_assessment(
         self,

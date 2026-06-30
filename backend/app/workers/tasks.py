@@ -484,15 +484,31 @@ async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
 
 @register_handler("learning_unit_generation")
 async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
-    """Execute a unit content generation task using LLM for detailed content."""
+    """Execute a unit content generation task using two-phase transaction.
+
+    Transaction A (short, committed):
+      - Load node/goal context
+      - Mark version as generating
+      - Commit (release locks before LLM)
+
+    LLM call (no DB transaction):
+      - Generate structured content
+      - Validate structure
+      - Review quality
+
+    Transaction B (short, committed via new session):
+      - SELECT version FOR UPDATE
+      - Check task not cancelled
+      - Save content and atomically switch active version
+      - On failure: mark version failed, keep old active version
+    """
     import json
-    import uuid
 
     from sqlalchemy import select
 
     from app.models.goal import LearningGoal
     from app.models.path import LearningNode, LearningPath
-    from app.models.unit import LearningUnitContent
+    from app.models.unit import LearningUnitContent, LearningUnitContentVersion
     from app.services.llm import LLMError, llm_json
 
     node_id = task.target_id
@@ -500,10 +516,13 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     metadata = task.target_metadata or {}
     path_id = metadata.get("path_id", "")
     preferences = metadata.get("preferences", "")
+    version_id = metadata.get("unit_content_version_id", "")
 
-    await update_task_status(db, task.id, "running", progress=10, stage="analyzing", message="正在分析节点上下文...")
+    # ------------------------------------------------
+    # Transaction A: load context, mark version generating
+    # ------------------------------------------------
+    await update_task_status(db, task.id, "running", progress=5, stage="analyzing", message="正在分析节点上下文...")
 
-    # Look up node context
     node_result = await db.execute(select(LearningNode).where(LearningNode.id == node_id))
     node = node_result.scalar_one_or_none()
     node_title = node.title if node else "未知节点"
@@ -517,14 +536,24 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     if path_id:
         path_result = await db.execute(select(LearningPath).where(LearningPath.id == path_id))
         path = path_result.scalar_one_or_none()
-        path_version_id = path.active_version_id if path and path.active_version_id else "1"
         if path and path.goal_id:
             goal_result = await db.execute(select(LearningGoal).where(LearningGoal.id == path.goal_id))
             goal = goal_result.scalar_one_or_none()
             if goal:
                 goal_title = goal.title or ""
-    else:
-        path_version_id = "1"
+
+    # Load the version and mark it generating
+    version: LearningUnitContentVersion | None = None
+    if version_id:
+        version_result = await db.execute(
+            select(LearningUnitContentVersion).where(LearningUnitContentVersion.id == version_id)
+        )
+        version = version_result.scalar_one_or_none()
+        if version:
+            version.status = "generating"
+
+    # Commit Transaction A — release all locks before LLM call
+    await db.commit()
 
     objectives = (
         learning_outcomes
@@ -535,7 +564,9 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
         ]
     )
 
-    # Try LLM generation
+    # ------------------------------------------------
+    # LLM call (no DB transaction)
+    # ------------------------------------------------
     content_data = None
     await update_task_status(
         db, task.id, "running", progress=25, stage="generating", message="智能体正在调用大语言模型生成内容..."
@@ -550,7 +581,6 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
 
         content_data = await llm_json(system_prompt, user_msg, temperature=0.6, max_tokens=12000)
 
-        # Validate structure
         if not content_data.get("sections") or len(content_data["sections"]) < 2:
             raise LLMError("Insufficient sections generated")
 
@@ -566,91 +596,9 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
 
     # Fallback: template-based content
     if content_data is None:
-        diff_map = {"beginner": "入门", "intermediate": "进阶", "advanced": "高级"}
-        difficulty_label = diff_map.get(node_difficulty, "基础")
-        node_desc_fallback = node_desc or f"本单元将系统学习{node_title}的理论基础与实践应用。"
+        content_data = _build_fallback_content(node_title, node_desc, node_difficulty, objectives)
 
-        intro = f"# {node_title}\n\n{node_desc_fallback}"
-
-        sec1_intro = (
-            f"## 概念介绍\n\n"
-            f"{node_desc or f'{node_title}是本学习路径中的一个重要知识点。'}\n\n"
-            f"本节将从{difficulty_label}角度出发，"
-            f"帮助你建立对{node_title}的整体认知。\n\n### 学习目标\n\n"
-        )
-        sec1_content = sec1_intro + "\n".join(f"- {o}" for o in objectives)
-
-        sec2_content = (
-            f"## 核心原理\n\n要深入理解{node_title}，需要掌握以下关键点：\n\n"
-            f"1. **基本定义**：{node_title}的基本定义和适用场景\n"
-            f"2. **工作原理**：内部机制和数据流动方式\n"
-            f"3. **关键特性**：区别于其他概念的核心特征\n\n"
-            f"> 💡 建议结合实际案例来理解这些概念。"
-        )
-
-        sec3_content = (
-            f"## 实际应用\n\n{node_title}在实际开发中有广泛的应用场景。\n\n"
-            f"### 代码示例\n\n```python\n"
-            f"# {node_title} 基本示例\ndef main():\n"
-            f"    result = process()\n    return result\n\n"
-            f"def process():\n    return '处理完成'\n\n"
-            f"if __name__ == '__main__':\n    print(main())\n```\n\n"
-            f"### 注意事项\n\n1. 确保理解前置概念\n"
-            f"2. 注意边界条件的处理\n3. 考虑性能和可扩展性"
-        )
-
-        sec4_content = (
-            f"## 常见问题与最佳实践\n\n### 最佳实践\n\n"
-            f"- ✅ 先理解概念，再动手实践\n"
-            f"- ✅ 多做练习，加深理解\n"
-            f"- ✅ 阅读优秀项目中的实际应用\n\n"
-            f"### 进阶方向\n\n"
-            f"掌握{node_title}的基础后，可以进一步探索高级用法和性能优化技巧。"
-        )
-
-        content_data = {
-            "introduction": intro,
-            "objectives": objectives,
-            "sections": [
-                {
-                    "section_id": "sec-1",
-                    "title": f"什么是{node_title}？",
-                    "content": sec1_content,
-                    "order": 1,
-                },
-                {
-                    "section_id": "sec-2",
-                    "title": f"{node_title}的核心原理",
-                    "content": sec2_content,
-                    "order": 2,
-                },
-                {
-                    "section_id": "sec-3",
-                    "title": f"{node_title}的实际应用",
-                    "content": sec3_content,
-                    "order": 3,
-                },
-                {
-                    "section_id": "sec-4",
-                    "title": "常见问题与最佳实践",
-                    "content": sec4_content,
-                    "order": 4,
-                },
-            ],
-            "practice_tasks": [
-                {
-                    "task_id": f"pt-{i + 1}",
-                    "title": f"练习{i + 1}：{node_title}基础操作",
-                    "description": f"尝试使用{node_title}完成一个简单的任务。",
-                    "difficulty": node_difficulty,
-                }
-                for i in range(3)
-            ],
-            "summary": f"本单元系统地介绍了{node_title}的核心概念和实际应用。建议完成练习后再进行通关评估。",
-            "references": [{"title": f"{node_title} 官方文档", "url": None, "type": "documentation"}],
-        }
-
-    # Review step — quality check via LLM
+    # Review step
     review_passed = True
     try:
         await update_task_status(
@@ -677,44 +625,198 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     except Exception as e:
         logger.warning("review_step_error", error=str(e))
 
-    await update_task_status(db, task.id, "running", progress=90, stage="finalizing", message="正在写入学习内容...")
+    await update_task_status(db, task.id, "running", progress=90, stage="finalizing", message="正在保存学习内容...")
 
-    # Check if this is a regeneration (existing content to update)
-    existing_content_result = await db.execute(
-        select(LearningUnitContent).where(
-            LearningUnitContent.path_id == path_id,
-            LearningUnitContent.node_id == node_id,
-            LearningUnitContent.user_id == user_id,
-        )
-    )
-    existing_content = existing_content_result.scalar_one_or_none()
-
-    if existing_content:
-        # Safe regeneration: update existing record atomically
-        existing_content.status = "ready"
-        existing_content.content = content_data
-        existing_content.version_number = (existing_content.version_number or 1) + 1
-        await db.flush()
-        unit_id = existing_content.id
-        logger.info("unit_content_regenerated", unit_id=unit_id, version=existing_content.version_number)
-    else:
-        # First-time generation: create new record
-        content = LearningUnitContent(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            path_id=path_id,
-            path_version_id=path_version_id,
-            node_id=node_id,
-            status="ready",
-            content=content_data,
-        )
-        db.add(content)
-        await db.flush()
-        unit_id = content.id
+    # ------------------------------------------------
+    # Transaction B: atomic version switch (same session, new transaction)
+    #    The session was released by commit() above, so with_for_update()
+    #    will acquire a fresh lock.
+    # ------------------------------------------------
+    try:
+        result = await _complete_unit_generation(db, version_id, content_data, task.id)
+        unit_id = result["unit_id"]
+    except Exception:
+        logger.exception("unit_generation_txn_b_failed", node_id=node_id, version_id=version_id)
+        await _fail_unit_generation(db, version_id)
+        raise
 
     await update_task_status(db, task.id, "running", progress=100, stage="completed", message="单元内容生成完成")
-
     return {"path_id": path_id, "unit_id": unit_id, "node_id": node_id}
+
+
+async def _complete_unit_generation(
+    txn_db: Any,
+    version_id: str,
+    content_data: dict[str, Any],
+    task_id: str,
+) -> dict[str, str]:
+    """Transaction B: atomically save generated content and switch versions."""
+    from app.common.datetime import utc_now
+    from sqlalchemy import select
+
+    from app.models.unit import LearningUnitContent, LearningUnitContentVersion
+
+    # Load version FOR UPDATE to prevent concurrent completion
+    version_result = await txn_db.execute(
+        select(LearningUnitContentVersion)
+        .where(LearningUnitContentVersion.id == version_id)
+        .with_for_update()
+    )
+    version: LearningUnitContentVersion | None = version_result.scalar_one_or_none()
+    if not version:
+        raise ValueError(f"Version {version_id} not found")
+
+    # Check task was not cancelled mid-flight
+    from app.common.enums import TERMINAL_TASK_STATUSES, TaskStatus
+    from app.models.task import BackgroundTask
+
+    task_result = await txn_db.execute(
+        select(BackgroundTask).where(BackgroundTask.id == task_id)
+    )
+    bg_task = task_result.scalar_one_or_none()
+    if bg_task and bg_task.status == TaskStatus.CANCELLED.value:
+        # Task was cancelled — don't activate this version
+        version.status = "failed"
+        version.error_code = "TASK_CANCELLED"
+        version.error_message = "Task was cancelled before completion"
+        await txn_db.commit()
+        raise RuntimeError("Task was cancelled")
+
+    # Save content to version
+    version.status = "ready"
+    version.content = content_data
+    version.completed_at = utc_now()
+
+    # Load unit content and atomically switch active version
+    uc_result = await txn_db.execute(
+        select(LearningUnitContent)
+        .where(LearningUnitContent.id == version.unit_content_id)
+        .with_for_update()
+    )
+    uc: LearningUnitContent | None = uc_result.scalar_one_or_none()
+    if uc:
+        # Mark old active version as superseded
+        if uc.active_version_id:
+            old_version_result = await txn_db.execute(
+                select(LearningUnitContentVersion)
+                .where(LearningUnitContentVersion.id == uc.active_version_id)
+            )
+            old_version = old_version_result.scalar_one_or_none()
+            if old_version and old_version.id != version.id:
+                old_version.status = "superseded"
+
+        # Atomically switch
+        uc.active_version_id = version.id
+        version.activated_at = utc_now()
+        uc.status = "ready"
+        uc.active_task_id = None
+
+    await txn_db.commit()
+    return {"unit_id": uc.id if uc else version.unit_content_id}
+
+
+async def _fail_unit_generation(txn_db: Any, version_id: str) -> None:
+    """Mark a version as failed without affecting the active version."""
+    from sqlalchemy import select
+
+    from app.models.unit import LearningUnitContent, LearningUnitContentVersion
+
+    try:
+        version_result = await txn_db.execute(
+            select(LearningUnitContentVersion)
+            .where(LearningUnitContentVersion.id == version_id)
+            .with_for_update()
+        )
+        version = version_result.scalar_one_or_none()
+        if version and version.status == "generating":
+            version.status = "failed"
+
+            # Reset unit content to ready (old version still active)
+            uc_result = await txn_db.execute(
+                select(LearningUnitContent)
+                .where(LearningUnitContent.id == version.unit_content_id)
+                .with_for_update()
+            )
+            uc = uc_result.scalar_one_or_none()
+            if uc and uc.active_task_id:
+                uc.status = "ready" if uc.active_version_id else "failed"
+                uc.active_task_id = None
+
+            await txn_db.commit()
+    except Exception:
+        logger.exception("failed_to_mark_version_failed", version_id=version_id)
+        await txn_db.rollback()
+
+
+def _build_fallback_content(
+    node_title: str,
+    node_desc: str | None,
+    node_difficulty: str,
+    objectives: list[str],
+) -> dict[str, Any]:
+    """Build template-based fallback content when LLM is unavailable."""
+    diff_map = {"beginner": "入门", "intermediate": "进阶", "advanced": "高级"}
+    difficulty_label = diff_map.get(node_difficulty, "基础")
+    node_desc_fallback = node_desc or f"本单元将系统学习{node_title}的理论基础与实践应用。"
+
+    intro = f"# {node_title}\n\n{node_desc_fallback}"
+
+    sec1_content = (
+        f"## 概念介绍\n\n"
+        f"{node_desc or f'{node_title}是本学习路径中的一个重要知识点。'}\n\n"
+        f"本节将从{difficulty_label}角度出发，"
+        f"帮助你建立对{node_title}的整体认知。\n\n### 学习目标\n\n"
+    ) + "\n".join(f"- {o}" for o in objectives)
+
+    sec2_content = (
+        f"## 核心原理\n\n要深入理解{node_title}，需要掌握以下关键点：\n\n"
+        f"1. **基本定义**：{node_title}的基本定义和适用场景\n"
+        f"2. **工作原理**：内部机制和数据流动方式\n"
+        f"3. **关键特性**：区别于其他概念的核心特征\n\n"
+        f"> 💡 建议结合实际案例来理解这些概念。"
+    )
+
+    sec3_content = (
+        f"## 实际应用\n\n{node_title}在实际开发中有广泛的应用场景。\n\n"
+        f"### 代码示例\n\n```python\n"
+        f"# {node_title} 基本示例\ndef main():\n"
+        f"    result = process()\n    return result\n\n"
+        f"def process():\n    return '处理完成'\n\n"
+        f"if __name__ == '__main__':\n    print(main())\n```\n\n"
+        f"### 注意事项\n\n1. 确保理解前置概念\n"
+        f"2. 注意边界条件的处理\n3. 考虑性能和可扩展性"
+    )
+
+    sec4_content = (
+        f"## 常见问题与最佳实践\n\n### 最佳实践\n\n"
+        f"- ✅ 先理解概念，再动手实践\n"
+        f"- ✅ 多做练习，加深理解\n"
+        f"- ✅ 阅读优秀项目中的实际应用\n\n"
+        f"### 进阶方向\n\n"
+        f"掌握{node_title}的基础后，可以进一步探索高级用法和性能优化技巧。"
+    )
+
+    return {
+        "introduction": intro,
+        "objectives": objectives,
+        "sections": [
+            {"section_id": "sec-1", "title": f"什么是{node_title}？", "content": sec1_content, "order": 1},
+            {"section_id": "sec-2", "title": f"{node_title}的核心原理", "content": sec2_content, "order": 2},
+            {"section_id": "sec-3", "title": f"{node_title}的实际应用", "content": sec3_content, "order": 3},
+            {"section_id": "sec-4", "title": "常见问题与最佳实践", "content": sec4_content, "order": 4},
+        ],
+        "practice_tasks": [
+            {
+                "task_id": f"pt-{i + 1}",
+                "title": f"练习{i + 1}：{node_title}基础操作",
+                "description": f"尝试使用{node_title}完成一个简单的任务。",
+                "difficulty": node_difficulty,
+            }
+            for i in range(3)
+        ],
+        "summary": f"本单元系统地介绍了{node_title}的核心概念和实际应用。建议完成练习后再进行通关评估。",
+        "references": [{"title": f"{node_title} 官方文档", "url": None, "type": "documentation"}],
+    }
 
 
 @register_handler("knowledge_index")

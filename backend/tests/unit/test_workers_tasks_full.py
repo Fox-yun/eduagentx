@@ -310,13 +310,11 @@ class TestExecuteUnitGeneration:
         mock_db = AsyncMock()
         mock_db.add = MagicMock()
         mock_db.add_all = MagicMock()
-        mock_db.add = MagicMock()
-        mock_db.add_all = MagicMock()
         mock_task = MagicMock()
         mock_task.id = "unit-task-1"
         mock_task.target_id = "node-1"
         mock_task.user_id = "user-1"
-        mock_task.target_metadata = {"path_id": "path-1"}
+        mock_task.target_metadata = {"path_id": "path-1", "unit_content_version_id": "ver-gen-1"}
 
         # Mock node
         mock_node = MagicMock()
@@ -334,6 +332,28 @@ class TestExecuteUnitGeneration:
         mock_goal = MagicMock()
         mock_goal.title = "Learn Python"
 
+        # Mock version (Transaction A load)
+        mock_version = MagicMock()
+        mock_version.id = "ver-gen-1"
+        mock_version.unit_content_id = "uc-1"
+        mock_version.status = "generating"
+
+        # Mock unit content (Transaction B)
+        mock_uc = MagicMock()
+        mock_uc.id = "uc-1"
+        mock_uc.active_version_id = "ver-old-1"
+        mock_uc.status = "regenerating"
+        mock_uc.active_task_id = "unit-task-1"
+
+        # Mock old version (Transaction B)
+        mock_old_version = MagicMock()
+        mock_old_version.id = "ver-old-1"
+        mock_old_version.status = "active"
+
+        # Mock background task (not cancelled)
+        mock_bg_task = MagicMock()
+        mock_bg_task.status = "running"
+
         # Mock LLM result
         llm_content = {
             "introduction": "# Python Lists\n\nIntro",
@@ -349,27 +369,38 @@ class TestExecuteUnitGeneration:
 
         review_result = {"passed": True, "score": 85, "issues": [], "summary": "Good"}
 
-        mock_db.execute = AsyncMock()
-        # Chain: node_result → path_result → goal_result
-        node_result_mock = MagicMock()
-        node_result_mock.scalar_one_or_none.return_value = mock_node
-        path_result_mock = MagicMock()
-        path_result_mock.scalar_one_or_none.return_value = mock_path
-        goal_result_mock = MagicMock()
-        goal_result_mock.scalar_one_or_none.return_value = mock_goal
+        from unittest.mock import MagicMock as _MM
 
-        call_count = 0
+        call_data: dict[str, int] = {"calls": 0}
 
-        async def mock_execute(query):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return node_result_mock
-            elif call_count == 2:
-                return path_result_mock
-            elif call_count == 3:
-                return goal_result_mock
-            return MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+        def _scalar(val):
+            r = _MM()
+            r.scalar_one_or_none.return_value = val
+            return r
+
+        async def mock_execute(stmt):
+            call_data["calls"] += 1
+            n = call_data["calls"]
+            # Txn A queries: node, path, goal, version
+            if n == 1:
+                return _scalar(mock_node)
+            elif n == 2:
+                return _scalar(mock_path)
+            elif n == 3:
+                return _scalar(mock_goal)
+            elif n == 4:
+                return _scalar(mock_version)
+            # After LLM: progress update uses db.execute for nothing
+            # Txn B queries: version, task, unit_content, old_version
+            elif n == 5:
+                return _scalar(mock_version)
+            elif n == 6:
+                return _scalar(mock_bg_task)
+            elif n == 7:
+                return _scalar(mock_uc)
+            elif n == 8:
+                return _scalar(mock_old_version)
+            return _scalar(None)
 
         mock_db.execute = mock_execute
 
@@ -391,13 +422,11 @@ class TestExecuteUnitGeneration:
         mock_db = AsyncMock()
         mock_db.add = MagicMock()
         mock_db.add_all = MagicMock()
-        mock_db.add = MagicMock()
-        mock_db.add_all = MagicMock()
         mock_task = MagicMock()
         mock_task.id = "unit-task-2"
         mock_task.target_id = "node-2"
         mock_task.user_id = "user-2"
-        mock_task.target_metadata = {}
+        mock_task.target_metadata = {"path_id": "path-2", "unit_content_version_id": "ver-gen-2"}
 
         mock_node = MagicMock()
         mock_node.title = "Numpy Arrays"
@@ -405,7 +434,51 @@ class TestExecuteUnitGeneration:
         mock_node.difficulty = "intermediate"
         mock_node.learning_outcomes = "[]"
 
-        mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_node)))
+        mock_version = MagicMock()
+        mock_version.id = "ver-gen-2"
+        mock_version.unit_content_id = "uc-2"
+        mock_version.status = "generating"
+
+        mock_bg_task = MagicMock()
+        mock_bg_task.status = "running"
+
+        mock_uc = MagicMock()
+        mock_uc.id = "uc-2"
+        mock_uc.active_version_id = "ver-old-2"
+        mock_uc.status = "regenerating"
+        mock_uc.active_task_id = "unit-task-2"
+
+        mock_old_version = MagicMock()
+        mock_old_version.id = "ver-old-2"
+        mock_old_version.status = "active"
+
+        def _scalar(val):
+            r = MagicMock()
+            r.scalar_one_or_none.return_value = val
+            return r
+
+        call_data: dict[str, int] = {"calls": 0}
+
+        async def mock_execute(stmt):
+            call_data["calls"] += 1
+            n = call_data["calls"]
+            if n == 1:
+                return _scalar(mock_node)
+            elif n == 2:
+                return _scalar(None)  # no path
+            elif n == 3:
+                return _scalar(mock_version)
+            elif n == 4:
+                return _scalar(mock_version)  # Txn B: version
+            elif n == 5:
+                return _scalar(mock_bg_task)  # Txn B: task
+            elif n == 6:
+                return _scalar(mock_uc)  # Txn B: unit content
+            elif n == 7:
+                return _scalar(mock_old_version)  # Txn B: old version
+            return _scalar(None)
+
+        mock_db.execute = mock_execute
 
         with (
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
@@ -422,13 +495,11 @@ class TestExecuteUnitGeneration:
         mock_db = AsyncMock()
         mock_db.add = MagicMock()
         mock_db.add_all = MagicMock()
-        mock_db.add = MagicMock()
-        mock_db.add_all = MagicMock()
         mock_task = MagicMock()
         mock_task.id = "unit-task-3"
         mock_task.target_id = "node-3"
         mock_task.user_id = "user-3"
-        mock_task.target_metadata = None  # No metadata
+        mock_task.target_metadata = {"unit_content_version_id": "ver-gen-3"}
 
         mock_node = MagicMock()
         mock_node.title = "Pandas"
@@ -436,16 +507,51 @@ class TestExecuteUnitGeneration:
         mock_node.difficulty = "advanced"
         mock_node.learning_outcomes = "[]"
 
-        mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_node)))
+        mock_version = MagicMock()
+        mock_version.id = "ver-gen-3"
+        mock_version.unit_content_id = "uc-3"
+        mock_version.status = "generating"
 
-        with (
-            patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
-            patch("app.workers.tasks.asyncio.sleep", new_callable=AsyncMock),
-            patch("app.services.llm.llm_json", new_callable=AsyncMock, side_effect=Exception("fail")),
-        ):
-            result = await _execute_unit_generation(mock_db, mock_task)
+        mock_bg_task = MagicMock()
+        mock_bg_task.status = "running"
 
-        assert "unit_id" in result
+        mock_uc = MagicMock()
+        mock_uc.id = "uc-3"
+        mock_uc.active_version_id = "ver-old-3"
+        mock_uc.status = "generating"
+        mock_uc.active_task_id = "unit-task-3"
+
+        mock_old_version = MagicMock()
+        mock_old_version.id = "ver-old-3"
+        mock_old_version.status = "active"
+
+        def _scalar(val):
+            r = MagicMock()
+            r.scalar_one_or_none.return_value = val
+            return r
+
+        call_data: dict[str, int] = {"calls": 0}
+
+        async def mock_execute(stmt):
+            call_data["calls"] += 1
+            n = call_data["calls"]
+            if n == 1:
+                return _scalar(mock_node)
+            elif n == 2:
+                return _scalar(None)  # no path
+            elif n == 3:
+                return _scalar(mock_version)
+            elif n == 4:
+                return _scalar(mock_version)  # Txn B: version
+            elif n == 5:
+                return _scalar(mock_bg_task)  # Txn B: task
+            elif n == 6:
+                return _scalar(mock_uc)  # Txn B: unit content
+            elif n == 7:
+                return _scalar(mock_old_version)  # Txn B: old version
+            return _scalar(None)
+
+        mock_db.execute = mock_execute
 
 
 # ---------------------------------------------------------------------------

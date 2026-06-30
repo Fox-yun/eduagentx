@@ -45,20 +45,14 @@ async def generate_unit_content(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Generate unit content for a learning node."""
+    """Generate unit content for a learning node.
+
+    Idempotent: returns existing content if already ready,
+    or returns existing task_id if already generating.
+    """
     await require_node_access(db, user.id, path_id, node_id)
-
-    from app.services.task import TaskService
-
-    task_service = TaskService(db)
-    task = await task_service.create_task(
-        user_id=user.id,
-        task_type="learning_unit_generation",
-        target_type="node",
-        target_id=node_id,
-        target_metadata={"path_id": path_id},
-    )
-    return {"next_step": "generating", "active_task_id": task.id}
+    service = UnitService(db)
+    return await service.generate_content(path_id, node_id, user.id)
 
 
 @router.post("/{path_id}/nodes/{node_id}/content/regenerate")
@@ -69,60 +63,14 @@ async def regenerate_unit_content(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Regenerate unit content with optional user preferences.
+    """Regenerate unit content preserving existing active version.
 
-    Safe regeneration: existing content is preserved until the worker
-    atomically replaces it with the new version. If the worker fails,
-    old content remains available.
+    Safe regeneration: old content remains available via active_version
+    until the worker atomically switches to the new version.
     """
     await require_node_access(db, user.id, path_id, node_id)
-
-    from sqlalchemy import select
-
-    from app.models.task import BackgroundTask
-    from app.models.unit import LearningUnitContent
-    from app.services.task import TaskService
-
-    # Check for existing pending/running regeneration task
-    task_result = await db.execute(
-        select(BackgroundTask).where(
-            BackgroundTask.target_type == "node",
-            BackgroundTask.target_id == node_id,
-            BackgroundTask.task_type == "learning_unit_generation",
-            BackgroundTask.idempotency_key == f"unit-regenerate:{user.id}:{path_id}:{node_id}",
-            BackgroundTask.status.in_(["pending", "running"]),
-        )
-    )
-    existing_task = task_result.scalar_one_or_none()
-    if existing_task:
-        return {"next_step": "generating", "active_task_id": existing_task.id}
-
-    # Mark existing content as regenerating (do NOT delete it)
-    existing_result = await db.execute(
-        select(LearningUnitContent).where(
-            LearningUnitContent.path_id == path_id,
-            LearningUnitContent.node_id == node_id,
-            LearningUnitContent.user_id == user.id,
-        )
-    )
-    existing = existing_result.scalar_one_or_none()
-    if existing:
-        existing.status = "regenerating"
-
-    task_service = TaskService(db)
-    metadata: dict[str, Any] = {"path_id": path_id}
-    if body.preferences:
-        metadata["preferences"] = body.preferences
-
-    task = await task_service.create_task(
-        user_id=user.id,
-        task_type="learning_unit_generation",
-        target_type="node",
-        target_id=node_id,
-        target_metadata=metadata,
-        idempotency_key=f"unit-regenerate:{user.id}:{path_id}:{node_id}",
-    )
-    return {"next_step": "generating", "active_task_id": task.id}
+    service = UnitService(db)
+    return await service.regenerate_content(path_id, node_id, user.id, body.preferences)
 
 
 @router.post("/{path_id}/nodes/{node_id}/content/lecture")

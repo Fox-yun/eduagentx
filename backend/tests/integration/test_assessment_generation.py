@@ -40,6 +40,7 @@ from app.workers.assessment_generation import (
 # Seed helpers
 # ---------------------------------------------------------------------------
 
+
 async def _create_user(db_session, prefix: str) -> str:
     uid = str(uuid.uuid4())
     user = User(
@@ -146,9 +147,7 @@ class TestAssessmentGenerationAtomic:
 
         # -- Assessment --
         assessment = (
-            await db_session.execute(
-                sa_select(Assessment).where(Assessment.id == result["assessment_id"])
-            )
+            await db_session.execute(sa_select(Assessment).where(Assessment.id == result["assessment_id"]))
         ).scalar_one()
         assert assessment.status == "generating"
         assert assessment.active_task_id == result["active_task_id"]
@@ -156,9 +155,7 @@ class TestAssessmentGenerationAtomic:
 
         # -- BackgroundTask --
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == result["active_task_id"])
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == result["active_task_id"]))
         ).scalar_one()
         assert task.task_type == "learning_assessment_generation"
         assert task.status == "pending"
@@ -166,11 +163,7 @@ class TestAssessmentGenerationAtomic:
         assert task.target_id == assessment.id
 
         # -- TaskEvent --
-        events = (
-            (await db_session.execute(sa_select(TaskEvent).where(TaskEvent.task_id == task.id)))
-            .scalars()
-            .all()
-        )
+        events = (await db_session.execute(sa_select(TaskEvent).where(TaskEvent.task_id == task.id))).scalars().all()
         assert len(events) == 1
         assert events[0].event_type == "snapshot"
         assert events[0].sequence_number == 0
@@ -209,23 +202,33 @@ class TestAssessmentGenerationAtomic:
 
         # Nothing should have been committed for this user
         assessments = (
-            await db_session.execute(
-                sa_select(Assessment).where(
-                    Assessment.path_id == pid,
-                    Assessment.node_id == nid,
-                    Assessment.user_id == uid,
-                    Assessment.purpose == "quiz_bank",
+            (
+                await db_session.execute(
+                    sa_select(Assessment).where(
+                        Assessment.path_id == pid,
+                        Assessment.node_id == nid,
+                        Assessment.user_id == uid,
+                        Assessment.purpose == "quiz_bank",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(assessments) == 0, f"Expected 0 assessments, got {len(assessments)}"
 
-        tasks = (await db_session.execute(
-            sa_select(BackgroundTask).where(
-                BackgroundTask.task_type == "learning_assessment_generation",
-                BackgroundTask.user_id == uid,
+        tasks = (
+            (
+                await db_session.execute(
+                    sa_select(BackgroundTask).where(
+                        BackgroundTask.task_type == "learning_assessment_generation",
+                        BackgroundTask.user_id == uid,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(tasks) == 0, f"Expected 0 tasks, got {len(tasks)}"
 
 
@@ -245,11 +248,17 @@ class TestAssessmentGenerationIdempotency:
 
         service = UnitService(db_session)
         r1 = await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         r2 = await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         assert r1["assessment_id"] == r2["assessment_id"]
@@ -276,21 +285,31 @@ class TestAssessmentGenerationIdempotency:
 
         service = UnitService(db_session)
         r1 = await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         r2 = await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         assert r1["active_task_id"] == r2["active_task_id"]
 
         # Only one task for this user
         tasks = (
-            (await db_session.execute(sa_select(BackgroundTask).where(
-                BackgroundTask.task_type == "learning_assessment_generation",
-                BackgroundTask.user_id == uid,
-            )))
+            (
+                await db_session.execute(
+                    sa_select(BackgroundTask).where(
+                        BackgroundTask.task_type == "learning_assessment_generation",
+                        BackgroundTask.user_id == uid,
+                    )
+                )
+            )
             .scalars()
             .all()
         )
@@ -304,11 +323,17 @@ class TestAssessmentGenerationIdempotency:
 
         service = UnitService(db_session)
         r1 = await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         await service.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
 
         outbox_count = await _count_outbox(db_session, r1["active_task_id"])
@@ -343,7 +368,10 @@ class TestAssessmentGenerationConcurrency:
                 try:
                     svc = UnitService(session)
                     return await svc.generate_quiz_bank(
-                        path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+                        path_id=pid,
+                        node_id=nid,
+                        user_id=uid,
+                        path_version_id=pvid,
                     )
                 except Exception:
                     return None
@@ -359,14 +387,16 @@ class TestAssessmentGenerationConcurrency:
 
         # Only one assessment in DB
         assessments = (
-            (await db_session.execute(
-                sa_select(Assessment).where(
-                    Assessment.path_id == pid,
-                    Assessment.node_id == nid,
-                    Assessment.user_id == uid,
-                    Assessment.purpose == "quiz_bank",
+            (
+                await db_session.execute(
+                    sa_select(Assessment).where(
+                        Assessment.path_id == pid,
+                        Assessment.node_id == nid,
+                        Assessment.user_id == uid,
+                        Assessment.purpose == "quiz_bank",
+                    )
                 )
-            ))
+            )
             .scalars()
             .all()
         )
@@ -392,7 +422,10 @@ class TestAssessmentGenerationConcurrency:
                 try:
                     svc = UnitService(session)
                     return await svc.generate_quiz_bank(
-                        path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+                        path_id=pid,
+                        node_id=nid,
+                        user_id=uid,
+                        path_version_id=pvid,
                     )
                 except Exception:
                     return None
@@ -403,12 +436,14 @@ class TestAssessmentGenerationConcurrency:
         await _call(), await _call()
 
         tasks = (
-            (await db_session.execute(
-                sa_select(BackgroundTask).where(
-                    BackgroundTask.task_type == "learning_assessment_generation",
-                    BackgroundTask.user_id == uid,
+            (
+                await db_session.execute(
+                    sa_select(BackgroundTask).where(
+                        BackgroundTask.task_type == "learning_assessment_generation",
+                        BackgroundTask.user_id == uid,
+                    )
                 )
-            ))
+            )
             .scalars()
             .all()
         )
@@ -476,7 +511,10 @@ class TestAssessmentWorkerSuccess:
         # Create assessment in pending state via service
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
@@ -484,9 +522,7 @@ class TestAssessmentWorkerSuccess:
 
         # Simulate outbox dispatch setting task to pending and running
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()
@@ -507,11 +543,13 @@ class TestAssessmentWorkerSuccess:
 
         # Questions exist
         questions = (
-            (await db_session.execute(
-                sa_select(AssessmentQuestion)
-                .where(AssessmentQuestion.assessment_id == assessment_id)
-                .order_by(AssessmentQuestion.question_order)
-            ))
+            (
+                await db_session.execute(
+                    sa_select(AssessmentQuestion)
+                    .where(AssessmentQuestion.assessment_id == assessment_id)
+                    .order_by(AssessmentQuestion.question_order)
+                )
+            )
             .scalars()
             .all()
         )
@@ -525,16 +563,17 @@ class TestAssessmentWorkerSuccess:
 
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
         await db_session.commit()
 
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()
@@ -543,9 +582,11 @@ class TestAssessmentWorkerSuccess:
             await execute_assessment_generation(db_session, task)
 
         questions = (
-            (await db_session.execute(
-                sa_select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
-            ))
+            (
+                await db_session.execute(
+                    sa_select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
+                )
+            )
             .scalars()
             .all()
         )
@@ -560,16 +601,17 @@ class TestAssessmentWorkerSuccess:
 
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
         await db_session.commit()
 
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()
@@ -599,16 +641,17 @@ class TestAssessmentWorkerFailure:
 
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
         await db_session.commit()
 
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()
@@ -635,16 +678,17 @@ class TestAssessmentWorkerFailure:
 
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
         await db_session.commit()
 
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()
@@ -658,9 +702,11 @@ class TestAssessmentWorkerFailure:
                     await execute_assessment_generation(db_session, task)
 
         questions = (
-            (await db_session.execute(
-                sa_select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
-            ))
+            (
+                await db_session.execute(
+                    sa_select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
+                )
+            )
             .scalars()
             .all()
         )
@@ -674,16 +720,17 @@ class TestAssessmentWorkerFailure:
 
         svc = UnitService(db_session)
         gen = await svc.generate_quiz_bank(
-            path_id=pid, node_id=nid, user_id=uid, path_version_id=pvid,
+            path_id=pid,
+            node_id=nid,
+            user_id=uid,
+            path_version_id=pvid,
         )
         assessment_id = gen["assessment_id"]
         task_id = gen["active_task_id"]
         await db_session.commit()
 
         task = (
-            await db_session.execute(
-                sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update()
-            )
+            await db_session.execute(sa_select(BackgroundTask).where(BackgroundTask.id == task_id).with_for_update())
         ).scalar_one()
         task.status = "pending"
         await db_session.commit()

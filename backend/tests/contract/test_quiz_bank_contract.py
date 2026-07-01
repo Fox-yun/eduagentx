@@ -18,14 +18,16 @@ from httpx import ASGITransport, AsyncClient
 from app.services.unit import _safe_question_dto
 
 # Fields that MUST NEVER appear in public quiz-bank responses
-FORBIDDEN_ANSWER_FIELDS = frozenset({
-    "correct_answer",
-    "reference_answer",
-    "rubric",
-    "explanation",
-    "targeted_error_pattern",
-    "generation_prompt",
-})
+FORBIDDEN_ANSWER_FIELDS = frozenset(
+    {
+        "correct_answer",
+        "reference_answer",
+        "rubric",
+        "explanation",
+        "targeted_error_pattern",
+        "generation_prompt",
+    }
+)
 
 # Sample AssessmentQuestion-like data for _safe_question_dto
 SAMPLE_QUESTION_DICT = {
@@ -201,9 +203,7 @@ class TestQuizBankPostHttpContract:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(
-                    "/api/learning-paths/path-1/nodes/node-1/quiz-bank"
-                )
+                resp = await client.post("/api/learning-paths/path-1/nodes/node-1/quiz-bank")
                 assert resp.status_code == 200
                 data = resp.json()
                 violations = self._check_no_answer_fields(data)

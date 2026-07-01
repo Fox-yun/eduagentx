@@ -404,7 +404,7 @@ class TestUnitServiceSubmitAssessment:
         # Mock finalizer for unit test isolation
         mock_fin_result = MagicMock()
         mock_fin_result.percentage = Decimal("100")
-        mock_fin_result.passed = True
+        mock_fin_result.assessment_passed = True
         mock_fin_result.mastery_before = Decimal("0")
         mock_fin_result.mastery_after = Decimal("100")
         mock_fin_result.node_completed = True
@@ -449,7 +449,7 @@ class TestUnitServiceSubmitAssessment:
         # Mock finalizer
         mock_fin = MagicMock()
         mock_fin.percentage = Decimal("0")
-        mock_fin.passed = False
+        mock_fin.assessment_passed = False
         mock_fin.mastery_before = Decimal("0")
         mock_fin.mastery_after = Decimal("0")
         mock_fin.node_completed = False
@@ -499,7 +499,7 @@ class TestUnitServiceSubmitAssessment:
 
         mock_fin = MagicMock()
         mock_fin.percentage = Decimal("100")
-        mock_fin.passed = True
+        mock_fin.assessment_passed = True
         mock_fin.mastery_before = Decimal("0")
         mock_fin.mastery_after = Decimal("100")
         mock_fin.node_completed = True
@@ -541,6 +541,7 @@ class TestUnitServiceSubmitAssessment:
 
         # enqueue_task returns a mock task
         from app.models.task import BackgroundTask
+
         mock_task = MagicMock(spec=BackgroundTask)
         mock_task.id = "task-grading-1"
 

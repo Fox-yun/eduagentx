@@ -74,9 +74,7 @@ class StudentProfileEvidence(Base):
     """Immutable evidence record for student profile dimension updates."""
 
     __tablename__ = "student_profile_evidence"
-    __table_args__ = (
-        UniqueConstraint("evidence_type", "evidence_id", "dimension", name="uq_evidence_per_dimension"),
-    )
+    __table_args__ = (UniqueConstraint("evidence_type", "evidence_id", "dimension", name="uq_evidence_per_dimension"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)

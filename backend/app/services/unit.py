@@ -280,9 +280,7 @@ class UnitService:
 
         # Resolve path_version_id if not provided
         if not path_version_id:
-            path_result = await self.db.execute(
-                select(LearningPath).where(LearningPath.id == path_id)
-            )
+            path_result = await self.db.execute(select(LearningPath).where(LearningPath.id == path_id))
             path = path_result.scalar_one_or_none()
             path_version_id = path.active_version_id if path else None
 
@@ -443,21 +441,23 @@ class UnitService:
 
         # Get content data from active version or legacy
         if content.active_version_id and content.versions:
-            active_version = next(
-                (v for v in content.versions if v.id == content.active_version_id), None
+            active_version = next((v for v in content.versions if v.id == content.active_version_id), None)
+            content_data = (
+                active_version.content if active_version and active_version.content else (content.content or {})
             )
-            content_data = active_version.content if active_version and active_version.content else (content.content or {})
         else:
             content_data = content.content or {}
 
-        title = content_data.get("introduction", "").strip("# \n").split("\n")[0] if content_data.get("introduction") else "未知节点"
+        title = (
+            content_data.get("introduction", "").strip("# \n").split("\n")[0]
+            if content_data.get("introduction")
+            else "未知节点"
+        )
         objectives = content_data.get("objectives", [])
         sections = content_data.get("sections", [])
 
         # Build hierarchical tree
-        tree: list[dict[str, Any]] = [
-            {"id": "root", "label": title, "children": []}
-        ]
+        tree: list[dict[str, Any]] = [{"id": "root", "label": title, "children": []}]
 
         # Objectives branch
         obj_branch: dict[str, Any] = {"id": "objectives", "label": "学习目标", "children": []}
@@ -517,9 +517,7 @@ class UnitService:
         if not path_version_id:
             from app.models.path import LearningPath
 
-            path_result = await self.db.execute(
-                select(LearningPath).where(LearningPath.id == path_id)
-            )
+            path_result = await self.db.execute(select(LearningPath).where(LearningPath.id == path_id))
             path = path_result.scalar_one_or_none()
             path_version_id = path.active_version_id if path else None
 
@@ -996,24 +994,30 @@ class UnitService:
 
         # Load assessment FOR UPDATE
         result = await self.db.execute(
-            select(Assessment).where(
+            select(Assessment)
+            .where(
                 Assessment.id == assessment_id,
                 Assessment.user_id == user_id,
-            ).with_for_update()
+            )
+            .with_for_update()
         )
         assessment = result.scalar_one_or_none()
         if not assessment:
             raise ApiError(code="ASSESSMENT_NOT_FOUND", message="Assessment not found", status_code=404)
         if assessment.status not in ("ready", "submitted"):
-            raise ApiError(code="ASSESSMENT_NOT_READY", message="Assessment is not ready for submission", status_code=400)
+            raise ApiError(
+                code="ASSESSMENT_NOT_READY", message="Assessment is not ready for submission", status_code=400
+            )
 
         # Check for existing completed attempt (idempotent)
         existing_attempt = await self.db.execute(
-            select(AssessmentAttempt).where(
+            select(AssessmentAttempt)
+            .where(
                 AssessmentAttempt.assessment_id == assessment_id,
                 AssessmentAttempt.user_id == user_id,
                 AssessmentAttempt.status.in_(["completed", "grading"]),
-            ).with_for_update()
+            )
+            .with_for_update()
         )
         existing = existing_attempt.scalar_one_or_none()
         if existing and existing.status == "completed":
@@ -1160,7 +1164,7 @@ class UnitService:
                 "attempt_id": attempt.id,
                 "status": "completed",
                 "score": attempt.score or float(fin.percentage),
-                "passed": fin.passed,
+                "passed": fin.assessment_passed,
                 "grading_quality": "final",
                 "feedback": attempt.feedback,
                 "mastery_before": float(fin.mastery_before),
@@ -1380,13 +1384,15 @@ class UnitService:
 # ---------------------------------------------------------------------------
 
 
-ASSESSMENT_STATUSES = frozenset({
-    "pending",
-    "generating",
-    "ready",
-    "failed",
-    "archived",
-})
+ASSESSMENT_STATUSES = frozenset(
+    {
+        "pending",
+        "generating",
+        "ready",
+        "failed",
+        "archived",
+    }
+)
 
 
 def _safe_question_dto(q: AssessmentQuestion) -> dict[str, object]:
@@ -1395,9 +1401,7 @@ def _safe_question_dto(q: AssessmentQuestion) -> dict[str, object]:
         "question_id": q.id,
         "type": q.question_type,
         "prompt": q.prompt,
-        "options": json.loads(q.options)
-        if isinstance(q.options, str)
-        else (q.options if q.options else []),
+        "options": json.loads(q.options) if isinstance(q.options, str) else (q.options if q.options else []),
         "difficulty": q.difficulty,
         "knowledge_point": q.knowledge_point,
         "max_score": q.max_score or q.points,

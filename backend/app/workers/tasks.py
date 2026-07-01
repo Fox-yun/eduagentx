@@ -658,9 +658,7 @@ async def _complete_unit_generation(
 
     # Load version FOR UPDATE to prevent concurrent completion
     version_result = await txn_db.execute(
-        select(LearningUnitContentVersion)
-        .where(LearningUnitContentVersion.id == version_id)
-        .with_for_update()
+        select(LearningUnitContentVersion).where(LearningUnitContentVersion.id == version_id).with_for_update()
     )
     version: LearningUnitContentVersion | None = version_result.scalar_one_or_none()
     if not version:
@@ -670,9 +668,7 @@ async def _complete_unit_generation(
     from app.common.enums import TERMINAL_TASK_STATUSES, TaskStatus
     from app.models.task import BackgroundTask
 
-    task_result = await txn_db.execute(
-        select(BackgroundTask).where(BackgroundTask.id == task_id)
-    )
+    task_result = await txn_db.execute(select(BackgroundTask).where(BackgroundTask.id == task_id))
     bg_task = task_result.scalar_one_or_none()
     if bg_task and bg_task.status == TaskStatus.CANCELLED.value:
         # Task was cancelled — don't activate this version
@@ -689,17 +685,14 @@ async def _complete_unit_generation(
 
     # Load unit content and atomically switch active version
     uc_result = await txn_db.execute(
-        select(LearningUnitContent)
-        .where(LearningUnitContent.id == version.unit_content_id)
-        .with_for_update()
+        select(LearningUnitContent).where(LearningUnitContent.id == version.unit_content_id).with_for_update()
     )
     uc: LearningUnitContent | None = uc_result.scalar_one_or_none()
     if uc:
         # Mark old active version as superseded
         if uc.active_version_id:
             old_version_result = await txn_db.execute(
-                select(LearningUnitContentVersion)
-                .where(LearningUnitContentVersion.id == uc.active_version_id)
+                select(LearningUnitContentVersion).where(LearningUnitContentVersion.id == uc.active_version_id)
             )
             old_version = old_version_result.scalar_one_or_none()
             if old_version and old_version.id != version.id:
@@ -723,9 +716,7 @@ async def _fail_unit_generation(txn_db: Any, version_id: str) -> None:
 
     try:
         version_result = await txn_db.execute(
-            select(LearningUnitContentVersion)
-            .where(LearningUnitContentVersion.id == version_id)
-            .with_for_update()
+            select(LearningUnitContentVersion).where(LearningUnitContentVersion.id == version_id).with_for_update()
         )
         version = version_result.scalar_one_or_none()
         if version and version.status == "generating":
@@ -733,9 +724,7 @@ async def _fail_unit_generation(txn_db: Any, version_id: str) -> None:
 
             # Reset unit content to ready (old version still active)
             uc_result = await txn_db.execute(
-                select(LearningUnitContent)
-                .where(LearningUnitContent.id == version.unit_content_id)
-                .with_for_update()
+                select(LearningUnitContent).where(LearningUnitContent.id == version.unit_content_id).with_for_update()
             )
             uc = uc_result.scalar_one_or_none()
             if uc and uc.active_task_id:

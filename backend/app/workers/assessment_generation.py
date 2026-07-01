@@ -30,13 +30,15 @@ logger = structlog.get_logger()
 # Assessment status constants
 # ---------------------------------------------------------------------------
 
-ASSESSMENT_STATUSES = frozenset({
-    "pending",
-    "generating",
-    "ready",
-    "failed",
-    "archived",
-})
+ASSESSMENT_STATUSES = frozenset(
+    {
+        "pending",
+        "generating",
+        "ready",
+        "failed",
+        "archived",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Structured LLM output schemas
@@ -197,16 +199,18 @@ async def execute_assessment_generation(db: Any, task: Any) -> dict[str, Any]:
     # ==================================================================
     # Transaction A: Load context, mark assessment generating
     # ==================================================================
-    assess_result = await db.execute(
-        select(Assessment).where(Assessment.id == assessment_id).with_for_update()
-    )
+    assess_result = await db.execute(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
     assessment: Assessment | None = assess_result.scalar_one_or_none()
     if not assessment:
         raise ValueError(f"Assessment {assessment_id} not found")
 
     if assessment.status == "ready":
         # Already generated — idempotent return
-        return {"assessment_id": assessment_id, "status": "ready", "questions_count": await _count_questions(db, assessment_id)}
+        return {
+            "assessment_id": assessment_id,
+            "status": "ready",
+            "questions_count": await _count_questions(db, assessment_id),
+        }
 
     assessment.status = "generating"
 
@@ -266,22 +270,23 @@ async def execute_assessment_generation(db: Any, task: Any) -> dict[str, Any]:
     # ==================================================================
     # Transaction B: Save questions, mark assessment ready
     # ==================================================================
-    await update_task_status(
-        db, task.id, "running", progress=80, stage="saving", message="正在保存题目..."
-    )
+    await update_task_status(db, task.id, "running", progress=80, stage="saving", message="正在保存题目...")
 
     try:
         await _complete_assessment_generation(
-            db, assessment_id, questions, generation_source, quality_status, task.id,
+            db,
+            assessment_id,
+            questions,
+            generation_source,
+            quality_status,
+            task.id,
         )
     except Exception:
         logger.exception("assessment_generation_txn_b_failed", assessment_id=assessment_id)
         await _fail_assessment_generation(db, assessment_id)
         raise
 
-    await update_task_status(
-        db, task.id, "running", progress=100, stage="completed", message="题库生成完成"
-    )
+    await update_task_status(db, task.id, "running", progress=100, stage="completed", message="题库生成完成")
 
     return {
         "assessment_id": assessment_id,
@@ -306,9 +311,7 @@ async def _complete_assessment_generation(
 ) -> None:
     """Atomically save generated questions and mark assessment ready."""
     # Reload assessment FOR UPDATE
-    result = await txn_db.execute(
-        select(Assessment).where(Assessment.id == assessment_id).with_for_update()
-    )
+    result = await txn_db.execute(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
     assessment = result.scalar_one_or_none()
     if not assessment:
         raise ValueError(f"Assessment {assessment_id} not found")
@@ -316,9 +319,7 @@ async def _complete_assessment_generation(
         raise ValueError(f"Assessment {assessment_id} is not in generating state (got {assessment.status})")
 
     # Delete any existing questions for this assessment (clean slate)
-    existing = await txn_db.execute(
-        select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
-    )
+    existing = await txn_db.execute(select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id))
     for eq in existing.scalars().all():
         await txn_db.delete(eq)
 
@@ -352,9 +353,7 @@ async def _complete_assessment_generation(
 async def _fail_assessment_generation(txn_db: Any, assessment_id: str) -> None:
     """Mark assessment as failed, keeping no partial questions."""
     try:
-        result = await txn_db.execute(
-            select(Assessment).where(Assessment.id == assessment_id).with_for_update()
-        )
+        result = await txn_db.execute(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
         assessment = result.scalar_one_or_none()
         if assessment and assessment.status == "generating":
             assessment.status = "failed"
@@ -418,6 +417,7 @@ async def _build_generation_context(
         content_text = sec.get("content", "")
         # Simple extraction: collect bold/emphasized terms
         import re
+
         terms = re.findall(r"\*\*(.*?)\*\*", content_text)
         key_terms.extend(terms[:5])
 
@@ -492,7 +492,9 @@ def _build_user_prompt(ctx: AssessmentGenerationInput) -> str:
     }
     label = purpose_labels.get(ctx.purpose, "题目")
 
-    objectives_text = "\n".join(f"- {o}" for o in ctx.learning_objectives) if ctx.learning_objectives else "（无具体学习目标）"
+    objectives_text = (
+        "\n".join(f"- {o}" for o in ctx.learning_objectives) if ctx.learning_objectives else "（无具体学习目标）"
+    )
     terms_text = "、".join(ctx.key_terms) if ctx.key_terms else "（无关键词）"
     mistakes_text = "\n".join(f"- {m}" for m in ctx.common_mistakes) if ctx.common_mistakes else "（无常见错误记录）"
 
@@ -551,175 +553,194 @@ def _build_fallback_assessment(ctx: AssessmentGenerationInput) -> GeneratedAsses
     o2 = objectives[1] if len(objectives) > 1 else f"{ctx.node_title}的实际应用"
 
     # Question 1: single_choice about concept
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="single_choice",
-        prompt=f"关于「{ctx.node_title}」，以下哪个描述最准确？",
-        options=[
-            GeneratedQuestionOption(value="a", label=f"{ctx.node_title}是一种基础概念，广泛应用于实际开发中"),
-            GeneratedQuestionOption(value="b", label=f"{ctx.node_title}仅适用于特定场景，不具有通用性"),
-            GeneratedQuestionOption(value="c", label=f"{ctx.node_title}已经过时，不建议学习"),
-            GeneratedQuestionOption(value="d", label=f"{ctx.node_title}只涉及理论，与实践无关"),
-        ],
-        correct_answer="a",
-        explanation=f"{ctx.node_title}是在实际开发中广泛应用的基础概念，理解和掌握它对于后续学习至关重要。",
-        difficulty="easy",
-        knowledge_point=f"{ctx.node_title}基础概念",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="single_choice",
+            prompt=f"关于「{ctx.node_title}」，以下哪个描述最准确？",
+            options=[
+                GeneratedQuestionOption(value="a", label=f"{ctx.node_title}是一种基础概念，广泛应用于实际开发中"),
+                GeneratedQuestionOption(value="b", label=f"{ctx.node_title}仅适用于特定场景，不具有通用性"),
+                GeneratedQuestionOption(value="c", label=f"{ctx.node_title}已经过时，不建议学习"),
+                GeneratedQuestionOption(value="d", label=f"{ctx.node_title}只涉及理论，与实践无关"),
+            ],
+            correct_answer="a",
+            explanation=f"{ctx.node_title}是在实际开发中广泛应用的基础概念，理解和掌握它对于后续学习至关重要。",
+            difficulty="easy",
+            knowledge_point=f"{ctx.node_title}基础概念",
+            max_score=1,
+        )
+    )
 
     # Question 2: single_choice about objective
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="single_choice",
-        prompt=f"学习「{ctx.node_title}」的首要目标是什么？",
-        options=[
-            GeneratedQuestionOption(value="a", label="记忆所有相关定义和术语"),
-            GeneratedQuestionOption(value="b", label=o1),
-            GeneratedQuestionOption(value="c", label="跳过基础直接学习高级内容"),
-            GeneratedQuestionOption(value="d", label="仅阅读文档即可，无需实践"),
-        ],
-        correct_answer="b",
-        explanation=f"学习{ctx.node_title}的首要目标是{o1}，这是后续深入学习的基础。",
-        difficulty="easy",
-        knowledge_point="学习目标理解",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="single_choice",
+            prompt=f"学习「{ctx.node_title}」的首要目标是什么？",
+            options=[
+                GeneratedQuestionOption(value="a", label="记忆所有相关定义和术语"),
+                GeneratedQuestionOption(value="b", label=o1),
+                GeneratedQuestionOption(value="c", label="跳过基础直接学习高级内容"),
+                GeneratedQuestionOption(value="d", label="仅阅读文档即可，无需实践"),
+            ],
+            correct_answer="b",
+            explanation=f"学习{ctx.node_title}的首要目标是{o1}，这是后续深入学习的基础。",
+            difficulty="easy",
+            knowledge_point="学习目标理解",
+            max_score=1,
+        )
+    )
 
     # Question 3: single_choice about practice
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="single_choice",
-        prompt=f"在学习「{ctx.node_title}」时，以下哪种做法最有效？",
-        options=[
-            GeneratedQuestionOption(value="a", label="只看不练，追求速度"),
-            GeneratedQuestionOption(value="b", label="先理解原理，再结合实际场景实践"),
-            GeneratedQuestionOption(value="c", label="只做练习不学理论"),
-            GeneratedQuestionOption(value="d", label="完全依赖他人解释"),
-        ],
-        correct_answer="b",
-        explanation="理论与实践相结合是最高效的学习方式，先理解原理再动手实践。",
-        difficulty="easy",
-        knowledge_point="学习方法",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="single_choice",
+            prompt=f"在学习「{ctx.node_title}」时，以下哪种做法最有效？",
+            options=[
+                GeneratedQuestionOption(value="a", label="只看不练，追求速度"),
+                GeneratedQuestionOption(value="b", label="先理解原理，再结合实际场景实践"),
+                GeneratedQuestionOption(value="c", label="只做练习不学理论"),
+                GeneratedQuestionOption(value="d", label="完全依赖他人解释"),
+            ],
+            correct_answer="b",
+            explanation="理论与实践相结合是最高效的学习方式，先理解原理再动手实践。",
+            difficulty="easy",
+            knowledge_point="学习方法",
+            max_score=1,
+        )
+    )
 
     # Question 4: multiple_choice about key skills
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="multiple_choice",
-        prompt=f"以下哪些是学习「{ctx.node_title}」时需要掌握的关键方面？（多选）",
-        options=[
-            GeneratedQuestionOption(value="a", label=o1),
-            GeneratedQuestionOption(value="b", label="理解基本原理和概念"),
-            GeneratedQuestionOption(value="c", label="能够进行实际应用"),
-            GeneratedQuestionOption(value="d", label="记忆所有版本变更日志"),
-        ],
-        correct_answer=["a", "b", "c"],
-        explanation=f"学习{ctx.node_title}需要掌握{ o1 }、理解基本原理，并能进行实际应用。",
-        difficulty="medium",
-        knowledge_point=f"{ctx.node_title}综合理解",
-        max_score=2,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="multiple_choice",
+            prompt=f"以下哪些是学习「{ctx.node_title}」时需要掌握的关键方面？（多选）",
+            options=[
+                GeneratedQuestionOption(value="a", label=o1),
+                GeneratedQuestionOption(value="b", label="理解基本原理和概念"),
+                GeneratedQuestionOption(value="c", label="能够进行实际应用"),
+                GeneratedQuestionOption(value="d", label="记忆所有版本变更日志"),
+            ],
+            correct_answer=["a", "b", "c"],
+            explanation=f"学习{ctx.node_title}需要掌握{o1}、理解基本原理，并能进行实际应用。",
+            difficulty="medium",
+            knowledge_point=f"{ctx.node_title}综合理解",
+            max_score=2,
+        )
+    )
 
     # Question 5: single_choice about debugging
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="single_choice",
-        prompt=f"在使用「{ctx.node_title}」遇到问题时，最合理的排查步骤是什么？",
-        options=[
-            GeneratedQuestionOption(value="a", label="直接重写所有代码"),
-            GeneratedQuestionOption(value="b", label="检查输入输出是否符合预期，定位问题范围"),
-            GeneratedQuestionOption(value="c", label="忽略错误信息，随机尝试修改"),
-            GeneratedQuestionOption(value="d", label="等待他人帮助，不做任何排查"),
-        ],
-        correct_answer="b",
-        explanation="遇到问题时，应该系统性地排查：先定位问题范围，再深入分析原因。",
-        difficulty="medium",
-        knowledge_point="问题排查",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="single_choice",
+            prompt=f"在使用「{ctx.node_title}」遇到问题时，最合理的排查步骤是什么？",
+            options=[
+                GeneratedQuestionOption(value="a", label="直接重写所有代码"),
+                GeneratedQuestionOption(value="b", label="检查输入输出是否符合预期，定位问题范围"),
+                GeneratedQuestionOption(value="c", label="忽略错误信息，随机尝试修改"),
+                GeneratedQuestionOption(value="d", label="等待他人帮助，不做任何排查"),
+            ],
+            correct_answer="b",
+            explanation="遇到问题时，应该系统性地排查：先定位问题范围，再深入分析原因。",
+            difficulty="medium",
+            knowledge_point="问题排查",
+            max_score=1,
+        )
+    )
 
     # Question 6: short_answer
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="short_answer",
-        prompt=f"请用自己的话简要说明「{ctx.node_title}」的核心概念，以及它在实际开发中的一个应用场景。",
-        correct_answer=None,
-        reference_answer=f"{ctx.node_title}的核心概念是{o1}。在实际开发中，它常用于{o2}相关的场景。",
-        rubric=[
-            "正确描述了核心概念（3分）",
-            "提供了合理的实际应用场景（3分）",
-            "表述清晰，逻辑合理（2分）",
-            "举例具体且切题（2分）",
-        ],
-        explanation=(
-            f"本题考查对{ctx.node_title}核心概念的理解和应用能力。"
-            f"核心概念应围绕{o1}展开，应用场景应与{o2}相关。"
-        ),
-        difficulty="medium",
-        knowledge_point=f"{ctx.node_title}综合应用",
-        max_score=10,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="short_answer",
+            prompt=f"请用自己的话简要说明「{ctx.node_title}」的核心概念，以及它在实际开发中的一个应用场景。",
+            correct_answer=None,
+            reference_answer=f"{ctx.node_title}的核心概念是{o1}。在实际开发中，它常用于{o2}相关的场景。",
+            rubric=[
+                "正确描述了核心概念（3分）",
+                "提供了合理的实际应用场景（3分）",
+                "表述清晰，逻辑合理（2分）",
+                "举例具体且切题（2分）",
+            ],
+            explanation=(
+                f"本题考查对{ctx.node_title}核心概念的理解和应用能力。核心概念应围绕{o1}展开，应用场景应与{o2}相关。"
+            ),
+            difficulty="medium",
+            knowledge_point=f"{ctx.node_title}综合应用",
+            max_score=10,
+        )
+    )
 
     # Question 7: single_choice about application
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="single_choice",
-        prompt=f"关于「{ctx.node_title}」在实际项目中的价值，以下理解正确的是？",
-        options=[
-            GeneratedQuestionOption(value="a", label="增加代码复杂度以展示技术水平"),
-            GeneratedQuestionOption(value="b", label=f"掌握{o2}，提高开发效率和质量"),
-            GeneratedQuestionOption(value="c", label="仅用于面试答辩"),
-            GeneratedQuestionOption(value="d", label="没有实际应用价值"),
-        ],
-        correct_answer="b",
-        explanation=f"掌握{o2}能够显著提高开发效率和质量，这是{ctx.node_title}的核心价值。",
-        difficulty="medium",
-        knowledge_point="实际应用价值",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="single_choice",
+            prompt=f"关于「{ctx.node_title}」在实际项目中的价值，以下理解正确的是？",
+            options=[
+                GeneratedQuestionOption(value="a", label="增加代码复杂度以展示技术水平"),
+                GeneratedQuestionOption(value="b", label=f"掌握{o2}，提高开发效率和质量"),
+                GeneratedQuestionOption(value="c", label="仅用于面试答辩"),
+                GeneratedQuestionOption(value="d", label="没有实际应用价值"),
+            ],
+            correct_answer="b",
+            explanation=f"掌握{o2}能够显著提高开发效率和质量，这是{ctx.node_title}的核心价值。",
+            difficulty="medium",
+            knowledge_point="实际应用价值",
+            max_score=1,
+        )
+    )
 
     # Question 8: true_false
-    questions.append(GeneratedAssessmentQuestion(
-        question_type="true_false",
-        prompt=f"学习「{ctx.node_title}」只需要掌握理论知识，不需要动手实践。",
-        correct_answer=False,
-        explanation=f"学习{ctx.node_title}需要理论与实践相结合，仅靠理论学习无法真正掌握。",
-        difficulty="easy",
-        knowledge_point="学习方法",
-        max_score=1,
-    ))
+    questions.append(
+        GeneratedAssessmentQuestion(
+            question_type="true_false",
+            prompt=f"学习「{ctx.node_title}」只需要掌握理论知识，不需要动手实践。",
+            correct_answer=False,
+            explanation=f"学习{ctx.node_title}需要理论与实践相结合，仅靠理论学习无法真正掌握。",
+            difficulty="easy",
+            knowledge_point="学习方法",
+            max_score=1,
+        )
+    )
 
     # Extra questions for formal assessment
     if ctx.purpose == "formal" and len(questions) < 10:
-        questions.append(GeneratedAssessmentQuestion(
-            question_type="multiple_choice",
-            prompt=f"以下哪些是应用「{ctx.node_title}」时的良好实践？（多选）",
-            options=[
-                GeneratedQuestionOption(value="a", label="编写清晰的文档和注释"),
-                GeneratedQuestionOption(value="b", label="遵循规范和最佳实践"),
-                GeneratedQuestionOption(value="c", label="进行充分的测试"),
-                GeneratedQuestionOption(value="d", label="忽略性能和可维护性"),
-            ],
-            correct_answer=["a", "b", "c"],
-            explanation="良好的实践包括编写清晰文档、遵循规范、充分测试，这些都是专业开发的基本要求。",
-            difficulty="hard",
-            knowledge_point="最佳实践",
-            max_score=2,
-        ))
-        questions.append(GeneratedAssessmentQuestion(
-            question_type="short_answer",
-            prompt=f"学习完「{ctx.node_title}」后，你认为下一步应该学习什么？请说明理由。",
-            correct_answer=None,
-            reference_answer=f"学习完{ctx.node_title}后，下一步应学习与之相关的进阶主题，如{ctx.node_title}的高级用法或与之配套的技术，以形成完整的知识体系。",
-            rubric=[
-                "提出了合理的进阶方向（3分）",
-                "说明了选择该方向的理由（3分）",
-                "与实际学习目标关联（2分）",
-                "表述清晰（2分）",
-            ],
-            explanation=f"本题考查学习路径规划能力，进阶方向应与{ctx.node_title}相关。",
-            difficulty="hard",
-            knowledge_point="学习路径规划",
-            max_score=10,
-        ))
+        questions.append(
+            GeneratedAssessmentQuestion(
+                question_type="multiple_choice",
+                prompt=f"以下哪些是应用「{ctx.node_title}」时的良好实践？（多选）",
+                options=[
+                    GeneratedQuestionOption(value="a", label="编写清晰的文档和注释"),
+                    GeneratedQuestionOption(value="b", label="遵循规范和最佳实践"),
+                    GeneratedQuestionOption(value="c", label="进行充分的测试"),
+                    GeneratedQuestionOption(value="d", label="忽略性能和可维护性"),
+                ],
+                correct_answer=["a", "b", "c"],
+                explanation="良好的实践包括编写清晰文档、遵循规范、充分测试，这些都是专业开发的基本要求。",
+                difficulty="hard",
+                knowledge_point="最佳实践",
+                max_score=2,
+            )
+        )
+        questions.append(
+            GeneratedAssessmentQuestion(
+                question_type="short_answer",
+                prompt=f"学习完「{ctx.node_title}」后，你认为下一步应该学习什么？请说明理由。",
+                correct_answer=None,
+                reference_answer=f"学习完{ctx.node_title}后，下一步应学习与之相关的进阶主题，如{ctx.node_title}的高级用法或与之配套的技术，以形成完整的知识体系。",
+                rubric=[
+                    "提出了合理的进阶方向（3分）",
+                    "说明了选择该方向的理由（3分）",
+                    "与实际学习目标关联（2分）",
+                    "表述清晰（2分）",
+                ],
+                explanation=f"本题考查学习路径规划能力，进阶方向应与{ctx.node_title}相关。",
+                difficulty="hard",
+                knowledge_point="学习路径规划",
+                max_score=10,
+            )
+        )
 
     # Limit to requested count
-    questions = questions[:ctx.question_count]
+    questions = questions[: ctx.question_count]
 
     return GeneratedAssessment(
         title=title,
@@ -747,7 +768,5 @@ def _serialize_correct_answer(answer: str | list[str] | bool) -> str:
 
 async def _count_questions(txn_db: Any, assessment_id: str) -> int:
     """Count questions for an assessment."""
-    result = await txn_db.execute(
-        select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id)
-    )
+    result = await txn_db.execute(select(AssessmentQuestion).where(AssessmentQuestion.assessment_id == assessment_id))
     return len(list(result.scalars().all()))

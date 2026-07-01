@@ -7,6 +7,7 @@ Revision ID: 356527c10db9
 Revises: 53b32f4b4afb
 Create Date: 2026-06-30 23:15:27.248368
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -29,9 +30,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(20), nullable=False, server_default="not_generated"),
         sa.Column("content", sa.JSON(), nullable=True),
         sa.Column("active_task_id", sa.String(36), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -42,15 +41,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_learning_lectures_node_id"), "learning_lectures", ["node_id"], unique=True
-    )
-    op.create_index(
-        op.f("ix_learning_lectures_path_id"), "learning_lectures", ["path_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_learning_lectures_user_id"), "learning_lectures", ["user_id"], unique=False
-    )
+    op.create_index(op.f("ix_learning_lectures_node_id"), "learning_lectures", ["node_id"], unique=True)
+    op.create_index(op.f("ix_learning_lectures_path_id"), "learning_lectures", ["path_id"], unique=False)
+    op.create_index(op.f("ix_learning_lectures_user_id"), "learning_lectures", ["user_id"], unique=False)
 
 
 def downgrade() -> None:

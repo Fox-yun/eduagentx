@@ -84,9 +84,7 @@ class LearningUnitContentVersion(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("unit_content_id", "version_number", name="uq_version_per_content"),
-    )
+    __table_args__ = (UniqueConstraint("unit_content_id", "version_number", name="uq_version_per_content"),)
 
     unit_content: Mapped[LearningUnitContent] = relationship(
         "LearningUnitContent",
@@ -162,6 +160,8 @@ class AssessmentAttempt(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     progress_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assessment_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    node_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mastery_before: Mapped[float | None] = mapped_column(Float, nullable=True)
     mastery_after: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -185,9 +185,7 @@ class AssessmentAnswer(Base):
     grading_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("attempt_id", "question_id", name="uq_answer_per_question"),
-    )
+    __table_args__ = (UniqueConstraint("attempt_id", "question_id", name="uq_answer_per_question"),)
 
 
 class LearningLecture(Base):

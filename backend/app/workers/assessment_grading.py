@@ -66,10 +66,12 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
     # Load short-answer questions and answers for LLM grading
     # ==================================================================
     questions_result = await db.execute(
-        select(AssessmentQuestion).where(
+        select(AssessmentQuestion)
+        .where(
             AssessmentQuestion.assessment_id == (assessment_id or attempt.assessment_id),
             AssessmentQuestion.question_type == "short_answer",
-        ).order_by(AssessmentQuestion.question_order)
+        )
+        .order_by(AssessmentQuestion.question_order)
     )
     sa_questions: list[AssessmentQuestion] = list(questions_result.scalars().all())
     if not sa_questions:
@@ -82,6 +84,7 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
         )
         await _aggregate_attempt_score(db, attempt)
         from app.services.assessment_finalization import finalize_assessment_attempt as _fa
+
         await _fa(db, attempt_id=attempt_id)
         await db.commit()
         return {"attempt_id": attempt_id, "status": "completed", "graded_count": 0}
@@ -107,6 +110,7 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
         attempt.active_task_id = None
         await _aggregate_attempt_score(db, attempt)
         from app.services.assessment_finalization import finalize_assessment_attempt as _fa
+
         await _fa(db, attempt_id=attempt_id)
         await db.commit()
         return {"attempt_id": attempt_id, "status": "completed", "graded_count": 0}

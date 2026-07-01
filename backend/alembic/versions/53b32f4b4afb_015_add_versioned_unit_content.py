@@ -15,6 +15,7 @@ Revision ID: 53b32f4b4afb
 Revises: 014
 Create Date: 2026-06-30 18:41:51.920772
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Union
@@ -44,9 +45,7 @@ def upgrade() -> None:
         sa.Column("task_id", sa.String(36), nullable=True),
         sa.Column("error_code", sa.String(50), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("activated_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
@@ -55,9 +54,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id"),
-        sa.UniqueConstraint(
-            "unit_content_id", "version_number", name="uq_version_per_content"
-        ),
+        sa.UniqueConstraint("unit_content_id", "version_number", name="uq_version_per_content"),
     )
     op.create_index(
         op.f("ix_learning_unit_content_versions_unit_content_id"),
@@ -113,9 +110,7 @@ def downgrade() -> None:
     op.drop_constraint("fk_active_version", "learning_unit_contents", type_="foreignkey")
 
     # Clear active_version_id
-    op.execute(
-        "UPDATE learning_unit_contents SET active_version_id = NULL"
-    )
+    op.execute("UPDATE learning_unit_contents SET active_version_id = NULL")
 
     # Delete backfilled versions
     op.execute("DELETE FROM learning_unit_content_versions")
@@ -185,22 +180,24 @@ def _backfill_versions(connection) -> None:
         # Use the original created_at or now; ensure no tz for naive DB columns
         created = row.created_at.replace(tzinfo=None) if row.created_at else datetime.utcnow()
 
-        version_rows.append({
-            "id": version_id,
-            "unit_content_id": row.id,
-            "version_number": vnum,
-            "status": version_status,
-            "source": source,
-            "quality_status": "final",
-            "content": row.content,
-            "generation_metadata": row.generation_metadata,
-            "task_id": None,
-            "error_code": None,
-            "error_message": None,
-            "created_at": created,
-            "completed_at": created,
-            "activated_at": created,
-        })
+        version_rows.append(
+            {
+                "id": version_id,
+                "unit_content_id": row.id,
+                "version_number": vnum,
+                "status": version_status,
+                "source": source,
+                "quality_status": "final",
+                "content": row.content,
+                "generation_metadata": row.generation_metadata,
+                "task_id": None,
+                "error_code": None,
+                "error_message": None,
+                "created_at": created,
+                "completed_at": created,
+                "activated_at": created,
+            }
+        )
         update_pairs.append((version_id, row.id))
 
     # Batch insert versions
@@ -228,10 +225,6 @@ def _backfill_versions(connection) -> None:
     # Update active_version_id
     for version_id, content_id in update_pairs:
         connection.execute(
-            sa.text(
-                "UPDATE learning_unit_contents "
-                "SET active_version_id = :vid, status = 'ready' "
-                "WHERE id = :cid"
-            ),
+            sa.text("UPDATE learning_unit_contents SET active_version_id = :vid, status = 'ready' WHERE id = :cid"),
             {"vid": version_id, "cid": content_id},
         )

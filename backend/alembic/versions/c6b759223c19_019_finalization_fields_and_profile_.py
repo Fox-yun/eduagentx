@@ -4,6 +4,7 @@ Revision ID: c6b759223c19
 Revises: c135eb0b510e
 Create Date: 2026-07-01 14:45:38.395059
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -12,8 +13,8 @@ from sqlalchemy.dialects.postgresql import JSON
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'c6b759223c19'
-down_revision: Union[str, None] = 'c135eb0b510e'
+revision: str = "c6b759223c19"
+down_revision: Union[str, None] = "c135eb0b510e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -39,9 +40,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_student_profile_evidence_user_id")),
-        sa.UniqueConstraint(
-            "evidence_type", "evidence_id", "dimension", name="uq_evidence_per_dimension"
-        ),
+        sa.UniqueConstraint("evidence_type", "evidence_id", "dimension", name="uq_evidence_per_dimension"),
     )
     op.create_index(
         op.f("ix_student_profile_evidence_user_id"),

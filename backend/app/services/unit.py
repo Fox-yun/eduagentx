@@ -1145,21 +1145,28 @@ class UnitService:
                 "grading_quality": None,
             }
         else:
-            # All objective — finalize immediately
+            # All objective — finalize immediately via shared finalizer
             attempt.status = "completed"
             attempt.grading_quality = "final"
             attempt.active_task_id = None
             assessment.status = "submitted"
-            await self._finalize_attempt_scores(attempt)
+
+            from app.services.assessment_finalization import finalize_assessment_attempt
+
+            fin = await finalize_assessment_attempt(self.db, attempt_id=attempt.id)
             await self.db.commit()
 
             return {
                 "attempt_id": attempt.id,
                 "status": "completed",
-                "score": attempt.score,
-                "passed": attempt.passed,
+                "score": attempt.score or float(fin.percentage),
+                "passed": fin.passed,
                 "grading_quality": "final",
                 "feedback": attempt.feedback,
+                "mastery_before": float(fin.mastery_before),
+                "mastery_after": float(fin.mastery_after),
+                "node_completed": fin.node_completed,
+                "unlocked_node_ids": list(fin.unlocked_node_ids),
             }
 
     async def _finalize_attempt_scores(self, attempt: AssessmentAttempt) -> None:

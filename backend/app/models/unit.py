@@ -160,6 +160,10 @@ class AssessmentAttempt(Base):
     recommended_actions: Mapped[list | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    progress_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mastery_before: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mastery_after: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

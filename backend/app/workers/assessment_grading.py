@@ -73,8 +73,17 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
     )
     sa_questions: list[AssessmentQuestion] = list(questions_result.scalars().all())
     if not sa_questions:
-        # No short-answer questions — nothing to grade
-        await _finalize_attempt(db, attempt, task.id)
+        # No short-answer questions — finalize immediately
+        attempt.status = "completed"
+        attempt.grading_quality = "final"
+        attempt.active_task_id = None
+        attempt.submitted_at = attempt.submitted_at or __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        await _aggregate_attempt_score(db, attempt)
+        from app.services.assessment_finalization import finalize_assessment_attempt as _fa
+        await _fa(db, attempt_id=attempt_id)
+        await db.commit()
         return {"attempt_id": attempt_id, "status": "completed", "graded_count": 0}
 
     # Build (idx, prompt, answer) pairs for LLM
@@ -93,7 +102,13 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
             sa_answer_map[q.id] = ans
 
     if not sa_pairs:
-        await _finalize_attempt(db, attempt, task.id)
+        attempt.status = "completed"
+        attempt.grading_quality = "final"
+        attempt.active_task_id = None
+        await _aggregate_attempt_score(db, attempt)
+        from app.services.assessment_finalization import finalize_assessment_attempt as _fa
+        await _fa(db, attempt_id=attempt_id)
+        await db.commit()
         return {"attempt_id": attempt_id, "status": "completed", "graded_count": 0}
 
     grading_source = "llm"
@@ -160,7 +175,22 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
         ans.grading_status = grading_status
         ans.feedback = grade.get("feedback", "") or ""
 
-    await _finalize_attempt(db, attempt_b, task.id)
+    # Finalize: determine quality and call shared finalizer
+    attempt_b.status = "completed"
+    attempt_b.grading_quality = "final" if grading_status == "graded" else "provisional"
+    attempt_b.active_task_id = None
+    attempt_b.submitted_at = attempt_b.submitted_at or __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    )
+
+    # Calculate aggregate score
+    await _aggregate_attempt_score(db, attempt_b)
+
+    # Call shared finalizer (handles mastery/progress/unlock/evidence)
+    from app.services.assessment_finalization import finalize_assessment_attempt
+
+    await finalize_assessment_attempt(db, attempt_id=attempt_id)
+    await db.commit()
 
     return {
         "attempt_id": attempt_id,
@@ -171,11 +201,10 @@ async def execute_assessment_grading(db: Any, task: Any) -> dict[str, Any]:
     }
 
 
-async def _finalize_attempt(db: Any, attempt: AssessmentAttempt, task_id: str) -> None:
-    """Calculate final score and mark attempt completed."""
+async def _aggregate_attempt_score(db: Any, attempt: AssessmentAttempt) -> None:
+    """Calculate aggregate score for an attempt."""
     from sqlalchemy import func as sa_func
 
-    # Aggregate scores from all answers
     agg_result = await db.execute(
         select(
             sa_func.coalesce(sa_func.sum(AssessmentAnswer.points_earned), 0).label("earned"),
@@ -185,14 +214,5 @@ async def _finalize_attempt(db: Any, attempt: AssessmentAttempt, task_id: str) -
     row = agg_result.one()
     earned = float(row.earned) if row.earned else 0
     max_possible = float(row.max_possible) if row.max_possible else 0
-
     attempt.score = (earned / max_possible * 100) if max_possible > 0 else 0
     attempt.passed = attempt.score >= 60
-    attempt.status = "completed"
-    attempt.grading_quality = "final"
-    attempt.active_task_id = None
-    attempt.submitted_at = attempt.submitted_at or __import__("datetime").datetime.now(
-        __import__("datetime").timezone.utc
-    )
-
-    await db.commit()

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.common.enums import UserStatus
@@ -68,6 +68,25 @@ class UserProfile(Base):
 
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="profile")
+
+
+class StudentProfileEvidence(Base):
+    """Immutable evidence record for student profile dimension updates."""
+
+    __tablename__ = "student_profile_evidence"
+    __table_args__ = (
+        UniqueConstraint("evidence_type", "evidence_id", "dimension", name="uq_evidence_per_dimension"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    dimension: Mapped[str] = mapped_column(String(50), nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    evidence_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    evidence_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AuthSession(Base):

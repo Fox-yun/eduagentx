@@ -21,7 +21,7 @@ from app.models.unit import (
     AssessmentQuestion,
     LearningUnitContent,
 )
-from app.models.user import AuthAuditLog, AuthSession, RefreshToken, User, UserProfile, VerificationToken
+from app.models.user import AuthAuditLog, AuthSession, RefreshToken, User, UserProfile, VerificationToken, StudentProfileEvidence
 
 __all__ = [
     # User & Auth
@@ -65,4 +65,5 @@ __all__ = [
     "ClarificationSet",
     "ClarificationQuestion",
     "ClarificationAnswer",
+    "StudentProfileEvidence",
 ]

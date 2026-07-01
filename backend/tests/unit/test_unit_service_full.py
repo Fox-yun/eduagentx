@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -400,9 +401,22 @@ class TestUnitServiceSubmitAssessment:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        result = await svc.submit_assessment("assess-1", "user-1", {"q1": "a", "q2": "b"})
-        assert result["score"] == 100.0
-        assert result["passed"] is True
+        # Mock finalizer for unit test isolation
+        mock_fin_result = MagicMock()
+        mock_fin_result.percentage = Decimal("100")
+        mock_fin_result.passed = True
+        mock_fin_result.mastery_before = Decimal("0")
+        mock_fin_result.mastery_after = Decimal("100")
+        mock_fin_result.node_completed = True
+        mock_fin_result.unlocked_node_ids = ()
+
+        with patch(
+            "app.services.assessment_finalization.finalize_assessment_attempt",
+            AsyncMock(return_value=mock_fin_result),
+        ):
+            result = await svc.submit_assessment("assess-1", "user-1", {"q1": "a", "q2": "b"})
+            assert result["score"] == 100.0
+            assert result["passed"] is True
 
     @pytest.mark.asyncio
     async def test_submit_fail_with_wrong_answers(self):
@@ -432,9 +446,22 @@ class TestUnitServiceSubmitAssessment:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        result = await svc.submit_assessment("assess-1", "user-1", {"q1": "b"})
-        assert result["score"] == 0.0
-        assert result["passed"] is False
+        # Mock finalizer
+        mock_fin = MagicMock()
+        mock_fin.percentage = Decimal("0")
+        mock_fin.passed = False
+        mock_fin.mastery_before = Decimal("0")
+        mock_fin.mastery_after = Decimal("0")
+        mock_fin.node_completed = False
+        mock_fin.unlocked_node_ids = ()
+
+        with patch(
+            "app.services.assessment_finalization.finalize_assessment_attempt",
+            AsyncMock(return_value=mock_fin),
+        ):
+            result = await svc.submit_assessment("assess-1", "user-1", {"q1": "b"})
+            assert result["score"] == 0.0
+            assert result["passed"] is False
 
     @pytest.mark.asyncio
     async def test_submit_multiple_choice(self):
@@ -470,9 +497,21 @@ class TestUnitServiceSubmitAssessment:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        result = await svc.submit_assessment("assess-1", "user-1", {"q1": ["a", "b", "c"]})
-        assert result["score"] == 100.0
-        assert result["passed"] is True
+        mock_fin = MagicMock()
+        mock_fin.percentage = Decimal("100")
+        mock_fin.passed = True
+        mock_fin.mastery_before = Decimal("0")
+        mock_fin.mastery_after = Decimal("100")
+        mock_fin.node_completed = True
+        mock_fin.unlocked_node_ids = ()
+
+        with patch(
+            "app.services.assessment_finalization.finalize_assessment_attempt",
+            AsyncMock(return_value=mock_fin),
+        ):
+            result = await svc.submit_assessment("assess-1", "user-1", {"q1": ["a", "b", "c"]})
+            assert result["score"] == 100.0
+            assert result["passed"] is True
 
     @pytest.mark.asyncio
     async def test_submit_with_short_answer(self):

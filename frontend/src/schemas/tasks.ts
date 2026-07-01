@@ -23,6 +23,7 @@ export const TaskTypeSchema = z.enum([
   "learning_path_revision",
   "learning_unit_generation",
   "learning_assessment_generation",
+  "assessment_grading",
   "learning_path_adaptation",
   "knowledge_index",
   "knowledge_reindex",

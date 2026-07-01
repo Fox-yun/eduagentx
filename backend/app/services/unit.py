@@ -28,6 +28,17 @@ logger = structlog.get_logger()
 PASS_THRESHOLD = 60.0
 
 
+def _parse_correct_answer_list(correct_answer: str | None) -> list[str]:
+    """Parse a JSON-serialized correct answer list for multiple_choice."""
+    if not correct_answer:
+        return []
+    try:
+        parsed = json.loads(correct_answer)
+        return list(parsed) if isinstance(parsed, list) else [str(parsed)]
+    except (json.JSONDecodeError, TypeError):
+        return [str(correct_answer)]
+
+
 class UnitService:
     """Unit content and assessment business logic."""
 
@@ -967,32 +978,69 @@ class UnitService:
         user_id: str,
         answers: dict[str, str | list[str]],
     ) -> dict:
-        """Submit an assessment attempt."""
-        # Get assessment
+        """Submit an assessment attempt with async grading for short answers.
+
+        Phase 3.5-B: Grades objective questions synchronously using shared
+        answer_scoring module. Short-answer questions are graded asynchronously
+        via the assessment_grading worker. Mastery and node unlock are NOT
+        updated in this phase (handled by Phase 3.5-C for final assessments only).
+        """
+        from decimal import Decimal
+
+        from app.services.answer_scoring import (
+            score_multiple_choice,
+            score_single_choice,
+            score_true_false,
+        )
+        from app.services.task import TaskService
+
+        # Load assessment FOR UPDATE
         result = await self.db.execute(
             select(Assessment).where(
                 Assessment.id == assessment_id,
                 Assessment.user_id == user_id,
-            )
+            ).with_for_update()
         )
         assessment = result.scalar_one_or_none()
         if not assessment:
             raise ApiError(code="ASSESSMENT_NOT_FOUND", message="Assessment not found", status_code=404)
+        if assessment.status not in ("ready", "submitted"):
+            raise ApiError(code="ASSESSMENT_NOT_READY", message="Assessment is not ready for submission", status_code=400)
 
-        # Look up node title for LLM grading context
-        from app.models.path import LearningNode
+        # Check for existing completed attempt (idempotent)
+        existing_attempt = await self.db.execute(
+            select(AssessmentAttempt).where(
+                AssessmentAttempt.assessment_id == assessment_id,
+                AssessmentAttempt.user_id == user_id,
+                AssessmentAttempt.status.in_(["completed", "grading"]),
+            ).with_for_update()
+        )
+        existing = existing_attempt.scalar_one_or_none()
+        if existing and existing.status == "completed":
+            return {
+                "attempt_id": existing.id,
+                "status": "completed",
+                "score": existing.score,
+                "passed": existing.passed,
+                "grading_quality": existing.grading_quality,
+                "feedback": existing.feedback,
+            }
+        if existing and existing.active_task_id:
+            return {
+                "attempt_id": existing.id,
+                "status": "grading",
+                "active_task_id": existing.active_task_id,
+            }
 
-        node_result = await self.db.execute(select(LearningNode).where(LearningNode.id == assessment.node_id))
-        node = node_result.scalar_one_or_none()
-        node_title = node.title if node else "未知节点"
-
-        # Get questions
+        # Load questions
         questions_result = await self.db.execute(
             select(AssessmentQuestion)
             .where(AssessmentQuestion.assessment_id == assessment_id)
             .order_by(AssessmentQuestion.question_order)
         )
         questions = list(questions_result.scalars().all())
+        if not questions:
+            raise ApiError(code="NO_QUESTIONS", message="Assessment has no questions", status_code=400)
 
         # Create attempt
         attempt = AssessmentAttempt(
@@ -1002,230 +1050,139 @@ class UnitService:
             status="in_progress",
         )
         self.db.add(attempt)
-        await self.db.flush()  # Flush so attempt.id is available for FK references
+        await self.db.flush()
 
         # Grade answers
-        total_points = 0
-        earned_points = 0
-        weak_concepts: list[str] = []
-        explanations: dict[str, str] = {}
-
-        # Grade answers — batch LLM call for short answers
-        short_answer_pairs: list[tuple[int, str, str]] = []  # (idx, prompt, answer)
-        for idx, question in enumerate(questions):
-            total_points += question.points
+        has_pending_short_answer = False
+        for question in questions:
             answer_value = answers.get(question.id)
-            is_correct = False
-            points_earned = 0
-            feedback = ""
+            if answer_value is None:
+                continue
 
-            if answer_value is not None:
-                if question.question_type in ("single_choice", "multiple_choice"):
-                    correct = question.correct_answer
-                    if isinstance(answer_value, list):
-                        is_correct = set(answer_value) == set(json.loads(correct) if correct else [])
-                    else:
-                        is_correct = str(answer_value) == str(correct)
-                    if is_correct:
-                        points_earned = question.points
-                        earned_points += question.points
-                    else:
-                        weak_concepts.append(question.prompt[:50])
-                        feedback = f"正确答案: {question.correct_answer}"
-                elif question.question_type == "short_answer" and str(answer_value).strip():
-                    short_answer_pairs.append((idx, question.prompt, str(answer_value)))
-                    # Will be graded by LLM below; placeholder
-                    continue
-
-            # Save answer (non-short-answer)
-            answer = AssessmentAnswer(
+            ans = AssessmentAnswer(
                 id=str(uuid.uuid4()),
                 attempt_id=attempt.id,
                 question_id=question.id,
-                answer_value=json.dumps(answer_value) if answer_value else None,
-                is_correct=is_correct,
-                points_earned=points_earned,
-                feedback=feedback,
+                max_score=question.max_score or float(question.points),
+                grading_source="program",
+                grading_status="graded",
             )
-            self.db.add(answer)
 
-        # LLM-grade short answer questions in a single batch call
-        grading_used_fallback = False
-        if short_answer_pairs:
-            short_feedback = await self._grade_short_answers(short_answer_pairs, node_title)
-            for idx, _prompt, student_answer in short_answer_pairs:
-                q = questions[idx]
-                grade = short_feedback.get(idx, {"score": 0, "feedback": "未评分"})
-                if grade.get("grading_status") == "provisional":
-                    grading_used_fallback = True
-                score_pct = grade.get("score", 0)
-                is_correct = score_pct >= 60
-                # Use int(x+0.5) instead of round() to avoid banker's rounding
-                # which gives round(0.5)=0 and causes 1-point questions to score 0
-                points_earned = max(0, int(q.points * score_pct / 100 + 0.5))
-                earned_points += points_earned
-                if not is_correct:
-                    weak_concepts.append(q.prompt[:50])
-                answer = AssessmentAnswer(
-                    id=str(uuid.uuid4()),
-                    attempt_id=attempt.id,
-                    question_id=q.id,
-                    answer_value=json.dumps(student_answer),
-                    is_correct=is_correct,
-                    points_earned=points_earned,
-                    feedback=grade.get("feedback", ""),
+            if question.question_type == "single_choice":
+                scored = score_single_choice(
+                    str(answer_value),
+                    str(question.correct_answer or ""),
+                    Decimal(str(question.max_score or question.points)),
                 )
-                self.db.add(answer)
+                ans.answer_value = str(answer_value)
+                ans.is_correct = scored.is_correct
+                ans.points_earned = float(scored.score)
+                ans.feedback = scored.feedback
 
-        # Calculate score
-        score = (earned_points / total_points * 100) if total_points > 0 else 0
-        passed = score >= PASS_THRESHOLD
+            elif question.question_type == "multiple_choice":
+                ans_list = answer_value if isinstance(answer_value, list) else [str(answer_value)]
+                correct_list = _parse_correct_answer_list(question.correct_answer)
+                scored = score_multiple_choice(
+                    ans_list,
+                    correct_list,
+                    Decimal(str(question.max_score or question.points)),
+                )
+                ans.answer_value = json.dumps(ans_list)
+                ans.is_correct = scored.is_correct
+                ans.points_earned = float(scored.score)
+                ans.feedback = scored.feedback
 
-        # Update attempt
-        attempt.submitted_at = utc_now()
-        if grading_used_fallback:
-            attempt.status = "provisional"
-            attempt.score = score
-            attempt.passed = False
-            attempt.feedback = "部分简答题自动评分暂不可用，该结果为临时评分，暂不解锁后续节点及更新掌握度。"
-            passed = False
-        else:
-            attempt.status = "scored"
-            attempt.score = score
-            attempt.passed = passed
-            if passed:
-                attempt.feedback = "恭喜通过！您已掌握本节点的核心知识。"
+            elif question.question_type == "true_false":
+                bool_val = str(answer_value).strip().lower() in ("true", "1", "yes")
+                correct_bool = str(question.correct_answer).strip().lower() in ("true", "1", "yes")
+                scored = score_true_false(
+                    bool_val,
+                    correct_bool,
+                    Decimal(str(question.max_score or question.points)),
+                )
+                ans.answer_value = str(answer_value)
+                ans.is_correct = scored.is_correct
+                ans.points_earned = float(scored.score)
+                ans.feedback = scored.feedback
+
+            elif question.question_type == "short_answer":
+                ans.answer_value = str(answer_value)
+                ans.is_correct = None
+                ans.points_earned = 0
+                ans.grading_source = "pending"
+                ans.grading_status = "pending"
+                has_pending_short_answer = True
+
             else:
-                attempt.feedback = await self._generate_remedial_feedback(assessment.node_id, weak_concepts, score)
+                continue
 
-        attempt.weak_concepts = weak_concepts
-        attempt.explanations = explanations
+            self.db.add(ans)
 
-        # Update assessment status
-        assessment.status = "submitted"
+        attempt.submitted_at = utc_now()
 
-        # Update mastery and progress only when not fallback
-        if not grading_used_fallback:
-            await self._update_mastery(user_id, assessment.node_id, score, passed, assessment_id)
-            await self._update_progress(user_id, assessment.path_id, assessment.node_id, passed)
-
-        # Update student profile dimensions (async, non-blocking)
-        profile_result = None
-        if not grading_used_fallback:
-            try:
-                from app.models.path import LearningNode
-                from app.services.profile import ProfileService
-
-                node_result = await self.db.execute(select(LearningNode).where(LearningNode.id == assessment.node_id))
-                node = node_result.scalar_one_or_none()
-                node_title = node.title if node else "未知节点"
-                profile_svc = ProfileService(self.db)
-                profile_result = await profile_svc.update_after_assessment(
-                    user_id, node_title, score, passed, weak_concepts
-                )
-            except Exception:
-                pass  # Profile update is non-critical
-
-        await self.db.flush()
-        await self.db.commit()
-
-        submission_result: dict[str, Any] = {
-            "score": score,
-            "passed": passed,
-            "feedback": attempt.feedback,
-            "grading_status": "provisional" if grading_used_fallback else "completed",
-            "mastery_delta": (score - 50 if passed else 0) if not grading_used_fallback else 0,
-            "weak_concepts": weak_concepts,
-            "explanations": explanations,
-            "recommended_actions": ["重新学习本单元"] if not passed else [],
-        }
-        if profile_result:
-            submission_result["profile_update"] = profile_result
-        return submission_result
-
-    async def _generate_remedial_feedback(self, node_id: str, weak_concepts: list[str], score: float) -> str:
-        """Generate remedial feedback using LLM when assessment is failed."""
-        from app.models.path import LearningNode
-        from app.prompts.agents import REMEDIAL_SYSTEM, remedial_user
-        from app.services.llm import LLMError, llm_json
-
-        # Look up node title
-        node_result = await self.db.execute(select(LearningNode).where(LearningNode.id == node_id))
-        node = node_result.scalar_one_or_none()
-        node_title = node.title if node else "本节点"
-
-        try:
-            result = await llm_json(
-                REMEDIAL_SYSTEM,
-                remedial_user(node_title, weak_concepts, score),
-                temperature=0.5,
-                max_tokens=1024,
+        if has_pending_short_answer:
+            # Enqueue async grading for short answers
+            task_service = TaskService(self.db)
+            idempotency_key = f"assessment-grade:{user_id}:{attempt.id}"
+            task = await task_service.enqueue_task(
+                user_id=user_id,
+                task_type="assessment_grading",
+                target_type="attempt",
+                target_id=attempt.id,
+                target_metadata={"assessment_id": assessment_id},
+                idempotency_key=idempotency_key,
             )
-            # Format the remedial content into readable text
-            parts = []
-            for item in result.get("weak_analysis", []):
-                parts.append(
-                    f"📌 **{item.get('concept', '')}**\n原因：{item.get('reason', '')}\n建议：{item.get('suggestion', '')}"
-                )
-            actions = result.get("recommended_actions", [])
-            if actions:
-                parts.append("\n🎯 **推荐行动**\n" + "\n".join(f"- {a}" for a in actions))
-            encouragement = result.get("encouragement", "")
-            if encouragement:
-                parts.append(f"\n💪 {encouragement}")
-            return "\n\n".join(parts) if parts else f"评估未通过（得分：{score:.0f}/100），建议重新学习本单元内容。"
-        except (LLMError, Exception):
-            return f"评估未通过（得分：{score:.0f}/100）。薄弱环节：{'、'.join(weak_concepts) if weak_concepts else '多项知识点'}。建议重新学习本单元内容并完成练习题后再试。"
+            attempt.status = "grading"
+            attempt.active_task_id = task.id
+            attempt.grading_quality = None
+            assessment.status = "submitted"
+            await self.db.commit()
 
-    async def _grade_short_answers(self, pairs: list[tuple[int, str, str]], node_title: str) -> dict[int, dict]:
-        """Grade short answer questions in a single LLM call."""
-        from app.services.llm import LLMError, llm_json
+            return {
+                "attempt_id": attempt.id,
+                "status": "grading",
+                "active_task_id": task.id,
+                "grading_quality": None,
+            }
+        else:
+            # All objective — finalize immediately
+            attempt.status = "completed"
+            attempt.grading_quality = "final"
+            attempt.active_task_id = None
+            assessment.status = "submitted"
+            await self._finalize_attempt_scores(attempt)
+            await self.db.commit()
 
-        # Map sequential LLM indices back to original question indices
-        llm_to_orig = {i: orig_idx for i, (orig_idx, _, _) in enumerate(pairs)}
-        questions_text = "\n\n".join(
-            f"[题目{i}] {prompt}\n[学生答案] {answer}" for i, (_, prompt, answer) in enumerate(pairs)
+            return {
+                "attempt_id": attempt.id,
+                "status": "completed",
+                "score": attempt.score,
+                "passed": attempt.passed,
+                "grading_quality": "final",
+                "feedback": attempt.feedback,
+            }
+
+    async def _finalize_attempt_scores(self, attempt: AssessmentAttempt) -> None:
+        """Aggregate answer scores and update attempt fields."""
+        from sqlalchemy import func as sa_func
+
+        agg = await self.db.execute(
+            select(
+                sa_func.coalesce(sa_func.sum(AssessmentAnswer.points_earned), 0).label("earned"),
+                sa_func.coalesce(sa_func.sum(AssessmentAnswer.max_score), 0).label("max_possible"),
+            ).where(AssessmentAnswer.attempt_id == attempt.id)
         )
+        row = agg.one()
+        earned = float(row.earned) if row.earned else 0
+        max_possible = float(row.max_possible) if row.max_possible else 0
 
-        system_prompt = """你是一个教育评估判分智能体。请对学生的简答题答案进行评分。
+        attempt.score = (earned / max_possible * 100) if max_possible > 0 else 0
+        attempt.passed = attempt.score >= PASS_THRESHOLD
 
-评分标准：
-- 80-100分：答案准确、完整、有深度
-- 60-79分：答案基本正确，但不够完整
-- 40-59分：答案部分正确，有明显遗漏
-- 0-39分：答案错误或过于简略
-
-请以 JSON 格式输出每道题的评分，index 从 0 开始：
-{
-  "grades": [
-    {"index": 0, "score": 75, "feedback": "具体评价和建议"}
-  ]
-}"""
-
-        try:
-            result = await llm_json(
-                system_prompt,
-                f"请对以下关于「{node_title}」的简答题答案进行评分：\n\n{questions_text}",
-                temperature=0.2,
-                max_tokens=2048,
-            )
-            grades = result.get("grades", [])
-            return {
-                llm_to_orig[g["index"]]: {"score": g.get("score", 0), "feedback": g.get("feedback", "")}
-                for g in grades
-                if "index" in g and g["index"] in llm_to_orig
-            }
-        except (LLMError, Exception):
-            # Fallback: give 50 score and provisional fields/feedback
-            return {
-                idx: {
-                    "score": 50,
-                    "feedback": "自动评分暂不可用，该结果为临时评分。",
-                    "grading_status": "provisional",
-                    "grading_source": "fallback",
-                }
-                for idx, _, _ in pairs
-            }
+        if attempt.passed:
+            attempt.feedback = "恭喜通过！您已掌握本节点的核心知识。"
+        else:
+            attempt.feedback = "未通过，请回顾学习内容后重试。"
 
     async def _update_mastery(
         self,

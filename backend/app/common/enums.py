@@ -28,6 +28,7 @@ class TaskType(enum.StrEnum):
     LEARNING_PATH_REVISION = "learning_path_revision"
     LEARNING_UNIT_GENERATION = "learning_unit_generation"
     LEARNING_ASSESSMENT_GENERATION = "learning_assessment_generation"
+    ASSESSMENT_GRADING = "assessment_grading"
     LEARNING_PATH_ADAPTATION = "learning_path_adaptation"
     KNOWLEDGE_INDEX = "knowledge_index"
     KNOWLEDGE_REINDEX = "knowledge_reindex"

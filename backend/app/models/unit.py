@@ -152,6 +152,8 @@ class AssessmentAttempt(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="in_progress")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    grading_quality: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     weak_concepts: Mapped[list | None] = mapped_column(JSON, nullable=True)
     explanations: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -174,7 +176,14 @@ class AssessmentAnswer(Base):
     answer_value: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points_earned: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    grading_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    grading_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "question_id", name="uq_answer_per_question"),
+    )
 
 
 class LearningLecture(Base):

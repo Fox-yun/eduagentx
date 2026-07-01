@@ -42,6 +42,7 @@ IMPLEMENTED_TASK_TYPES: frozenset[str] = frozenset(
         "learning_unit_generation",
         "learning_lecture_generation",
         "learning_assessment_generation",
+        "assessment_grading",
         "knowledge_index",
         "knowledge_reindex",
         "e2e_progress_test",
@@ -66,6 +67,7 @@ PUBLIC_TASK_TYPES: frozenset[str] = frozenset(
         "learning_path_revision",
         "learning_unit_generation",
         "learning_assessment_generation",
+        "assessment_grading",
         "learning_path_adaptation",
         "knowledge_index",
         "knowledge_reindex",
@@ -124,6 +126,10 @@ def register_builtin_task_handlers() -> None:
     from app.workers.assessment_generation import execute_assessment_generation
 
     _register_if_missing("learning_assessment_generation", execute_assessment_generation)
+
+    from app.workers.assessment_grading import execute_assessment_grading
+
+    _register_if_missing("assessment_grading", execute_assessment_grading)
 
 
 def _register_if_missing(task_type: str, handler: TaskHandler) -> None:

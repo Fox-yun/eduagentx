@@ -6,13 +6,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
+from app.models.unit import Assessment, AssessmentQuestion
 from app.models.user import User
 from app.services.learning_access import require_node_access
-from app.services.unit import UnitService
+from app.services.unit import UnitService, _safe_question_dto
 
 router = APIRouter()
 
@@ -142,10 +144,56 @@ async def generate_quiz_bank(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Generate a quiz bank for a learning node (async background task)."""
+    """Generate a quiz bank for a learning node (async background task).
+
+    Uses transactional outbox for reliability. Idempotent:
+    returns existing if already ready, or existing task if generating.
+    """
     await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
     return await service.generate_quiz_bank(path_id, node_id, user.id)
+
+
+@router.get("/{path_id}/nodes/{node_id}/quiz-bank")
+async def get_quiz_bank(
+    path_id: str,
+    node_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get existing quiz bank for a node, if ready."""
+    await require_node_access(db, user.id, path_id, node_id)
+
+    result = await db.execute(
+        select(Assessment).where(
+            Assessment.path_id == path_id,
+            Assessment.node_id == node_id,
+            Assessment.user_id == user.id,
+            Assessment.purpose == "quiz_bank",
+        )
+    )
+    assessment = result.scalar_one_or_none()
+    if not assessment:
+        return {"assessment_id": None, "status": "not_generated", "questions": []}
+
+    if assessment.status == "ready":
+        q_result = await db.execute(
+            select(AssessmentQuestion)
+            .where(AssessmentQuestion.assessment_id == assessment.id)
+            .order_by(AssessmentQuestion.question_order)
+        )
+        return {
+            "assessment_id": assessment.id,
+            "status": "ready",
+            "questions": [_safe_question_dto(q) for q in q_result.scalars().all()],
+        }
+
+    return {
+        "assessment_id": assessment.id,
+        "status": assessment.status,
+        "active_task_id": assessment.active_task_id,
+        "questions": [],
+    }
 
 
 async def submit_assessment(

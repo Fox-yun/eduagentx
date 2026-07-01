@@ -97,7 +97,11 @@ class LearningUnitContentVersion(Base):
 
 
 class Assessment(Base):
-    """Assessment for a learning node."""
+    """Assessment for a learning node.
+
+    Purpose distinguishes usage: quiz_bank (generated, browsable),
+    formal (scored, one attempt), practice (repeatable, not scored).
+    """
 
     __tablename__ = "assessments"
 
@@ -106,12 +110,18 @@ class Assessment(Base):
     path_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_paths.id"), nullable=False, index=True)
     path_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False, default="quiz_bank")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AssessmentQuestion(Base):
-    """A question within an assessment."""
+    """A question within an assessment.
+
+    Public DTO MUST exclude correct_answer, reference_answer, rubric,
+    and explanation — these are only returned after submission/grading.
+    """
 
     __tablename__ = "assessment_questions"
 
@@ -121,7 +131,13 @@ class AssessmentQuestion(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     options: Mapped[list | None] = mapped_column(JSON, nullable=True)
     correct_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rubric: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    difficulty: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    knowledge_point: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     points: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     question_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 

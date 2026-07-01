@@ -1,4 +1,7 @@
-"""Comprehensive unit tests for units router."""
+"""Comprehensive unit tests for units router.
+
+Uses httpx.AsyncClient for httpx 0.28+ compatibility with async endpoints.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture
@@ -28,8 +31,6 @@ def app_with_mocked_auth():
     mock_db = AsyncMock()
     mock_db.add = MagicMock()
     mock_db.add_all = MagicMock()
-    mock_db.add = MagicMock()
-    mock_db.add_all = MagicMock()
 
     async def override_db():
         return mock_db
@@ -40,8 +41,16 @@ def app_with_mocked_auth():
     return app, mock_db
 
 
+@pytest.fixture(autouse=True)
+def _patch_node_access():
+    """Patch require_node_access in the units router module."""
+    with patch("app.routers.units.require_node_access", AsyncMock(return_value=None)):
+        yield
+
+
 class TestGetUnitContent:
-    def test_get_unit_content(self, app_with_mocked_auth):
+    @pytest.mark.asyncio
+    async def test_get_unit_content(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
         content = {
@@ -65,35 +74,38 @@ class TestGetUnitContent:
             instance = MockSvc.return_value
             instance.get_unit_content = AsyncMock(return_value=content)
 
-            client = TestClient(app)
-            resp = client.get("/paths/path-1/nodes/node-1/content")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["unit_id"] == "u1"
-            assert data["status"] == "ready"
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/paths/path-1/nodes/node-1/content")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["unit_id"] == "u1"
+                assert data["status"] == "ready"
 
 
 class TestGenerateUnitContent:
-    def test_generate_unit_content(self, app_with_mocked_auth):
+    @pytest.mark.asyncio
+    async def test_generate_unit_content(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
-        task = MagicMock()
-        task.id = "task-1"
+        result = {"next_step": "generating", "active_task_id": "task-1"}
 
-        with patch("app.services.task.TaskService") as MockTaskSvc:
-            task_svc = MockTaskSvc.return_value
-            task_svc.create_task = AsyncMock(return_value=task)
+        with patch("app.routers.units.UnitService") as MockSvc:
+            instance = MockSvc.return_value
+            instance.generate_content = AsyncMock(return_value=result)
 
-            client = TestClient(app)
-            resp = client.post("/paths/path-1/nodes/node-1/content")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["next_step"] == "generating"
-            assert data["active_task_id"] == "task-1"
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/paths/path-1/nodes/node-1/content")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["next_step"] == "generating"
+                assert data["active_task_id"] == "task-1"
 
 
 class TestCreateAssessment:
-    def test_create_assessment(self, app_with_mocked_auth):
+    @pytest.mark.asyncio
+    async def test_create_assessment(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
         assessment = {
@@ -108,15 +120,17 @@ class TestCreateAssessment:
             instance = MockSvc.return_value
             instance.create_assessment = AsyncMock(return_value=assessment)
 
-            client = TestClient(app)
-            resp = client.post("/paths/path-1/nodes/node-1/assessments")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["assessment_id"] == "assess-1"
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/paths/path-1/nodes/node-1/assessments")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["assessment_id"] == "assess-1"
 
 
 class TestCreatePractice:
-    def test_create_practice(self, app_with_mocked_auth):
+    @pytest.mark.asyncio
+    async def test_create_practice(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
         practice = {
@@ -130,12 +144,13 @@ class TestCreatePractice:
             instance = MockSvc.return_value
             instance.create_practice = AsyncMock(return_value=practice)
 
-            client = TestClient(app)
-            resp = client.post("/paths/path-1/nodes/node-1/practice")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["node_id"] == "node-1"
-            assert len(data["questions"]) == 1
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/paths/path-1/nodes/node-1/practice")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["node_id"] == "node-1"
+                assert len(data["questions"]) == 1
 
 
 class TestSubmitAssessment:

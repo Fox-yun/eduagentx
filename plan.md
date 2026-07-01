@@ -672,6 +672,47 @@ Fallback：
 
 ---
 
+### 6.2.1 Phase 3.5-A：Assessment Generation Handler ✅ 已完成
+
+**分支：** `phase/3.5-a-assessment-generation`
+
+完成项：
+
+- [x] Migration 017: Assessment 增加 purpose/active_task_id；AssessmentQuestion 增加 difficulty/knowledge_point/explanation/reference_answer/rubric/max_score
+- [x] Assessment 模型字段更新（purpose、active_task_id）
+- [x] AssessmentQuestion 模型字段更新（全量新字段）
+- [x] `workers/assessment_generation.py` — 双事务 Handler：
+  - Transaction A: 加锁加载 Assessment，标记 generating，commit
+  - LLM 调用与验证（事务外）
+  - Transaction B: FOR UPDATE 验证状态，保存题目，标记 ready
+- [x] 严格 Pydantic Schema（`GeneratedAssessment`, `GeneratedAssessmentQuestion`）— `extra="forbid"`
+- [x] 四种题型校验：single_choice、multiple_choice、true_false、short_answer
+- [x] LLM 失败 -> Fallback 确定性题库生成（8 题 quiz_bank / 10 题 formal / 5 题 practice）
+- [x] Handler 注册（`@register_handler` + `register_builtin_task_handlers` 导入）
+- [x] `learning_assessment_generation` 从 `RESERVED_TASK_TYPES` 移入 `IMPLEMENTED_TASK_TYPES`
+- [x] `generate_quiz_bank` 服务：幂等生成 + `enqueue_task` 事务性 Outbox + 幂等键
+- [x] GET quiz-bank 端点：支持获取已有题库
+- [x] 安全公共 DTO（不含 `correct_answer`、`reference_answer`、`rubric`、`explanation`）
+- [x] 前端 API 更新（含 GET/POST 新格式）
+- [x] 29 个单元测试（schema 验证 + 题型校验 + Fallback + 安全 DTO）
+- [x] Ruff: 0 errors; MyPy: 0 errors (72 source files); pytest: 722 passed, 13 skipped, 0 failed (735 collected, 0 collection errors); Migration 017 round-trip 通过
+- [ ] ~~前端题库按钮重新开放~~（推迟至 Phase 3.5-B E2E 通过后）
+
+文件变更：
+
+| 文件 | 操作 |
+|---|---|
+| `backend/alembic/versions/017_enhance_assessment_models.py` | 新增 |
+| `backend/app/models/unit.py` | 修改 |
+| `backend/app/workers/assessment_generation.py` | 新增 |
+| `backend/app/workers/task_handlers.py` | 修改 |
+| `backend/app/services/unit.py` | 修改 |
+| `backend/app/routers/units.py` | 修改 |
+| `backend/tests/unit/test_assessment_generation_schema.py` | 新增 |
+| `frontend/src/api/units.ts` | 修改 |
+
+---
+
 ### 6.3 Assessment Submission
 
 客观题同步评分，简答题建议复用 Phase 3.2 的异步评分模式。
@@ -1659,3 +1700,15 @@ npm run build
 - [x] Phase 3.4-E: 前端资源 Tabs + Regenerating UI
 
 ### 下一步：Phase 3.5 — Assessment、Practice、Mastery 与节点解锁闭环
+
+#### Phase 3.5-A：Assessment Generation Handler ✅ 已完成
+
+- [x] Migration 017 — Assessment/Question 模型增强
+- [x] `workers/assessment_generation.py` — 双事务 Handler
+- [x] 四种题型校验 + Fallback 生成
+- [x] Handler 注册 + IMPLEMENTED_TASK_TYPES 更新
+- [x] 安全公共 DTO（无答案泄漏）
+- [x] 安全公共 DTO（无答案泄漏）+ Contract 测试（13 个）
+- [x] MyPy: 0 errors, Ruff: 0 errors, pytest: 722 passed 0 failed, Migration 017 round-trip 通过
+
+### 下一阶段：Phase 3.5-B — Assessment Submission 与异步评分

@@ -234,9 +234,9 @@ class UnitService:
     ) -> dict[str, object]:
         """Start generating unit content. Idempotent if already ready or generating."""
         from app.common.enums import TaskStatus
+        from app.models.path import LearningPath
         from app.models.task import BackgroundTask
         from app.models.unit import LearningUnitContentVersion
-        from app.models.path import LearningPath
 
         # Lock the unit content row
         existing = await self._ensure_unit_content(path_id, node_id, user_id, for_update=True)
@@ -491,19 +491,109 @@ class UnitService:
         path_id: str,
         node_id: str,
         user_id: str,
+        path_version_id: str | None = None,
     ) -> dict[str, object]:
-        """Start a quiz bank generation task."""
+        """Start quiz bank generation (async background task).
+
+        Idempotent: returns existing assessment if ready,
+        or existing task_id if already generating.
+        Uses transactional outbox via enqueue_task for reliability.
+        """
+        from app.common.enums import TaskStatus
+        from app.models.task import BackgroundTask
+
+        # Resolve path_version_id if not provided
+        if not path_version_id:
+            from app.models.path import LearningPath
+
+            path_result = await self.db.execute(
+                select(LearningPath).where(LearningPath.id == path_id)
+            )
+            path = path_result.scalar_one_or_none()
+            path_version_id = path.active_version_id if path else None
+
+        # Check for existing assessment for this node + purpose
+        result = await self.db.execute(
+            select(Assessment).where(
+                Assessment.path_id == path_id,
+                Assessment.node_id == node_id,
+                Assessment.user_id == user_id,
+                Assessment.purpose == "quiz_bank",
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        # If ready, return existing (idempotent)
+        if existing and existing.status == "ready":
+            questions_result = await self.db.execute(
+                select(AssessmentQuestion)
+                .where(AssessmentQuestion.assessment_id == existing.id)
+                .order_by(AssessmentQuestion.question_order)
+            )
+            questions = list(questions_result.scalars().all())
+            return {
+                "assessment_id": existing.id,
+                "status": "ready",
+                "questions": [_safe_question_dto(q) for q in questions],
+            }
+
+        # If currently generating, return existing task
+        if existing and existing.active_task_id:
+            task_result = await self.db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == existing.active_task_id,
+                    BackgroundTask.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value]),
+                )
+            )
+            active_task = task_result.scalar_one_or_none()
+            if active_task:
+                return {
+                    "assessment_id": existing.id,
+                    "status": "generating",
+                    "active_task_id": active_task.id,
+                }
+
+        # Create new assessment
+        assessment_id = existing.id if existing else str(uuid.uuid4())
+        if not existing:
+            assessment = Assessment(
+                id=assessment_id,
+                user_id=user_id,
+                path_id=path_id,
+                path_version_id=path_version_id or "",
+                node_id=node_id,
+                purpose="quiz_bank",
+                status="pending",
+            )
+            self.db.add(assessment)
+            await self.db.flush()
+
+        # Enqueue task via enqueue_task (no commit — caller commits)
         from app.services.task import TaskService
 
         task_service = TaskService(self.db)
-        task = await task_service.create_task(
+        idempotency_key = f"assessment-generate:{user_id}:{path_version_id}:{node_id}:quiz_bank"
+        task = await task_service.enqueue_task(
             user_id=user_id,
             task_type="learning_assessment_generation",
-            target_type="node",
-            target_id=node_id,
-            target_metadata={"path_id": path_id},
+            target_type="assessment",
+            target_id=assessment_id,
+            target_metadata={"path_id": path_id, "purpose": "quiz_bank"},
+            idempotency_key=idempotency_key,
         )
-        return {"next_step": "generating", "active_task_id": task.id}
+
+        # Link task to assessment
+        update_target = existing or assessment
+        update_target.active_task_id = task.id
+        update_target.status = "generating"
+
+        await self.db.commit()
+
+        return {
+            "assessment_id": assessment_id,
+            "status": "generating",
+            "active_task_id": task.id,
+        }
 
     async def create_assessment(
         self,
@@ -1319,3 +1409,32 @@ class UnitService:
             "explanations": {},
             "recommended_actions": [],
         }
+
+
+# ---------------------------------------------------------------------------
+# Safe question DTO — never leaks answers in public responses
+# ---------------------------------------------------------------------------
+
+
+ASSESSMENT_STATUSES = frozenset({
+    "pending",
+    "generating",
+    "ready",
+    "failed",
+    "archived",
+})
+
+
+def _safe_question_dto(q: AssessmentQuestion) -> dict[str, object]:
+    """Build a public-safe question response without answer fields."""
+    return {
+        "question_id": q.id,
+        "type": q.question_type,
+        "prompt": q.prompt,
+        "options": json.loads(q.options)
+        if isinstance(q.options, str)
+        else (q.options if q.options else []),
+        "difficulty": q.difficulty,
+        "knowledge_point": q.knowledge_point,
+        "max_score": q.max_score or q.points,
+    }

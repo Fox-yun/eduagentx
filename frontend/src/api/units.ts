@@ -168,17 +168,92 @@ export async function getMindMap(
 }
 
 const GenerateQuizBankResponseSchema = z.object({
-  next_step: z.literal("generating"),
-  active_task_id: z.string(),
+  assessment_id: z.string(),
+  status: z.enum(["generating", "ready", "failed", "pending"]),
+  active_task_id: z.string().optional().nullable(),
+  questions: z
+    .array(
+      z.object({
+        question_id: z.string(),
+        type: z.string(),
+        prompt: z.string(),
+        options: z.array(z.object({ value: z.string(), label: z.string() })).nullable().optional(),
+        difficulty: z.string().optional().nullable(),
+        knowledge_point: z.string().optional().nullable(),
+        max_score: z.number().optional().nullable(),
+      })
+    )
+    .optional(),
 });
+
+const GetQuizBankResponseSchema = z.object({
+  assessment_id: z.string().nullable(),
+  status: z.string(),
+  questions: z.array(z.any()),
+  active_task_id: z.string().optional().nullable(),
+});
+
+export interface QuizBankQuestion {
+  questionId: string;
+  type: string;
+  text: string;
+  options?: { value: string; label: string }[];
+  difficulty?: string | null;
+  knowledgePoint?: string | null;
+  maxScore?: number | null;
+}
+
+export interface QuizBankResult {
+  assessmentId: string;
+  status: "generating" | "ready" | "failed" | "pending" | "not_generated";
+  activeTaskId: string | null;
+  questions: QuizBankQuestion[];
+}
 
 export async function generateQuizBank(
   pathId: string,
   nodeId: string
-): Promise<{ nextStep: "generating"; activeTaskId: string }> {
+): Promise<QuizBankResult> {
   const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/quiz-bank`, {
     method: "POST",
     schema: GenerateQuizBankResponseSchema,
   });
-  return { nextStep: dto.next_step as "generating", activeTaskId: dto.active_task_id };
+  return {
+    assessmentId: dto.assessment_id,
+    status: dto.status,
+    activeTaskId: dto.active_task_id || null,
+    questions: (dto.questions || []).map((q: any) => ({
+      questionId: q.question_id,
+      type: q.type,
+      text: q.prompt,
+      options: q.options || undefined,
+      difficulty: q.difficulty || null,
+      knowledgePoint: q.knowledge_point || null,
+      maxScore: q.max_score || null,
+    })),
+  };
+}
+
+export async function getQuizBank(
+  pathId: string,
+  nodeId: string
+): Promise<QuizBankResult> {
+  const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/quiz-bank`, {
+    method: "GET",
+    schema: GetQuizBankResponseSchema,
+  });
+  return {
+    assessmentId: dto.assessment_id || "",
+    status: dto.status as any,
+    activeTaskId: dto.active_task_id || null,
+    questions: (dto.questions || []).map((q: any) => ({
+      questionId: q.question_id,
+      type: q.type,
+      text: q.prompt,
+      options: q.options || undefined,
+      difficulty: q.difficulty || null,
+      knowledgePoint: q.knowledge_point || null,
+      maxScore: q.max_score || null,
+    })),
+  };
 }

@@ -198,20 +198,50 @@ export interface AssessmentModel {
 }
 
 export const AssessmentSubmitResponseSchema = z.object({
-  score: z.number(),
-  passed: z.boolean(),
+  attempt_id: z.string(),
+  status: z.enum(["completed", "grading", "submitted", "failed"]),
+  score: z.number().nullable(),
+  passed: z.boolean().nullable(),
+  grading_quality: z.enum(["final", "provisional"]).nullable(),
+  active_task_id: z.string().nullable(),
   feedback: z.string().optional().nullable(),
-  mastery_delta: z.number().optional().nullable(),
+  mastery_before: z.number().optional().nullable(),
+  mastery_after: z.number().optional().nullable(),
+  node_completed: z.boolean().optional().nullable(),
+  unlocked_node_ids: z.array(z.string()).optional(),
 });
 
 export type AssessmentSubmitResponseDto = z.infer<typeof AssessmentSubmitResponseSchema>;
 
 export interface AssessmentSubmitResultModel {
-  score: number;
-  passed: boolean;
+  attemptId: string;
+  status: "completed" | "grading" | "submitted" | "failed";
+  score: number | null;
+  passed: boolean | null;
+  gradingQuality: "final" | "provisional" | null;
+  activeTaskId: string | null;
   feedback: string | null;
-  masteryDelta: number | null;
+  masteryBefore: number | null;
+  masteryAfter: number | null;
+  nodeCompleted: boolean | null;
+  unlockedNodeIds: string[];
 }
+
+/**
+ * Schema for GET /learning-paths/{pathId}/nodes/{nodeId}/attempts/{attemptId}
+ */
+export const AssessmentAttemptResultSchema = z.object({
+  attempt_id: z.string(),
+  status: z.string(),
+  grading_quality: z.string().nullable(),
+  score: z.number().nullable(),
+  assessment_passed: z.boolean().nullable(),
+  mastery_before: z.number().nullable(),
+  mastery_after: z.number().nullable(),
+  node_completed: z.boolean().nullable(),
+  mastery_updated: z.boolean(),
+  progress_status: z.string().nullable(),
+});
 
 // Practice question set (repeatable, not scored)
 export const PracticeQuestionDtoSchema = z.object({

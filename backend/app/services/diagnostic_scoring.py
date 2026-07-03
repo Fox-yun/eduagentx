@@ -15,14 +15,11 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from app.services.answer_scoring import (
-    PROVISIONAL_FEEDBACK,
-    PROVISIONAL_WEIGHT,
     ScoredAnswer,
-    _d,
-    score_single_choice,
     score_multiple_choice,
-    score_true_false,
     score_short_answer,
+    score_single_choice,
+    score_true_false,
 )
 
 # Re-export shared scoring symbols for backward compatibility

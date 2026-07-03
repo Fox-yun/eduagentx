@@ -7,6 +7,7 @@ import {
   AssessmentModel,
   AssessmentSubmitResponseSchema,
   AssessmentSubmitResultModel,
+  AssessmentAttemptResultSchema,
   PracticeSetDtoSchema,
   PracticeQuestionModel,
 } from "../schemas/units";
@@ -16,6 +17,8 @@ import {
   mapAssessmentSubmitResponse,
   mapPracticeQuestions,
 } from "../mappers/units";
+
+export type { AssessmentSubmitResultModel } from "../schemas/units";
 
 
 export async function getUnitContent(
@@ -109,13 +112,18 @@ export async function generateLecture(
 
 export async function createAssessment(
   pathId: string,
-  nodeId: string
+  nodeId: string,
+  purpose: string = "formal"
 ): Promise<AssessmentModel> {
-  const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/assessments`, {
-    method: "POST",
-    schema: AssessmentDtoSchema,
-    timeoutMs: 120000,  // LLM generation can take 30-60s
-  });
+  const params = new URLSearchParams({ purpose });
+  const dto = await apiRequest(
+    `/learning-paths/${pathId}/nodes/${nodeId}/assessments?${params}`,
+    {
+      method: "POST",
+      schema: AssessmentDtoSchema,
+      timeoutMs: 120000,
+    }
+  );
   return mapAssessment(dto);
 }
 
@@ -127,9 +135,21 @@ export async function submitAssessment(
     method: "POST",
     body: { answers },
     schema: AssessmentSubmitResponseSchema,
-    timeoutMs: 120000,  // LLM grading for short answers can take 30-60s
+    timeoutMs: 120000,
   });
   return mapAssessmentSubmitResponse(dto);
+}
+
+export async function getAttemptResult(
+  pathId: string,
+  nodeId: string,
+  attemptId: string,
+  signal?: AbortSignal
+): Promise<z.infer<typeof AssessmentAttemptResultSchema>> {
+  return apiRequest(
+    `/learning-paths/${pathId}/nodes/${nodeId}/attempts/${attemptId}`,
+    { method: "GET", schema: AssessmentAttemptResultSchema, signal }
+  );
 }
 
 export async function createPractice(
@@ -236,11 +256,13 @@ export async function generateQuizBank(
 
 export async function getQuizBank(
   pathId: string,
-  nodeId: string
+  nodeId: string,
+  signal?: AbortSignal
 ): Promise<QuizBankResult> {
   const dto = await apiRequest(`/learning-paths/${pathId}/nodes/${nodeId}/quiz-bank`, {
     method: "GET",
     schema: GetQuizBankResponseSchema,
+    signal,
   });
   return {
     assessmentId: dto.assessment_id || "",

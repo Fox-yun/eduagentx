@@ -508,7 +508,7 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
 
     from app.models.goal import LearningGoal
     from app.models.path import LearningNode, LearningPath
-    from app.models.unit import LearningUnitContent, LearningUnitContentVersion
+    from app.models.unit import LearningUnitContentVersion
     from app.services.llm import LLMError, llm_json
 
     node_id = task.target_id
@@ -651,9 +651,9 @@ async def _complete_unit_generation(
     task_id: str,
 ) -> dict[str, str]:
     """Transaction B: atomically save generated content and switch versions."""
-    from app.common.datetime import utc_now
     from sqlalchemy import select
 
+    from app.common.datetime import utc_now
     from app.models.unit import LearningUnitContent, LearningUnitContentVersion
 
     # Load version FOR UPDATE to prevent concurrent completion
@@ -665,7 +665,7 @@ async def _complete_unit_generation(
         raise ValueError(f"Version {version_id} not found")
 
     # Check task was not cancelled mid-flight
-    from app.common.enums import TERMINAL_TASK_STATUSES, TaskStatus
+    from app.common.enums import TaskStatus
     from app.models.task import BackgroundTask
 
     task_result = await txn_db.execute(select(BackgroundTask).where(BackgroundTask.id == task_id))

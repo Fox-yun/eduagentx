@@ -222,7 +222,7 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
     expect(screen.getByText("主动学习可以极大地节省标注成本。")).toBeInTheDocument();
 
     // Click Quiz/Assessment Button — should navigate to assessment page
-    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估 (≥10题)" });
+    const startQuizBtn = screen.getByRole("button", { name: "评估中心" });
     fireEvent.click(startQuizBtn);
 
     // Verify navigation to assessment page
@@ -401,7 +401,7 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
 
     // 2. Click Quiz/Assessment Button — should navigate to assessment page
     expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
-    const startQuizBtn = screen.getByRole("button", { name: "开始通关评估 (≥10题)" });
+    const startQuizBtn = screen.getByRole("button", { name: "评估中心" });
     fireEvent.click(startQuizBtn);
 
     // Verify navigation to assessment page

@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
-from app.models.unit import Assessment, AssessmentQuestion
+from app.core.errors import ApiError
+from app.models.progress import LearningProgress
+from app.models.unit import Assessment, AssessmentAttempt, AssessmentQuestion
 from app.models.user import User
 from app.services.learning_access import require_node_access
 from app.services.unit import UnitService, _safe_question_dto
@@ -102,13 +104,18 @@ async def generate_lecture(
 async def create_assessment(
     path_id: str,
     node_id: str,
+    purpose: str = "formal",
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Create an assessment for a learning node."""
+    """Create an assessment for a learning node.
+
+    Purpose defaults to 'formal' (scored, updates mastery). Use
+    `purpose=quiz_bank` for un-scored practice question sets.
+    """
     await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
-    return await service.create_assessment(path_id, node_id, user.id)
+    return await service.create_assessment(path_id, node_id, user.id, purpose=purpose)
 
 
 @router.post("/{path_id}/nodes/{node_id}/practice")
@@ -205,3 +212,44 @@ async def submit_assessment(
     """Submit an assessment attempt."""
     service = UnitService(db)
     return await service.submit_assessment(assessment_id, user.id, body.answers)
+
+
+@router.get("/{path_id}/nodes/{node_id}/attempts/{attempt_id}")
+async def get_attempt_result(
+    path_id: str,
+    node_id: str,
+    attempt_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get the result of a completed assessment attempt."""
+    result = await db.execute(
+        select(AssessmentAttempt).where(
+            AssessmentAttempt.id == attempt_id,
+            AssessmentAttempt.user_id == user.id,
+        )
+    )
+    attempt = result.scalar_one_or_none()
+    if not attempt:
+        raise ApiError(code="ATTEMPT_NOT_FOUND", message="Attempt not found", status_code=404)
+
+    prog = await db.execute(
+        select(LearningProgress).where(
+            LearningProgress.user_id == user.id,
+            LearningProgress.node_id == node_id,
+        )
+    )
+    progress = prog.scalar_one_or_none()
+
+    return {
+        "attempt_id": attempt.id,
+        "status": attempt.status,
+        "grading_quality": attempt.grading_quality,
+        "score": attempt.score,
+        "assessment_passed": getattr(attempt, "assessment_passed", None),
+        "mastery_before": attempt.mastery_before,
+        "mastery_after": attempt.mastery_after,
+        "node_completed": getattr(attempt, "node_completed", None),
+        "mastery_updated": attempt.progress_applied_at is not None,
+        "progress_status": progress.status if progress else None,
+    }

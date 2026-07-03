@@ -101,4 +101,3 @@ cnsoftcup/
 3. **API 密钥：** 切勿将 `.env` 文件提交到 git
 4. **测试：** 前端使用 `npm test`，后端使用 `pytest`
 5. **代码风格：** 后端使用 Ruff + MyPy，前端使用 ESLint + Prettier
-j

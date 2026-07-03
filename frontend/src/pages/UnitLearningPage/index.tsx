@@ -584,7 +584,8 @@ export function UnitLearningPage() {
                   onClick={() => navigate(appRoutes.assessment(pathId || "", nodeId || ""))}
                   className="inline-flex items-center gap-1.5 px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
                 >
-                  开始通关评估 (≥10题)
+                  <Sparkles className="h-4 w-4" />
+                  评估中心
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>

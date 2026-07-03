@@ -137,7 +137,7 @@ describe("Coverage Boost: UnitLearningPage error paths", () => {
     );
 
     expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "开始通关评估 (≥10题)" }));
+    fireEvent.click(screen.getByRole("button", { name: "评估中心" }));
 
     // Should navigate to assessment page
     await waitFor(() => {

@@ -25,10 +25,10 @@ from app.models.user import (
     AuthAuditLog,
     AuthSession,
     RefreshToken,
+    StudentProfileEvidence,
     User,
     UserProfile,
     VerificationToken,
-    StudentProfileEvidence,
 )
 
 __all__ = [

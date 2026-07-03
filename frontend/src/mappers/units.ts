@@ -182,10 +182,17 @@ export function mapAssessmentSubmitResponse(
   dto: AssessmentSubmitResponseDto
 ): AssessmentSubmitResultModel {
   return {
+    attemptId: dto.attempt_id,
+    status: dto.status,
     score: dto.score,
     passed: dto.passed,
+    gradingQuality: dto.grading_quality,
+    activeTaskId: dto.active_task_id || null,
     feedback: dto.feedback || null,
-    masteryDelta: dto.mastery_delta || null,
+    masteryBefore: dto.mastery_before ?? null,
+    masteryAfter: dto.mastery_after ?? null,
+    nodeCompleted: dto.node_completed ?? null,
+    unlockedNodeIds: dto.unlocked_node_ids || [],
   };
 }
 

@@ -609,14 +609,20 @@ class UnitService:
         path_id: str,
         node_id: str,
         user_id: str,
+        purpose: str = "formal",
     ) -> dict[str, object]:
-        """Create an assessment with 10+ questions for a node."""
-        # Check if assessment already exists
+        """Create an assessment for a node.
+
+        Args:
+            purpose: "formal" (scored, updates mastery) or "quiz_bank" (practice).
+        """
+        # Check if assessment already exists for this purpose
         result = await self.db.execute(
             select(Assessment).where(
                 Assessment.path_id == path_id,
                 Assessment.node_id == node_id,
                 Assessment.user_id == user_id,
+                Assessment.purpose == purpose,
             )
         )
         existing = result.scalar_one_or_none()
@@ -639,6 +645,7 @@ class UnitService:
             path_id=path_id,
             path_version_id="",
             node_id=node_id,
+            purpose=purpose,
             status="pending",
         )
         self.db.add(assessment)

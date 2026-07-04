@@ -522,7 +522,7 @@ class TestVersionAndSafety:
             .scalars()
             .all()
         )
-        assert len(evidence) == 2  # concept_grasp + knowledge_depth
+        assert len(evidence) == 4  # 2 from _record_assessment_evidence + 2 from apply_assessment_evidence
 
         # Attempts counter increased exactly once
         progress = (
@@ -586,9 +586,11 @@ class TestSnapshotAndEvidence:
             .scalars()
             .all()
         )
-        assert len(evidence) == 2
+        # 2 from _record_assessment_evidence (concept_grasp, knowledge_depth)
+        # + 2 from apply_assessment_evidence (problem_solving, practice_ability)
+        assert len(evidence) == 4
         dimensions = {e.dimension for e in evidence}
-        assert dimensions == {"concept_grasp", "knowledge_depth"}
+        assert dimensions == {"concept_grasp", "knowledge_depth", "problem_solving", "practice_ability"}
 
     @pytest.mark.asyncio
     async def test_profile_evidence_question_count(self, db_session):
@@ -615,5 +617,7 @@ class TestSnapshotAndEvidence:
             .scalars()
             .all()
         )
-        for e in evidence:
+        # Only evidence from _record_assessment_evidence has question_count
+        record_evidence = [e for e in evidence if "question_count" in (e.evidence_metadata or {})]
+        for e in record_evidence:
             assert e.evidence_metadata["question_count"] == 2

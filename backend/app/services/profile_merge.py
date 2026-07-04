@@ -74,25 +74,17 @@ async def apply_profile_evidence(
     """
     profile = await _get_or_create_profile(db, user_id)
 
+    # E0-A4: Check evidence existence BEFORE merging to ensure idempotency.
+    # Only new (non-existing) evidence items participate in the merge and
+    # are written to the database.  profile_version only increments when
+    # at least one new evidence item is added.
+    new_evidence_items: list[ProfileEvidenceInput] = []
+
     for ev in evidence:
         if ev.dimension not in PROFILE_DIMENSIONS:
             logger.warning("profile_merge_skip_invalid_dimension", dimension=ev.dimension)
             continue
 
-        # Merge into profile dimensions
-        current = profile.dimensions.get(ev.dimension, {})
-        old_value = current.get("value")
-        old_confidence = current.get("confidence", 0.0)
-
-        merged_value = _merge_values(old_value, old_confidence, ev.value, ev.confidence, ev.dimension)
-
-        profile.dimensions[ev.dimension] = {
-            "value": merged_value,
-            "confidence": max(old_confidence, ev.confidence),
-            "source": ev.evidence_type,
-        }
-
-        # Write evidence record (idempotent via unique constraint)
         existing = await db.execute(
             select(StudentProfileEvidence.id).where(
                 StudentProfileEvidence.evidence_type == ev.evidence_type,
@@ -100,24 +92,52 @@ async def apply_profile_evidence(
                 StudentProfileEvidence.dimension == ev.dimension,
             )
         )
-        if existing.scalar_one_or_none() is None:
-            evidence_record = StudentProfileEvidence(
-                id=str(uuid.uuid4()),
-                user_id=user_id,
-                dimension=ev.dimension,
-                evidence_type=ev.evidence_type,
-                evidence_id=ev.evidence_id,
-                value=float(ev.value) if isinstance(ev.value, (int, float)) else 0.0,
-                confidence=ev.confidence,
-                evidence_metadata={
-                    "evidence_text": ev.evidence_text,
-                    "raw_value": ev.value,
-                    **(ev.metadata or {}),
-                },
-            )
-            db.add(evidence_record)
+        if existing.scalar_one_or_none() is not None:
+            continue
 
-    # Update profile metadata
+        new_evidence_items.append(ev)
+
+    if not new_evidence_items:
+        # All evidence already exists — return profile unchanged
+        return profile
+
+    # Merge only new evidence into profile dimensions
+    # E0-A2: copy-then-assign for JSON persistence
+    dims = dict(profile.dimensions or {})
+
+    for ev in new_evidence_items:
+        current = dims.get(ev.dimension, {})
+        old_value = current.get("value")
+        old_confidence = current.get("confidence", 0.0)
+
+        merged_value = _merge_values(old_value, old_confidence, ev.value, ev.confidence, ev.dimension)
+
+        dims[ev.dimension] = {
+            "value": merged_value,
+            "confidence": max(old_confidence, ev.confidence),
+            "source": ev.evidence_type,
+        }
+
+        # Write evidence record
+        evidence_record = StudentProfileEvidence(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            dimension=ev.dimension,
+            evidence_type=ev.evidence_type,
+            evidence_id=ev.evidence_id,
+            value=float(ev.value) if isinstance(ev.value, (int, float)) else 0.0,
+            confidence=ev.confidence,
+            evidence_metadata={
+                "evidence_text": ev.evidence_text,
+                "raw_value": ev.value,
+                **(ev.metadata or {}),
+            },
+        )
+        db.add(evidence_record)
+
+    profile.dimensions = dims
+
+    # Update profile metadata — only when new evidence was added
     profile.profile_version += 1
     profile.confidence = _average_confidence(profile.dimensions)
 
@@ -134,7 +154,7 @@ async def apply_profile_evidence(
         user_id=user_id,
         profile_id=profile.id,
         version=profile.profile_version,
-        evidence_count=len(evidence),
+        evidence_count=len(new_evidence_items),
         confidence=profile.confidence,
     )
 

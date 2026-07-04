@@ -580,7 +580,7 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     try:
         from app.services.profile_merge import load_profile_context
 
-        _profile, profile_context = await load_profile_context(db, user_id)
+        _profile, profile_context = await load_profile_context(db, task.user_id)
     except Exception as e:
         logger.warning("profile_load_failed_for_unit", error=str(e))
 

@@ -519,15 +519,14 @@ def _build_user_prompt(ctx: AssessmentGenerationInput) -> str:
     mistakes_text = "\n".join(f"- {m}" for m in ctx.common_mistakes) if ctx.common_mistakes else "（无常见错误记录）"
 
     # Phase 3.6-D: Include error patterns from learner profile
-    error_text = (
-        "\n".join(f"- {e}" for e in ctx.error_patterns) if ctx.error_patterns else "（无已知薄弱点）"
-    )
+    error_text = "\n".join(f"- {e}" for e in ctx.error_patterns) if ctx.error_patterns else "（无已知薄弱点）"
 
     profile_section = ""
     if ctx.profile_context:
-        profile_section = f"\n
-{ctx.profile_context}
-请根据以上画像信息调整题目难度分布和考查重点，针对学习者的薄弱环节设计针对性题目。"
+        profile_section = (
+            f"\n{ctx.profile_context}\n"
+            "请根据以上画像信息调整题目难度分布和考查重点，针对学习者的薄弱环节设计针对性题目。"
+        )
 
     return f"""请为以下学习节点生成{label}（{ctx.question_count} 道题）：
 

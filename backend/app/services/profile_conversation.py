@@ -18,7 +18,6 @@ from app.common.enums import (
     ProfileConversationStatus,
     ProfileEvidenceType,
     ProfileMessageRole,
-    ProfileStatus,
 )
 from app.models.profile import ProfileConversationMessage, ProfileConversationSession, StudentProfile
 from app.models.user import StudentProfileEvidence
@@ -37,6 +36,14 @@ MIN_TURNS = 3
 MAX_TURNS = 7
 MIN_DIMENSIONS_COVERED = 6
 MIN_AVG_CONFIDENCE = 0.65
+
+
+def _average_confidence(dimensions: dict[str, Any]) -> float:
+    """Calculate average confidence across all dimensions."""
+    if not dimensions:
+        return 0.0
+    confidences = [d.get("confidence", 0) for d in dimensions.values()]
+    return sum(confidences) / len(confidences) if confidences else 0.0
 
 
 class ProfileConversationService:
@@ -60,12 +67,20 @@ class ProfileConversationService:
         user_id: str,
         learning_goal: str,
         learning_goal_id: str | None = None,
+        target_context: str | None = None,
     ) -> ProfileConversationSession:
-        """Create a new profile conversation session."""
+        """Create a new profile conversation session.
+
+        The *learning_goal* and *target_context* are persisted on the session
+        row so downstream extraction logic can use them directly instead of
+        reverse-engineering the goal from the first assistant message.
+        """
         session = ProfileConversationSession(
             id=str(uuid.uuid4()),
             user_id=user_id,
             learning_goal_id=learning_goal_id,
+            learning_goal_text=learning_goal,
+            target_context=target_context,
             status=ProfileConversationStatus.ACTIVE.value,
             turn_count=0,
             extracted_dimensions={},
@@ -140,10 +155,13 @@ class ProfileConversationService:
         # Determine covered dimensions
         covered = self._get_covered_dimensions(session.extracted_dimensions)
 
+        # Use the persisted learning goal text (E0-A1)
+        learning_goal = session.learning_goal_text or self._get_learning_goal_from_history(history)
+
         # Try LLM extraction
         try:
             result = await self._llm_extract(
-                learning_goal=self._get_learning_goal_from_history(history),
+                learning_goal=learning_goal,
                 history=history,
                 user_message=user_message,
                 covered_dimensions=covered,
@@ -153,8 +171,8 @@ class ProfileConversationService:
             logger.warning("profile_llm_fallback", error=str(e))
             result = self._fallback_extract(user_message, covered, session.turn_count)
 
-        # Update session state
-        new_extracted = self._merge_extracted(session.extracted_dimensions, result["extracted_dimensions"])
+        # Update session state — copy-then-assign for JSON persistence (E0-A2)
+        new_extracted = self._merge_extracted(dict(session.extracted_dimensions or {}), result["extracted_dimensions"])
         session.extracted_dimensions = new_extracted
         session.turn_count += 1
 
@@ -203,17 +221,33 @@ class ProfileConversationService:
     # Finalize
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def can_finalize(session: ProfileConversationSession) -> bool:
+        """Check whether a session meets the minimum requirements for finalize.
+
+        Enforced server-side so the frontend cannot bypass it (E0-A5).
+        """
+        extracted = session.extracted_dimensions or {}
+        if session.turn_count < MIN_TURNS:
+            return False
+        if len(extracted) < MIN_DIMENSIONS_COVERED:
+            return False
+        avg_confidence = _average_confidence(extracted)
+        return avg_confidence >= MIN_AVG_CONFIDENCE
+
     async def finalize(self, session: ProfileConversationSession) -> StudentProfile:
         """Finalize the conversation and create/update the student profile.
 
-        Writes evidence records for each extracted dimension.
-        Returns the created or updated StudentProfile.
+        Delegates all dimension merging and evidence writing to
+        ``profile_merge.apply_profile_evidence()`` to ensure a single,
+        idempotent code path (E0-A3).
         """
-        # Get or create profile
-        profile = await self._get_or_create_profile(session.user_id)
+        from app.services.profile_merge import ProfileEvidenceInput, apply_profile_evidence
 
-        # Merge extracted dimensions into profile
-        extracted = session.extracted_dimensions
+        extracted = session.extracted_dimensions or {}
+
+        # Build evidence inputs from extracted dimensions
+        evidence_inputs: list[ProfileEvidenceInput] = []
         for dim_name, dim_data in extracted.items():
             if dim_name not in PROFILE_DIMENSIONS:
                 continue
@@ -221,53 +255,33 @@ class ProfileConversationService:
             value = dim_data.get("value", 0)
             confidence = dim_data.get("confidence", 0.5)
 
-            # Merge into profile dimensions
-            current = profile.dimensions.get(dim_name, {})
-            old_value = current.get("value", 0)
-            old_confidence = current.get("confidence", 0)
-
-            if isinstance(value, (int, float)) and isinstance(old_value, (int, float)):
-                # Weighted average for numeric dimensions
-                total_conf = old_confidence + confidence
-                if total_conf > 0:
-                    merged_value = (old_value * old_confidence + value * confidence) / total_conf
-                else:
-                    merged_value = value
-            else:
-                # Non-numeric: use new value if confidence > old
-                merged_value = value if confidence >= old_confidence else old_value
-
-            profile.dimensions[dim_name] = {
-                "value": merged_value,
-                "confidence": confidence,
-                "source": "conversation",
-            }
-
-            # Write evidence record
-            evidence = StudentProfileEvidence(
-                id=str(uuid.uuid4()),
-                user_id=session.user_id,
-                dimension=dim_name,
-                evidence_type=ProfileEvidenceType.CONVERSATION_PROFILE.value,
-                evidence_id=session.id,
-                value=float(value) if isinstance(value, (int, float)) else 0.0,
-                confidence=confidence,
-                evidence_metadata={
-                    "evidence_text": dim_data.get("evidence_text", ""),
-                    "rationale": dim_data.get("rationale_summary", ""),
-                    "raw_value": value,
-                },
+            evidence_inputs.append(
+                ProfileEvidenceInput(
+                    dimension=dim_name,
+                    value=value,
+                    confidence=confidence,
+                    evidence_type=ProfileEvidenceType.CONVERSATION_PROFILE.value,
+                    evidence_id=session.id,
+                    evidence_text=dim_data.get("evidence_text", ""),
+                    metadata={
+                        "session_id": session.id,
+                        "learning_goal": session.learning_goal_text,
+                        "target_context": session.target_context,
+                        "rationale": dim_data.get("rationale_summary", ""),
+                        "raw_value": value,
+                    },
+                )
             )
-            self.db.add(evidence)
 
-        # Update profile metadata
-        profile.profile_version += 1
-        profile.confidence = self._average_confidence(profile.dimensions)
+        # Single entry point for all profile updates (E0-A3)
+        profile = await apply_profile_evidence(
+            self.db,
+            user_id=session.user_id,
+            evidence=evidence_inputs,
+        )
+
+        # Generate summary from extracted dimensions
         profile.summary = self._generate_summary(extracted)
-
-        # If low confidence, mark as provisional
-        if profile.confidence < MIN_AVG_CONFIDENCE:
-            profile.status = ProfileStatus.PROVISIONAL.value
 
         # Link session to profile
         session.profile_id = profile.id
@@ -472,10 +486,7 @@ class ProfileConversationService:
 
     def _average_confidence(self, dimensions: dict[str, Any]) -> float:
         """Calculate average confidence across all dimensions."""
-        if not dimensions:
-            return 0.0
-        confidences = [d.get("confidence", 0) for d in dimensions.values()]
-        return sum(confidences) / len(confidences) if confidences else 0.0
+        return _average_confidence(dimensions)
 
     def _should_finalize(self, turn_count: int, covered_count: int, avg_confidence: float) -> bool:
         """Determine if the conversation is ready to finalize."""
@@ -504,7 +515,13 @@ class ProfileConversationService:
         return "；".join(parts) if parts else "画像数据较少，后续会根据学习过程自动修正。"
 
     async def _get_or_create_profile(self, user_id: str) -> StudentProfile:
-        """Get existing profile or create a new one."""
+        """Get existing profile or create a new one.
+
+        Deprecated: prefer ``profile_merge.apply_profile_evidence()`` which
+        handles profile creation internally.  Kept for backwards compatibility.
+        """
+        from app.common.enums import ProfileStatus
+
         result = await self.db.execute(select(StudentProfile).where(StudentProfile.user_id == user_id))
         profile = result.scalar_one_or_none()
         if profile is None:

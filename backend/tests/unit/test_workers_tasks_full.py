@@ -152,6 +152,11 @@ class TestExecutePathGeneration:
             patch("app.services.goal.GoalService") as MockGoalSvc,
             patch("app.services.llm.llm_json", new_callable=AsyncMock, return_value=llm_result),
             patch("app.services.path.PathService") as MockPathSvc,
+            patch(
+                "app.services.profile_merge.load_profile_context",
+                new_callable=AsyncMock,
+                return_value=(None, ""),
+            ),
         ):
             MockGoalSvc.return_value.get_goal = AsyncMock(return_value=mock_goal)
             MockGoalSvc.return_value.transition_goal = AsyncMock(return_value=mock_goal)
@@ -197,6 +202,11 @@ class TestExecutePathGeneration:
             patch("app.services.goal.GoalService") as MockGoalSvc,
             patch("app.services.llm.llm_json", new_callable=AsyncMock, return_value=llm_result),
             patch("app.services.path.PathService") as MockPathSvc,
+            patch(
+                "app.services.profile_merge.load_profile_context",
+                new_callable=AsyncMock,
+                return_value=(None, ""),
+            ),
         ):
             MockGoalSvc.return_value.get_goal = AsyncMock(return_value=mock_goal)
             MockGoalSvc.return_value.transition_goal = AsyncMock(return_value=mock_goal)
@@ -234,6 +244,11 @@ class TestExecutePathGeneration:
             patch("app.services.goal.GoalService") as MockGoalSvc,
             patch("app.services.llm.llm_json", new_callable=AsyncMock, side_effect=Exception("LLM down")),
             patch("app.services.path.PathService") as MockPathSvc,
+            patch(
+                "app.services.profile_merge.load_profile_context",
+                new_callable=AsyncMock,
+                return_value=(None, ""),
+            ),
         ):
             MockGoalSvc.return_value.get_goal = AsyncMock(return_value=mock_goal)
             MockGoalSvc.return_value.transition_goal = AsyncMock(return_value=mock_goal)
@@ -291,6 +306,11 @@ class TestExecutePathGeneration:
             patch("app.services.goal.GoalService") as MockGoalSvc,
             patch("app.services.llm.llm_json", new_callable=AsyncMock, return_value=llm_result),
             patch("app.services.path.PathService") as MockPathSvc,
+            patch(
+                "app.services.profile_merge.load_profile_context",
+                new_callable=AsyncMock,
+                return_value=(None, ""),
+            ),
         ):
             MockGoalSvc.return_value.get_goal = AsyncMock(return_value=mock_goal)
             MockGoalSvc.return_value.transition_goal = AsyncMock(return_value=mock_goal)

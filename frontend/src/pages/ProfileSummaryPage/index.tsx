@@ -2,10 +2,8 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getMyProfile } from "../../api/profile";
-import { ProfileSummaryModel } from "../../schemas/profile";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
-import { useToast } from "../../components/feedback/Toast";
 import { AppShell } from "../../components/layout/AppShell";
 import {
   Sparkles,
@@ -43,6 +41,11 @@ function formatDimensionValue(value: any): string {
   if (Array.isArray(value)) {
     return value.join("、");
   }
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value)
+      .map(([k, v]) => `${k}: ${typeof v === "number" ? (v * 100).toFixed(0) + "%" : String(v)}`)
+      .join("、");
+  }
   return String(value);
 }
 
@@ -55,7 +58,6 @@ function getConfidenceColor(confidence: number): string {
 
 export function ProfileSummaryPage() {
   const navigate = useNavigate();
-  const { toast } = useToast();
 
   const {
     data: profile,
@@ -93,6 +95,31 @@ export function ProfileSummaryPage() {
   // Render: Error State
   // ──────────────────────────────────────────────
   if (status === "error") {
+    // E0-B3: Handle PROFILE_NOT_FOUND as empty state, not as an error
+    const apiError = error as any;
+    if (apiError?.code === "PROFILE_NOT_FOUND" || apiError?.status === 404) {
+      return (
+        <AppShell>
+          <div className="flex-grow flex flex-col items-center justify-center p-6 text-center bg-page select-none">
+            <div className="p-4 bg-primary-soft text-primary rounded-full mb-4">
+              <Sparkles className="h-8 w-8" />
+            </div>
+            <h2 className="text-base font-bold text-ink mb-1.5 font-serif-cn">还没有学习画像</h2>
+            <p className="text-xs text-muted max-w-[280px] leading-relaxed mb-6">
+              通过与 AI 对话，系统将了解您的八维学习特征，为您生成专属的学习画像。
+            </p>
+            <button
+              onClick={handleStartNewConversation}
+              className="inline-flex items-center gap-1.5 px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md transition-all cursor-pointer"
+            >
+              <Sparkles className="h-4 w-4" />
+              创建学习画像
+            </button>
+          </div>
+        </AppShell>
+      );
+    }
+
     return (
       <AppShell>
         <div className="flex-grow flex flex-col items-center justify-center p-6 text-center bg-page select-none">
@@ -101,7 +128,7 @@ export function ProfileSummaryPage() {
           </div>
           <h2 className="text-base font-bold text-ink mb-1.5 font-serif-cn">加载画像失败</h2>
           <p className="text-xs text-muted max-w-[280px] leading-relaxed mb-6">
-            {(error as any)?.message || "无法加载画像数据，请重试"}
+            {apiError?.message || "无法加载画像数据，请重试"}
           </p>
           <div className="flex gap-3">
             <button

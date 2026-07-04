@@ -143,9 +143,7 @@ class RecommendationService:
 
     async def _load_profile(self, user_id: str) -> StudentProfile | None:
         """Load the student profile for personalised recommendation reasons."""
-        result = await self.db.execute(
-            select(StudentProfile).where(StudentProfile.user_id == user_id)
-        )
+        result = await self.db.execute(select(StudentProfile).where(StudentProfile.user_id == user_id))
         return result.scalar_one_or_none()
 
     def _merge_node_and_progress(

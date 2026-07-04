@@ -81,6 +81,8 @@ class ProfileConversationSession(Base):
     learning_goal_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("learning_goals.id"), nullable=True, index=True
     )
+    learning_goal_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("student_profiles.id"), nullable=True, index=True
     )

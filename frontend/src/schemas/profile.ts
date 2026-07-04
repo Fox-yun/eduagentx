@@ -36,22 +36,36 @@ export const DIMENSION_LABELS: Record<ProfileDimension, string> = {
 // ──────────────────────────────────────────────
 
 /** A dimension value stored in StudentProfile.dimensions. */
-export const DimensionValueSchema = z.object({
-  value: z.union([z.number(), z.string(), z.array(z.string())]),
-  confidence: z.number(),
-  source: z.string().optional(),
-});
+export const DimensionValueSchema = z
+  .object({
+    value: z.union([
+      z.number(),
+      z.string(),
+      z.array(z.string()),
+      z.record(z.string(), z.number()),
+    ]),
+    confidence: z.number().min(0).max(1),
+    source: z.string().optional(),
+  })
+  .strict();
 
 export type DimensionValue = z.infer<typeof DimensionValueSchema>;
 
 /** An extracted dimension entry in session.extracted_dimensions. */
-export const ExtractedDimensionSchema = z.object({
-  dimension: z.string(),
-  value: z.union([z.number(), z.string(), z.array(z.string())]),
-  confidence: z.number(),
-  evidence_text: z.string().optional(),
-  rationale_summary: z.string().optional(),
-});
+export const ExtractedDimensionSchema = z
+  .object({
+    dimension: z.string(),
+    value: z.union([
+      z.number(),
+      z.string(),
+      z.array(z.string()),
+      z.record(z.string(), z.number()),
+    ]),
+    confidence: z.number(),
+    evidence_text: z.string().optional(),
+    rationale_summary: z.string().optional(),
+  })
+  .strict();
 
 export type ExtractedDimension = z.infer<typeof ExtractedDimensionSchema>;
 
@@ -60,44 +74,52 @@ export type ExtractedDimension = z.infer<typeof ExtractedDimensionSchema>;
 // ──────────────────────────────────────────────
 
 /** POST /api/profile/conversations */
-export const CreateConversationResponseSchema = z.object({
-  session_id: z.string(),
-  status: z.string(),
-  assistant_message: z.string(),
-});
+export const CreateConversationResponseSchema = z
+  .object({
+    session_id: z.string(),
+    status: z.string(),
+    assistant_message: z.string(),
+  })
+  .strict();
 
 export type CreateConversationDto = z.infer<typeof CreateConversationResponseSchema>;
 
 /** Message in a conversation session. */
-export const ConversationMessageDtoSchema = z.object({
-  id: z.string(),
-  role: z.enum(["user", "assistant", "system_summary"]),
-  content: z.string(),
-  created_at: z.string().nullable(),
-});
+export const ConversationMessageDtoSchema = z
+  .object({
+    id: z.string(),
+    role: z.enum(["user", "assistant", "system_summary"]),
+    content: z.string(),
+    created_at: z.string().nullable(),
+  })
+  .strict();
 
 export type ConversationMessageDto = z.infer<typeof ConversationMessageDtoSchema>;
 
 /** GET /api/profile/conversations/{session_id} */
-export const ConversationStateDtoSchema = z.object({
-  session_id: z.string(),
-  status: z.string(),
-  turn_count: z.number(),
-  extracted_dimensions: z.record(z.string(), z.unknown()),
-  completion_score: z.number(),
-  ready_to_finalize: z.boolean(),
-  messages: z.array(ConversationMessageDtoSchema),
-});
+export const ConversationStateDtoSchema = z
+  .object({
+    session_id: z.string(),
+    status: z.string(),
+    turn_count: z.number(),
+    extracted_dimensions: z.record(z.string(), z.unknown()),
+    completion_score: z.number(),
+    ready_to_finalize: z.boolean(),
+    messages: z.array(ConversationMessageDtoSchema),
+  })
+  .strict();
 
 export type ConversationStateDto = z.infer<typeof ConversationStateDtoSchema>;
 
 /** POST /api/profile/conversations/{session_id}/messages */
-export const SendMessageResponseSchema = z.object({
-  assistant_message: z.string(),
-  extracted_dimensions: z.record(z.string(), z.unknown()),
-  missing_dimensions: z.array(z.string()),
-  ready_to_finalize: z.boolean(),
-});
+export const SendMessageResponseSchema = z
+  .object({
+    assistant_message: z.string(),
+    extracted_dimensions: z.record(z.string(), z.unknown()),
+    missing_dimensions: z.array(z.string()),
+    ready_to_finalize: z.boolean(),
+  })
+  .strict();
 
 export type SendMessageDto = z.infer<typeof SendMessageResponseSchema>;
 
@@ -106,46 +128,52 @@ export type SendMessageDto = z.infer<typeof SendMessageResponseSchema>;
 // ──────────────────────────────────────────────
 
 /** POST /api/profile/conversations/{session_id}/finalize */
-export const FinalizeResponseSchema = z.object({
-  profile_id: z.string(),
-  profile_version: z.number(),
-  dimensions: z.record(z.string(), DimensionValueSchema),
-  summary: z.string(),
-  confidence: z.number(),
-});
+export const FinalizeResponseSchema = z
+  .object({
+    profile_id: z.string(),
+    profile_version: z.number(),
+    dimensions: z.record(z.string(), DimensionValueSchema),
+    summary: z.string(),
+    confidence: z.number(),
+  })
+  .strict();
 
 export type FinalizeDto = z.infer<typeof FinalizeResponseSchema>;
 
 /** GET /api/profile/me  &  PATCH /api/profile/me/dimensions */
-export const ProfileSummaryDtoSchema = z.object({
-  profile_id: z.string(),
-  user_id: z.string(),
-  status: z.string(),
-  profile_version: z.number(),
-  dimensions: z.record(z.string(), DimensionValueSchema),
-  summary: z.string().nullable(),
-  confidence: z.number(),
-});
+export const ProfileSummaryDtoSchema = z
+  .object({
+    profile_id: z.string(),
+    user_id: z.string(),
+    status: z.string(),
+    profile_version: z.number(),
+    dimensions: z.record(z.string(), DimensionValueSchema),
+    summary: z.string().nullable(),
+    confidence: z.number(),
+  })
+  .strict();
 
 export type ProfileSummaryDto = z.infer<typeof ProfileSummaryDtoSchema>;
 
 /** GET /api/profile/me/evidence (array item) */
-export const EvidenceDtoSchema = z.object({
-  evidence_id: z.string(),
-  dimension: z.string(),
-  evidence_type: z.string(),
-  value: z.number(),
-  confidence: z.number(),
-  evidence_metadata: z.record(z.string(), z.unknown()).nullable().optional(),
-  created_at: IsoDateTimeSchema,
-});
+export const EvidenceDtoSchema = z
+  .object({
+    evidence_id: z.string(),
+    dimension: z.string(),
+    evidence_type: z.string(),
+    value: z.number(),
+    confidence: z.number(),
+    evidence_metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    created_at: IsoDateTimeSchema,
+  })
+  .strict();
 
 export type EvidenceDto = z.infer<typeof EvidenceDtoSchema>;
 
 /** Request body for PATCH /api/profile/me/dimensions */
 export interface ManualCorrectionRequest {
   dimension: ProfileDimension;
-  value: number | string | string[];
+  value: number | string | string[] | Record<string, number>;
   confidence?: number;
   reason?: string;
 }

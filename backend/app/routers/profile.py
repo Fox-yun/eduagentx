@@ -15,10 +15,10 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import ProfileEvidenceType
@@ -30,6 +30,18 @@ from app.services.profile_conversation import ProfileConversationService
 
 router = APIRouter()
 
+# Type alias for the 8 profile dimensions (E0-A6)
+ProfileDimension = Literal[
+    "knowledge_depth",
+    "prerequisite_mastery",
+    "concept_grasp",
+    "problem_solving",
+    "practice_ability",
+    "learning_pace",
+    "resource_preference",
+    "error_pattern",
+]
+
 
 # ──────────────────────────────────────────────
 # Request / Response schemas
@@ -37,6 +49,8 @@ router = APIRouter()
 
 
 class CreateConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     learning_goal: str = Field(..., min_length=1, max_length=2000)
     target_context: str | None = Field(None, max_length=500)
     learning_goal_id: str | None = None
@@ -49,6 +63,8 @@ class CreateConversationResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(..., min_length=1, max_length=5000)
 
 
@@ -88,7 +104,9 @@ class EvidenceResponse(BaseModel):
 
 
 class ManualCorrectionRequest(BaseModel):
-    dimension: str = Field(..., min_length=1, max_length=50)
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: ProfileDimension
     value: float | str | list[str] | dict[str, float]
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     reason: str | None = Field(None, max_length=500)
@@ -111,6 +129,7 @@ async def create_conversation(
         user_id=user.id,
         learning_goal=request.learning_goal,
         learning_goal_id=request.learning_goal_id,
+        target_context=request.target_context,
     )
     messages = await service.get_messages(session.id)
     first_message = messages[0] if messages else None
@@ -206,6 +225,14 @@ async def finalize_conversation(
     if session.turn_count < 1:
         raise ApiError(code="INSUFFICIENT_TURNS", message="Need at least 1 turn to finalize", status_code=400)
 
+    # E0-A5: Enforce finalize rules server-side
+    if not ProfileConversationService.can_finalize(session):
+        raise ApiError(
+            code="PROFILE_NOT_READY",
+            message="Need more conversation before finalizing profile",
+            status_code=409,
+        )
+
     profile = await service.finalize(session)
 
     return FinalizeResponse(
@@ -273,16 +300,8 @@ async def manual_correction(
     """
     from sqlalchemy import select
 
-    from app.common.enums import PROFILE_DIMENSIONS
     from app.models.profile import StudentProfile
     from app.models.user import StudentProfileEvidence
-
-    if request.dimension not in PROFILE_DIMENSIONS:
-        raise ApiError(
-            code="INVALID_DIMENSION",
-            message=f"Dimension must be one of: {', '.join(PROFILE_DIMENSIONS)}",
-            status_code=400,
-        )
 
     # Get or create profile
     result = await db.execute(select(StudentProfile).where(StudentProfile.user_id == user.id))
@@ -300,12 +319,15 @@ async def manual_correction(
         await db.flush()
 
     # Update dimension with manual correction (high confidence)
+    # E0-A2: copy-then-assign for JSON persistence
     numeric_value = float(request.value) if isinstance(request.value, (int, float)) else 0.0
-    profile.dimensions[request.dimension] = {
+    dims = dict(profile.dimensions or {})
+    dims[request.dimension] = {
         "value": request.value,
         "confidence": request.confidence,
         "source": "manual_correction",
     }
+    profile.dimensions = dims
     profile.profile_version += 1
 
     # Write evidence record

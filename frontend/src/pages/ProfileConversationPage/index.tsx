@@ -7,7 +7,6 @@ import {
   sendProfileMessage,
   finalizeProfileConversation,
 } from "../../api/profile";
-import { ConversationStateModel } from "../../schemas/profile";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
 import { useToast } from "../../components/feedback/Toast";
@@ -240,9 +239,8 @@ export function ProfileConversationPage() {
   // ──────────────────────────────────────────────
   const messages = conversation?.messages || [];
   const readyToFinalize = conversation?.readyToFinalize || false;
-  const turnCount = conversation?.turnCount || 0;
   const missingDimensions = conversation?.extractedDimensions
-    ? PROFILE_DIMENSIONS.filter((d) => !(d in conversation.extracted_dimensions))
+    ? PROFILE_DIMENSIONS.filter((d) => !(d in conversation.extractedDimensions))
     : PROFILE_DIMENSIONS;
 
   return (

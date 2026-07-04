@@ -58,6 +58,54 @@ class UserStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class ProfileStatus(enum.StrEnum):
+    """Student profile lifecycle states."""
+
+    ACTIVE = "active"
+    PROVISIONAL = "provisional"
+    ARCHIVED = "archived"
+
+
+class ProfileConversationStatus(enum.StrEnum):
+    """Profile conversation session states."""
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class ProfileMessageRole(enum.StrEnum):
+    """Profile conversation message roles."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM_SUMMARY = "system_summary"
+
+
+class ProfileEvidenceType(enum.StrEnum):
+    """Evidence types for student profile updates."""
+
+    CONVERSATION_PROFILE = "conversation_profile"
+    ASSESSMENT_ATTEMPT = "assessment_attempt"
+    DIAGNOSTIC_RESULT = "diagnostic_result"
+    LEARNING_BEHAVIOR = "learning_behavior"
+    MANUAL_CORRECTION = "manual_correction"
+
+
+# The eight core profile dimensions
+PROFILE_DIMENSIONS: tuple[str, ...] = (
+    "knowledge_depth",
+    "prerequisite_mastery",
+    "concept_grasp",
+    "problem_solving",
+    "practice_ability",
+    "learning_pace",
+    "resource_preference",
+    "error_pattern",
+)
+
+
 TERMINAL_TASK_STATUSES: frozenset[TaskStatus] = frozenset(
     {
         TaskStatus.COMPLETED,

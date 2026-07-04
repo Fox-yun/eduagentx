@@ -144,6 +144,7 @@ describe("Mock Data DAG Integrity", () => {
         reason: "Invalid",
         nodeIds: ["non-existent"],
         status: "new",
+        resource: null,
       },
     ];
 
@@ -258,6 +259,7 @@ describe("Mock Data DAG Integrity", () => {
         reason: "Reason",
         nodeIds: ["ds-intro"],
         status: "new",
+        resource: null,
       },
     ];
 

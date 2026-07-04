@@ -91,6 +91,16 @@ class Settings(BaseSettings):
         description="Model name for LLM calls",
     )
 
+    # Object Storage (MinIO)
+    minio_endpoint: str | None = Field(
+        default=None,
+        description="MinIO endpoint (e.g. 'localhost:9000'). If empty, uses in-memory storage.",
+    )
+    minio_access_key: str = Field(default="minioadmin", description="MinIO access key")
+    minio_secret_key: str = Field(default="minioadmin", description="MinIO secret key")
+    minio_bucket: str = Field(default="eduagentx", description="MinIO bucket name")
+    minio_secure: bool = Field(default=False, description="Use HTTPS for MinIO connection")
+
     # Email & SMTP Settings
     smtp_host: str | None = Field(default=None, description="SMTP server host")
     smtp_port: int = Field(default=1025, description="SMTP server port")

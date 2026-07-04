@@ -271,6 +271,26 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     # Link path task to goal
     goal.active_task_id = path_task.id
 
+    # -------------------------------------------------------------------
+    # Phase 3.6-D: Apply diagnostic evidence to StudentProfile
+    # -------------------------------------------------------------------
+    try:
+        from app.services.profile_merge import apply_diagnostic_evidence
+
+        await apply_diagnostic_evidence(
+            db,
+            user_id=goal.user_id,
+            attempt_id=attempt_id,
+            percentage=aggregated.percentage,
+            weak_areas=weak_areas,
+        )
+    except Exception as e:
+        logger.warning(
+            "profile_merge_diagnostic_failed",
+            error=str(e),
+            attempt_id=attempt_id,
+        )
+
     await db.flush()
     await db.commit()
 

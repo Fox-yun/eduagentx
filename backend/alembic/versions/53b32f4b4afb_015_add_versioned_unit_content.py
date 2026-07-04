@@ -18,16 +18,19 @@ Create Date: 2026-06-30 18:41:51.920772
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 # revision identifiers, used by Alembic.
 revision: str = "53b32f4b4afb"
-down_revision: Union[str, None] = "014"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "014"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -146,8 +149,6 @@ def _backfill_versions(connection) -> None:
       - status = 'generating'/'regenerating' with non-null content → create as 'ready'
       - status = 'failed', 'not_generated', or null content → no version created
     """
-    from datetime import datetime
-
     import uuid
     from datetime import datetime
 

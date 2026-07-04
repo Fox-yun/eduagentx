@@ -39,6 +39,21 @@ def _parse_correct_answer_list(correct_answer: str | None) -> list[str]:
         return [str(correct_answer)]
 
 
+def _parse_correct_answer_scalar(correct_answer: str | None) -> str:
+    """Parse a JSON-serialized correct answer for single_choice.
+
+    correct_answer may be stored as json.dumps("a") → '"a"'.
+    This function strips the JSON encoding to return the plain value.
+    """
+    if not correct_answer:
+        return ""
+    try:
+        parsed = json.loads(correct_answer)
+        return str(parsed)
+    except (json.JSONDecodeError, TypeError):
+        return str(correct_answer)
+
+
 class UnitService:
     """Unit content and assessment business logic."""
 
@@ -521,13 +536,14 @@ class UnitService:
             path = path_result.scalar_one_or_none()
             path_version_id = path.active_version_id if path else None
 
-        # Check for existing assessment for this node + purpose
+        # Check for existing assessment for this node + purpose + version
         result = await self.db.execute(
             select(Assessment).where(
                 Assessment.path_id == path_id,
                 Assessment.node_id == node_id,
                 Assessment.user_id == user_id,
                 Assessment.purpose == "quiz_bank",
+                Assessment.path_version_id == path_version_id,
             )
         )
         existing = result.scalar_one_or_none()
@@ -611,63 +627,110 @@ class UnitService:
         user_id: str,
         purpose: str = "formal",
     ) -> dict[str, object]:
-        """Create an assessment for a node.
+        """Create an assessment for a node using async background generation.
+
+        Uses learning_assessment_generation worker via transactional outbox.
+        Idempotent: returns existing assessment if ready, existing task_id if generating.
 
         Args:
             purpose: "formal" (scored, updates mastery) or "quiz_bank" (practice).
         """
-        # Check if assessment already exists for this purpose
+        from app.common.enums import TaskStatus
+        from app.models.path import LearningPath
+        from app.models.task import BackgroundTask
+        from app.services.task import TaskService
+
+        # Resolve path_version_id
+        path_result = await self.db.execute(select(LearningPath).where(LearningPath.id == path_id))
+        path = path_result.scalar_one_or_none()
+        path_version_id = path.active_version_id if path else None
+
+        # Check for existing assessment for this node + purpose + version
         result = await self.db.execute(
             select(Assessment).where(
                 Assessment.path_id == path_id,
                 Assessment.node_id == node_id,
                 Assessment.user_id == user_id,
                 Assessment.purpose == purpose,
+                Assessment.path_version_id == path_version_id,
             )
         )
         existing = result.scalar_one_or_none()
-        if existing:
-            return await self._format_assessment(existing)
 
-        # Look up node context for question generation
-        from app.models.path import LearningNode
-
-        node_result = await self.db.execute(select(LearningNode).where(LearningNode.id == node_id))
-        node = node_result.scalar_one_or_none()
-        title = node.title if node else "本知识点"
-        outcomes_raw = node.learning_outcomes if node else "[]"
-        outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else (outcomes_raw or [])
-
-        # Create assessment
-        assessment = Assessment(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            path_id=path_id,
-            path_version_id="",
-            node_id=node_id,
-            purpose=purpose,
-            status="pending",
-        )
-        self.db.add(assessment)
-        await self.db.flush()
-
-        # Try LLM generation, fall back to template
-        questions_data = await self._llm_generate_questions(title, outcomes, is_assessment=True)
-        for idx, qd in enumerate(questions_data):
-            q = AssessmentQuestion(
-                id=str(uuid.uuid4()),
-                assessment_id=assessment.id,
-                question_type=qd["type"],
-                prompt=qd["prompt"],
-                options=json.dumps(qd.get("options")) if qd.get("options") else None,
-                correct_answer=qd.get("correct_answer", ""),
-                points=qd.get("points", 1),
-                question_order=idx + 1,
+        # If ready, return existing (idempotent)
+        if existing and existing.status == "ready":
+            questions_result = await self.db.execute(
+                select(AssessmentQuestion)
+                .where(AssessmentQuestion.assessment_id == existing.id)
+                .order_by(AssessmentQuestion.question_order)
             )
-            self.db.add(q)
+            questions = list(questions_result.scalars().all())
+            return {
+                "assessment_id": existing.id,
+                "purpose": purpose,
+                "status": "ready",
+                "questions": [_safe_question_dto(q) for q in questions],
+            }
+
+        # If currently generating, return existing task
+        if existing and existing.active_task_id:
+            task_result = await self.db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == existing.active_task_id,
+                    BackgroundTask.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value]),
+                )
+            )
+            active_task = task_result.scalar_one_or_none()
+            if active_task:
+                return {
+                    "assessment_id": existing.id,
+                    "purpose": purpose,
+                    "status": "generating",
+                    "active_task_id": active_task.id,
+                    "questions": [],
+                }
+
+        # Create new assessment
+        assessment_id = existing.id if existing else str(uuid.uuid4())
+        if not existing:
+            assessment = Assessment(
+                id=assessment_id,
+                user_id=user_id,
+                path_id=path_id,
+                path_version_id=path_version_id or "",
+                node_id=node_id,
+                purpose=purpose,
+                status="pending",
+            )
+            self.db.add(assessment)
+            await self.db.flush()
+
+        # Enqueue task via enqueue_task (no commit — caller commits)
+        task_service = TaskService(self.db)
+        idempotency_key = f"assessment-generate:{user_id}:{path_version_id}:{node_id}:{purpose}"
+        task = await task_service.enqueue_task(
+            user_id=user_id,
+            task_type="learning_assessment_generation",
+            target_type="assessment",
+            target_id=assessment_id,
+            target_metadata={"path_id": path_id, "purpose": purpose},
+            idempotency_key=idempotency_key,
+        )
+
+        # Link task to assessment
+        update_target = existing or assessment
+        update_target.active_task_id = task.id
+        update_target.status = "generating"
 
         await self.db.commit()
-        return await self._format_assessment(assessment)
+
+        return {
+            "assessment_id": assessment_id,
+            "purpose": purpose,
+            "status": "generating",
+            "active_task_id": task.id,
+            "questions": [],
+        }
 
     async def create_practice(
         self,
@@ -981,14 +1044,18 @@ class UnitService:
         self,
         assessment_id: str,
         user_id: str,
-        answers: dict[str, str | list[str]],
+        answers: dict[str, str | list[str] | bool],
+        client_request_id: str | None = None,
     ) -> dict:
         """Submit an assessment attempt with async grading for short answers.
 
-        Phase 3.5-B: Grades objective questions synchronously using shared
-        answer_scoring module. Short-answer questions are graded asynchronously
-        via the assessment_grading worker. Mastery and node unlock are NOT
-        updated in this phase (handled by Phase 3.5-C for final assessments only).
+        Validates all questions are answered, grades objective questions
+        synchronously, and enqueues async grading for short-answer questions.
+        Supports multiple attempts per assessment (D0-B).
+
+        Full-answer validation: all assessment questions must be present in
+        the answers dict. Extra question IDs that don't belong to this
+        assessment are rejected.
         """
         from decimal import Decimal
 
@@ -1016,33 +1083,6 @@ class UnitService:
                 code="ASSESSMENT_NOT_READY", message="Assessment is not ready for submission", status_code=400
             )
 
-        # Check for existing completed attempt (idempotent)
-        existing_attempt = await self.db.execute(
-            select(AssessmentAttempt)
-            .where(
-                AssessmentAttempt.assessment_id == assessment_id,
-                AssessmentAttempt.user_id == user_id,
-                AssessmentAttempt.status.in_(["completed", "grading"]),
-            )
-            .with_for_update()
-        )
-        existing = existing_attempt.scalar_one_or_none()
-        if existing and existing.status == "completed":
-            return {
-                "attempt_id": existing.id,
-                "status": "completed",
-                "score": existing.score,
-                "passed": existing.passed,
-                "grading_quality": existing.grading_quality,
-                "feedback": existing.feedback,
-            }
-        if existing and existing.active_task_id:
-            return {
-                "attempt_id": existing.id,
-                "status": "grading",
-                "active_task_id": existing.active_task_id,
-            }
-
         # Load questions
         questions_result = await self.db.execute(
             select(AssessmentQuestion)
@@ -1053,39 +1093,112 @@ class UnitService:
         if not questions:
             raise ApiError(code="NO_QUESTIONS", message="Assessment has no questions", status_code=400)
 
-        # Create attempt
-        attempt = AssessmentAttempt(
-            id=str(uuid.uuid4()),
-            assessment_id=assessment_id,
-            user_id=user_id,
-            status="in_progress",
+        # --- Full-answer validation ---
+        question_ids = {q.id for q in questions}
+        submitted_ids = set(answers.keys())
+
+        if submitted_ids != question_ids:
+            missing = question_ids - submitted_ids
+            extra = submitted_ids - question_ids
+            if missing:
+                raise ApiError(
+                    code="ASSESSMENT_INCOMPLETE",
+                    message=f"All questions must be answered. Missing {len(missing)} question(s).",
+                    status_code=422,
+                )
+            if extra:
+                raise ApiError(
+                    code="ASSESSMENT_EXTRA_QUESTIONS",
+                    message="Submitted answers contain question IDs not belonging to this assessment.",
+                    status_code=422,
+                )
+
+        # --- Check for existing grading/completed attempt with same client_request_id ---
+        if client_request_id:
+            existing_attempt = await self.db.execute(
+                select(AssessmentAttempt)
+                .where(
+                    AssessmentAttempt.assessment_id == assessment_id,
+                    AssessmentAttempt.user_id == user_id,
+                    AssessmentAttempt.client_request_id == client_request_id,
+                )
+                .with_for_update()
+            )
+            existing = existing_attempt.scalar_one_or_none()
+            if existing:
+                if existing.status == "completed":
+                    return {
+                        "attempt_id": existing.id,
+                        "status": "completed",
+                        "score": existing.score,
+                        "assessment_passed": existing.assessment_passed,
+                        "grading_quality": existing.grading_quality,
+                        "feedback": existing.feedback,
+                        "mastery_before": existing.mastery_before,
+                        "mastery_after": existing.mastery_after,
+                        "node_completed": existing.node_completed,
+                        "mastery_updated": True,
+                        "progress_status": None,
+                        "unlocked_node_ids": existing.unlocked_node_ids or [],
+                    }
+                if existing.status == "grading" and existing.active_task_id:
+                    return {
+                        "attempt_id": existing.id,
+                        "status": "grading",
+                        "active_task_id": existing.active_task_id,
+                        "grading_quality": None,
+                    }
+
+        # --- Check for existing in_progress attempt (re-enter) ---
+        existing_in_progress = await self.db.execute(
+            select(AssessmentAttempt)
+            .where(
+                AssessmentAttempt.assessment_id == assessment_id,
+                AssessmentAttempt.user_id == user_id,
+                AssessmentAttempt.status == "in_progress",
+            )
+            .with_for_update()
         )
-        self.db.add(attempt)
-        await self.db.flush()
+        existing_ip = existing_in_progress.scalar_one_or_none()
+
+        # Create or reuse attempt
+        attempt_id = existing_ip.id if existing_ip else str(uuid.uuid4())
+        if not existing_ip:
+            attempt = AssessmentAttempt(
+                id=attempt_id,
+                assessment_id=assessment_id,
+                user_id=user_id,
+                status="in_progress",
+                client_request_id=client_request_id,
+            )
+            self.db.add(attempt)
+            await self.db.flush()
+        else:
+            attempt = existing_ip
 
         # Grade answers
         has_pending_short_answer = False
         for question in questions:
             answer_value = answers.get(question.id)
-            if answer_value is None:
-                continue
+            # All questions guaranteed present by validation above
 
             ans = AssessmentAnswer(
                 id=str(uuid.uuid4()),
                 attempt_id=attempt.id,
                 question_id=question.id,
+                answer_value=_serialize_answer_value(answer_value),
                 max_score=question.max_score or float(question.points),
                 grading_source="program",
                 grading_status="graded",
             )
 
             if question.question_type == "single_choice":
+                correct_val = _parse_correct_answer_scalar(question.correct_answer)
                 scored = score_single_choice(
                     str(answer_value),
-                    str(question.correct_answer or ""),
+                    correct_val,
                     Decimal(str(question.max_score or question.points)),
                 )
-                ans.answer_value = str(answer_value)
                 ans.is_correct = scored.is_correct
                 ans.points_earned = float(scored.score)
                 ans.feedback = scored.feedback
@@ -1098,7 +1211,6 @@ class UnitService:
                     correct_list,
                     Decimal(str(question.max_score or question.points)),
                 )
-                ans.answer_value = json.dumps(ans_list)
                 ans.is_correct = scored.is_correct
                 ans.points_earned = float(scored.score)
                 ans.feedback = scored.feedback
@@ -1111,13 +1223,11 @@ class UnitService:
                     correct_bool,
                     Decimal(str(question.max_score or question.points)),
                 )
-                ans.answer_value = str(answer_value)
                 ans.is_correct = scored.is_correct
                 ans.points_earned = float(scored.score)
                 ans.feedback = scored.feedback
 
             elif question.question_type == "short_answer":
-                ans.answer_value = str(answer_value)
                 ans.is_correct = None
                 ans.points_earned = 0
                 ans.grading_source = "pending"
@@ -1171,12 +1281,14 @@ class UnitService:
                 "attempt_id": attempt.id,
                 "status": "completed",
                 "score": attempt.score or float(fin.percentage),
-                "passed": fin.assessment_passed,
+                "assessment_passed": fin.assessment_passed,
                 "grading_quality": "final",
                 "feedback": attempt.feedback,
                 "mastery_before": float(fin.mastery_before),
                 "mastery_after": float(fin.mastery_after),
                 "node_completed": fin.node_completed,
+                "mastery_updated": fin.mastery_updated,
+                "progress_status": None,
                 "unlocked_node_ids": list(fin.unlocked_node_ids),
             }
 
@@ -1413,3 +1525,14 @@ def _safe_question_dto(q: AssessmentQuestion) -> dict[str, object]:
         "knowledge_point": q.knowledge_point,
         "max_score": q.max_score or q.points,
     }
+
+
+def _serialize_answer_value(value: str | list[str] | bool | None) -> str:
+    """Serialize an answer value to a JSON string for storage."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False)
+    return value

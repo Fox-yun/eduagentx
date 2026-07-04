@@ -254,6 +254,15 @@ async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
 
     topic = _extract_topic(goal.title)
 
+    # Phase 3.6-D: Load student profile for personalised path planning
+    profile_context = ""
+    try:
+        from app.services.profile_merge import load_profile_context
+
+        _profile, profile_context = await load_profile_context(db, user_id)
+    except Exception as e:
+        logger.warning("profile_load_failed_for_path", error=str(e))
+
     user_message = f"""请为以下学习目标规划学习路径：
 
 学习目标：{goal.title}
@@ -261,13 +270,16 @@ async def _execute_path_generation(db: Any, task: Any) -> dict[str, Any]:
 {f"目标描述：{goal.raw_description}" if goal.raw_description else ""}
 {f"当前水平：{goal.current_level}" if goal.current_level else ""}
 {f"目标水平：{goal.target_level}" if goal.target_level else ""}
+{profile_context}
 
 请生成 5-15 个学习节点，确保：
 - 节点标题以核心主题「{topic}」为基础，不要包含用户目标的完整表述
 - 标题具体明确（例如："{topic} — 指针与引用"而非"{topic}基础"）
 - 每个节点 estimated_minutes 在 20-60 之间
 - difficulty 按照节点顺序递增
-- edges 反映真实的前置依赖关系"""
+- edges 反映真实的前置依赖关系
+- 如果学习者画像显示知识基础较弱，适当增加基础节点；如果先修知识掌握较好，可以减少前置复习节点
+- 如果学习者画像显示学习节奏偏慢，适当增加 estimated_minutes；偏快则可以压缩"""
 
     # Try LLM generation, fall back to template if LLM unavailable
     stages = []
@@ -512,7 +524,6 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
     from app.services.llm import LLMError, llm_json
 
     node_id = task.target_id
-    user_id = task.user_id
     metadata = task.target_metadata or {}
     path_id = metadata.get("path_id", "")
     preferences = metadata.get("preferences", "")
@@ -564,6 +575,15 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
         ]
     )
 
+    # Phase 3.6-D: Load student profile for personalised content generation
+    profile_context = ""
+    try:
+        from app.services.profile_merge import load_profile_context
+
+        _profile, profile_context = await load_profile_context(db, user_id)
+    except Exception as e:
+        logger.warning("profile_load_failed_for_unit", error=str(e))
+
     # ------------------------------------------------
     # LLM call (no DB transaction)
     # ------------------------------------------------
@@ -578,6 +598,8 @@ async def _execute_unit_generation(db: Any, task: Any) -> dict[str, Any]:
         user_msg = content_generator_user(node_title, node_desc, node_difficulty, objectives, goal_title)
         if preferences:
             user_msg += f"\n\n用户个性化偏好（请务必参考）：\n{preferences}"
+        if profile_context:
+            user_msg += f"\n\n{profile_context}\n请根据以上画像信息调整内容深度、讲解方式和示例类型。"
 
         content_data = await llm_json(system_prompt, user_msg, temperature=0.6, max_tokens=12000)
 
@@ -810,46 +832,103 @@ def _build_fallback_content(
 
 @register_handler("knowledge_index")
 async def _execute_knowledge_index(db: Any, task: Any) -> dict[str, Any]:
-    """Execute a knowledge indexing task."""
-    import uuid
+    """Execute a knowledge indexing task.
 
-    from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
-
-    doc_id = task.target_id
-
-    await update_task_status(db, task.id, "running", progress=30, stage="parsing", message="解析文档...")
-
-    # Get document
+    Pipeline:
+      1. Download file from object storage
+      2. Parse document (PDF/TXT/MD/DOCX/CSV/JSON)
+      3. Chunk into 800-1200 token segments
+      4. Insert chunks with new index_version
+      5. Activate new version (deletes old chunks)
+      6. Set document status to 'ready'
+    """
     from sqlalchemy import select
 
+    from app.models.knowledge import KnowledgeDocument
+    from app.services.chunker import chunk_sections, chunks_to_dicts
+    from app.services.document_parser import parse_document
+    from app.services.knowledge import KnowledgeService
+    from app.services.storage import get_object_storage
+
+    doc_id = task.target_id
+    if not doc_id:
+        raise ValueError("Document ID is required for knowledge_index task")
+
+    # Step 1: Get document
     result = await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.id == doc_id))
     doc = result.scalar_one_or_none()
-
     if not doc:
         raise ValueError(f"Document {doc_id} not found")
 
-    await update_task_status(db, task.id, "running", progress=60, stage="chunking", message="分块处理...")
+    # Determine if this is a reindex (doc already has a version)
+    is_reindex = doc.active_index_version is not None
+    new_version = (doc.active_index_version or 0) + 1
 
-    # Create sample chunks
-    chunk = KnowledgeChunk(
-        id=str(uuid.uuid4()),
-        document_id=doc_id,
-        chunk_index=0,
-        content="Sample content chunk",
-        token_count=10,
-    )
-    db.add(chunk)
+    storage = get_object_storage()
+    service = KnowledgeService(db, storage=storage)
 
-    doc.status = "ready"
-    doc.operation_status = "ready"
-    await db.flush()
+    try:
+        # Step 2: Download from object storage
+        await update_task_status(db, task.id, "running", progress=10, stage="downloading", message="下载文件...")
+        content_bytes = await storage.get(doc.storage_key)
 
-    return {"document_id": doc_id, "chunks": 1}
+        # Step 3: Parse document
+        await update_task_status(db, task.id, "running", progress=30, stage="parsing", message="解析文档...")
+        sections = parse_document(content_bytes, doc.mime_type, doc.filename)
+
+        if not sections:
+            raise ValueError("Document produced no parseable content")
+
+        # Step 4: Chunk
+        await update_task_status(db, task.id, "running", progress=50, stage="chunking", message="分块处理...")
+        chunks = chunk_sections(sections)
+        chunk_dicts = chunks_to_dicts(chunks)
+
+        if not chunk_dicts:
+            raise ValueError("Chunking produced no chunks")
+
+        # Step 5: Insert new chunks
+        await update_task_status(db, task.id, "running", progress=70, stage="indexing", message="写入索引...")
+        await service.add_chunks(doc_id, chunk_dicts, index_version=new_version)
+
+        # Step 6: Activate new version (deletes old chunks atomically)
+        await service.activate_version(doc_id, new_version)
+
+        # Step 7: Mark as ready
+        doc.status = "ready"
+        doc.operation_status = "ready"
+        doc.error = None
+        await db.flush()
+
+        return {
+            "document_id": doc_id,
+            "chunks": len(chunk_dicts),
+            "index_version": new_version,
+            "reindex": is_reindex,
+        }
+
+    except Exception as e:
+        # Mark document as failed
+        try:
+            doc.status = "failed"
+            doc.operation_status = "failed"
+            doc.error = str(e)
+            await db.flush()
+        except Exception:
+            pass
+        raise
 
 
 @register_handler("knowledge_reindex")
 async def _execute_knowledge_reindex(db: Any, task: Any) -> dict[str, Any]:
-    """Execute a knowledge reindex — reuses the index logic."""
+    """Execute a knowledge reindex — reuses the index logic.
+
+    The reindex handler is separate so we can set the document to
+    'reindexing' status before the task runs (done in the API).
+    The handler itself uses the same pipeline as knowledge_index,
+    but the document already has active_index_version set, so
+    a new version number is generated automatically.
+    """
     return await _execute_knowledge_index(db, task)
 
 

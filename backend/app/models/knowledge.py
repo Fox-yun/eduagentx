@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -39,6 +40,7 @@ class KnowledgeDocument(Base):
     extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     index_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    active_index_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -60,6 +62,9 @@ class KnowledgeChunk(Base):
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     section_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    index_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tsv: Mapped[Any] = mapped_column(TSVECTOR, nullable=True)
     extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

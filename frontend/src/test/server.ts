@@ -1,10 +1,12 @@
 import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
 import { handlers as authHandlers } from "./handlers/auth";
 import { handlers as resumeHandlers } from "./handlers/resume";
 import { handlers as pathHandlers } from "./handlers/paths";
 import { handlers as settingsHandlers } from "./handlers/settings";
 import { handlers as knowledgeHandlers } from "./handlers/knowledge";
 import { handlers as tasksHandlers } from "./handlers/tasks";
+import { mockRecommendationDtos } from "../mocks/recommendations";
 
 export const server = setupServer(
   ...authHandlers,
@@ -12,5 +14,10 @@ export const server = setupServer(
   ...pathHandlers,
   ...settingsHandlers,
   ...knowledgeHandlers,
-  ...tasksHandlers
+  ...tasksHandlers,
+
+  // Recommendations
+  http.get("*/api/learning-paths/:pathId/recommendations", () => {
+    return HttpResponse.json({ items: mockRecommendationDtos });
+  })
 );

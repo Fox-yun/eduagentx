@@ -23,18 +23,15 @@ from sqlalchemy import select as sa_select
 
 from app.models.goal import LearningGoal
 from app.models.outbox import OutboxEvent
-from app.models.path import LearningPath, LearningPathVersion, LearningNode
+from app.models.path import LearningNode, LearningPath, LearningPathVersion
 from app.models.task import BackgroundTask, TaskEvent
 from app.models.unit import Assessment, AssessmentQuestion
 from app.models.user import User
-from app.services.unit import UnitService
 from app.services.task import TaskService
+from app.services.unit import UnitService
 from app.workers.assessment_generation import (
     execute_assessment_generation,
-    GeneratedAssessmentQuestion,
-    GeneratedQuestionOption,
 )
-
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -354,9 +351,10 @@ class TestAssessmentGenerationConcurrency:
         uid = await _create_user(db_session, "conc1")
         pid, pvid, nid = await _create_path(db_session, uid)
 
-        from app.config import clear_settings_cache, get_settings
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
         from sqlalchemy.pool import NullPool
+
+        from app.config import clear_settings_cache, get_settings
 
         clear_settings_cache()
         settings = get_settings()
@@ -408,9 +406,10 @@ class TestAssessmentGenerationConcurrency:
         uid = await _create_user(db_session, "conc2")
         pid, pvid, nid = await _create_path(db_session, uid)
 
-        from app.config import clear_settings_cache, get_settings
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
         from sqlalchemy.pool import NullPool
+
+        from app.config import clear_settings_cache, get_settings
 
         clear_settings_cache()
         settings = get_settings()

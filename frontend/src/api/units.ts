@@ -3,8 +3,8 @@ import { apiRequest } from "./client";
 import {
   UnitContentDtoSchema,
   UnitContentModel,
-  AssessmentDtoSchema,
   AssessmentModel,
+  AssessmentGenerationResultSchema,
   AssessmentSubmitResponseSchema,
   AssessmentSubmitResultModel,
   AssessmentAttemptResultSchema,
@@ -13,7 +13,7 @@ import {
 } from "../schemas/units";
 import {
   mapUnitContent,
-  mapAssessment,
+  mapAssessmentGenerationResult,
   mapAssessmentSubmitResponse,
   mapPracticeQuestions,
 } from "../mappers/units";
@@ -120,20 +120,35 @@ export async function createAssessment(
     `/learning-paths/${pathId}/nodes/${nodeId}/assessments?${params}`,
     {
       method: "POST",
-      schema: AssessmentDtoSchema,
-      timeoutMs: 120000,
+      schema: AssessmentGenerationResultSchema,
     }
   );
-  return mapAssessment(dto);
+  return mapAssessmentGenerationResult(dto);
+}
+
+export async function getAssessment(
+  pathId: string,
+  nodeId: string,
+  assessmentId: string
+): Promise<AssessmentModel> {
+  const dto = await apiRequest(
+    `/learning-paths/${pathId}/nodes/${nodeId}/assessments/${assessmentId}`,
+    {
+      method: "GET",
+      schema: AssessmentGenerationResultSchema,
+    }
+  );
+  return mapAssessmentGenerationResult(dto);
 }
 
 export async function submitAssessment(
   assessmentId: string,
-  answers: Record<string, any>
+  answers: Record<string, any>,
+  clientRequestId?: string
 ): Promise<AssessmentSubmitResultModel> {
   const dto = await apiRequest(`/assessments/${assessmentId}/submit`, {
     method: "POST",
-    body: { answers },
+    body: { answers, client_request_id: clientRequestId ?? crypto.randomUUID() },
     schema: AssessmentSubmitResponseSchema,
     timeoutMs: 120000,
   });

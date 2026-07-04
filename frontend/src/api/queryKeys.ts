@@ -35,4 +35,9 @@ export const queryKeys = {
 
   knowledgeDocuments: (filters: KnowledgeFilters) =>
     ["knowledge-documents", filters] as const,
+
+  profile: () => ["profile"] as const,
+  profileEvidence: () => ["profile", "evidence"] as const,
+  profileConversation: (sessionId: string) =>
+    ["profile", "conversation", sessionId] as const,
 };

@@ -8,10 +8,9 @@ from pydantic import ValidationError
 from app.workers.assessment_generation import (
     AssessmentGenerationInput,
     GeneratedAssessmentQuestion,
-    validate_questions,
     _build_fallback_assessment,
+    validate_questions,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

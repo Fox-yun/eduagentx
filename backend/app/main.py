@@ -76,6 +76,7 @@ def create_app() -> FastAPI:
     from app.routers.goals import router as goals_router
     from app.routers.knowledge import router as knowledge_router
     from app.routers.paths import router as paths_router
+    from app.routers.profile import router as profile_router
     from app.routers.resume import router as resume_router
     from app.routers.tasks import router as tasks_router
     from app.routers.units import router as units_router
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(paths_router, prefix="/api/learning-paths", tags=["paths"])
     app.include_router(units_router, prefix="/api/learning-paths", tags=["units"])
     app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+    app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 
     # Assessment submit uses a different prefix than other unit routes
     from app.routers.units import submit_assessment

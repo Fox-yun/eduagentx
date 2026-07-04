@@ -201,6 +201,9 @@ TUTOR_SYSTEM = """你是一个耐心、专业的辅导教师智能体。你的�
 4. 如果学生的问题不够清晰，先追问澄清
 5. 鼓励学生思考，不要直接给出所有答案
 6. 回答后可以提出一个引导性问题，帮助学生深入思考
+7. 如果提供了「知识库参考」资料，请优先基于这些资料回答，并在回答末尾用 [1]、[2] 等标注引用来源
+8. 如果知识库参考资料与节点内容冲突，以知识库参考资料为准并说明
+9. 如果没有知识库参考资料，可以基于节点内容回答
 
 你正在辅导学生学习以下内容：
 {context}
@@ -208,12 +211,27 @@ TUTOR_SYSTEM = """你是一个耐心、专业的辅导教师智能体。你的�
 请用中文回答学生的问题。回答要简洁明了，适合该难度级别的学生理解。"""
 
 
-def tutor_context(node_title: str, node_content: str = "") -> str:
+def tutor_context(
+    node_title: str,
+    node_content: str = "",
+    knowledge_context: str = "",
+) -> str:
+    """Build the context block for the tutor system prompt.
+
+    Args:
+        node_title: Title of the learning node.
+        node_content: Truncated summary of the unit's generated content.
+        knowledge_context: Pre-formatted string of knowledge base chunks
+            with numbered citations (e.g. ``[1] ...``).  May be empty when
+            no knowledge documents exist or the search returned no results.
+    """
     ctx = f"当前学习节点：{node_title}"
     if node_content:
         # Truncate content to avoid exceeding token limits
         truncated = node_content[:2000] + "..." if len(node_content) > 2000 else node_content
         ctx += f"\n\n节点内容摘要：\n{truncated}"
+    if knowledge_context:
+        ctx += f"\n\n知识库参考：\n{knowledge_context}"
     return ctx
 
 

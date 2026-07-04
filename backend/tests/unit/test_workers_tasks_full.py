@@ -369,12 +369,12 @@ class TestExecuteUnitGeneration:
 
         review_result = {"passed": True, "score": 85, "issues": [], "summary": "Good"}
 
-        from unittest.mock import MagicMock as _MM
+        from unittest.mock import MagicMock as MockMM
 
         call_data: dict[str, int] = {"calls": 0}
 
         def _scalar(val):
-            r = _MM()
+            r = MockMM()
             r.scalar_one_or_none.return_value = val
             return r
 
@@ -388,11 +388,7 @@ class TestExecuteUnitGeneration:
                 return _scalar(mock_path)
             elif n == 3:
                 return _scalar(mock_goal)
-            elif n == 4:
-                return _scalar(mock_version)
-            # After LLM: progress update uses db.execute for nothing
-            # Txn B queries: version, task, unit_content, old_version
-            elif n == 5:
+            elif n == 4 or n == 5:
                 return _scalar(mock_version)
             elif n == 6:
                 return _scalar(mock_bg_task)
@@ -560,9 +556,9 @@ class TestExecuteUnitGeneration:
 class TestExecuteKnowledgeIndex:
     @pytest.mark.asyncio
     async def test_knowledge_index_success(self):
+        from app.services.storage import InMemoryObjectStorage
+
         mock_db = AsyncMock()
-        mock_db.add = MagicMock()
-        mock_db.add_all = MagicMock()
         mock_db.add = MagicMock()
         mock_db.add_all = MagicMock()
         mock_task = MagicMock()
@@ -570,25 +566,37 @@ class TestExecuteKnowledgeIndex:
         mock_task.target_id = "doc-1"
 
         mock_doc = MagicMock()
-        mock_doc.status = "pending"
-        mock_doc.operation_status = "pending"
+        mock_doc.id = "doc-1"
+        mock_doc.status = "uploaded"
+        mock_doc.operation_status = "queued"
+        mock_doc.storage_key = "knowledge/user-1/test.txt"
+        mock_doc.mime_type = "text/plain"
+        mock_doc.filename = "test.txt"
+        mock_doc.active_index_version = None
+        mock_doc.error = None
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_doc
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.workers.tasks.update_task_status", new_callable=AsyncMock):
-            result = await _execute_knowledge_index(mock_db, mock_task)
+        # Set up in-memory storage with test content
+        storage = InMemoryObjectStorage()
+        await storage.put("knowledge/user-1/test.txt", b"Hello world. This is test content for indexing.")
 
-        assert result == {"document_id": "doc-1", "chunks": 1}
+        with patch("app.workers.tasks.update_task_status", new_callable=AsyncMock):
+            with patch("app.services.storage.get_object_storage", return_value=storage):
+                with patch("app.services.knowledge.get_object_storage", return_value=storage):
+                    result = await _execute_knowledge_index(mock_db, mock_task)
+
+        assert result["document_id"] == "doc-1"
+        assert result["chunks"] >= 1
+        assert result["index_version"] == 1
         assert mock_doc.status == "ready"
         assert mock_doc.operation_status == "ready"
 
     @pytest.mark.asyncio
     async def test_knowledge_index_document_not_found(self):
         mock_db = AsyncMock()
-        mock_db.add = MagicMock()
-        mock_db.add_all = MagicMock()
         mock_db.add = MagicMock()
         mock_db.add_all = MagicMock()
         mock_task = MagicMock()

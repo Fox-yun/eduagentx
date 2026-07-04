@@ -133,24 +133,26 @@ class TestCreatePractice:
     async def test_create_practice(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
-        practice = {
-            "node_id": "node-1",
-            "questions": [
-                {"question_id": "practice-1", "type": "single_choice", "prompt": "Q1"},
-            ],
+        # Practice now delegates to create_assessment with purpose=practice
+        assessment = {
+            "assessment_id": "assess-1",
+            "purpose": "practice",
+            "status": "generating",
+            "active_task_id": "task-1",
+            "questions": [],
         }
 
         with patch("app.routers.units.UnitService") as MockSvc:
             instance = MockSvc.return_value
-            instance.create_practice = AsyncMock(return_value=practice)
+            instance.create_assessment = AsyncMock(return_value=assessment)
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post("/paths/path-1/nodes/node-1/practice")
                 assert resp.status_code == 200
                 data = resp.json()
-                assert data["node_id"] == "node-1"
-                assert len(data["questions"]) == 1
+                assert data["assessment_id"] == "assess-1"
+                assert data["purpose"] == "practice"
 
 
 class TestSubmitAssessment:

@@ -102,6 +102,15 @@ class Assessment(Base):
     """
 
     __tablename__ = "assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "path_version_id",
+            "node_id",
+            "purpose",
+            name="uq_assessment_user_version_node_purpose",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
@@ -164,7 +173,18 @@ class AssessmentAttempt(Base):
     node_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mastery_before: Mapped[float | None] = mapped_column(Float, nullable=True)
     mastery_after: Mapped[float | None] = mapped_column(Float, nullable=True)
+    client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    unlocked_node_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "assessment_id",
+            "client_request_id",
+            name="uq_attempt_user_assessment_request",
+        ),
+    )
 
 
 class AssessmentAnswer(Base):

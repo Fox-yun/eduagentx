@@ -81,7 +81,7 @@ def _make_question(**overrides):
     q.options = overrides.get("options", json.dumps([{"value": "a", "label": "A"}, {"value": "b", "label": "B"}]))
     q.correct_answer = overrides.get("correct_answer", "a")
     q.points = overrides.get("points", 1)
-    q.max_score = overrides.get("max_score", None)
+    q.max_score = overrides.get("max_score")
     q.question_order = overrides.get("question_order", 1)
     return q
 
@@ -175,58 +175,60 @@ class TestUnitServiceGetUnitContent:
 
 class TestUnitServiceCreateAssessment:
     @pytest.mark.asyncio
-    async def test_create_new_assessment(self):
+    async def test_create_new_assessment_returns_generating(self):
+        """New assessment creation returns generating status with active_task_id."""
         from app.services.unit import UnitService
 
         db = AsyncMock()
         db.add = MagicMock()
         db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
+        db.commit = AsyncMock()
+        db.flush = AsyncMock()
         svc = UnitService(db)
 
-        questions = [
-            {
-                "type": "single_choice",
-                "prompt": f"Q{i}",
-                "options": [{"value": "a", "label": "A"}],
-                "correct_answer": "a",
-                "points": 1,
-            }
-            for i in range(12)
-        ]
+        # Mock path lookup (first call)
+        mock_path = MagicMock()
+        mock_path.active_version_id = "ver-1"
 
         call_count = 0
 
         async def execute_side_effect(query):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:  # existing assessment check
+            if call_count == 1:  # select(LearningPath)
+                return _mock_scalar_result(mock_path)
+            elif call_count == 2:  # select(Assessment) — no existing
                 return _mock_scalar_result(None)
-            elif call_count == 2:  # node lookup
-                return _mock_scalar_result(_make_node())
-            elif call_count == 3:  # format: get questions
-                return _mock_scalars([])
             return _mock_scalar_result(None)
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        with patch.object(svc, "_llm_generate_questions", new_callable=AsyncMock, return_value=questions):
+        # Mock TaskService.enqueue_task
+        mock_task = MagicMock()
+        mock_task.id = "task-generated-1"
+
+        with patch(
+            "app.services.task.TaskService.enqueue_task",
+            new_callable=AsyncMock,
+            return_value=mock_task,
+        ):
             result = await svc.create_assessment("path-1", "node-1", "user-1")
             assert "assessment_id" in result
-            assert result["status"] == "pending"
+            assert result["status"] == "generating"
+            assert result["active_task_id"] == "task-generated-1"
+            assert result["questions"] == []
 
     @pytest.mark.asyncio
-    async def test_create_assessment_existing(self):
+    async def test_create_assessment_existing_ready(self):
+        """Existing ready assessment returns questions directly."""
         from app.services.unit import UnitService
 
         db = AsyncMock()
         db.add = MagicMock()
         db.add_all = MagicMock()
-        db.add = MagicMock()
-        db.add_all = MagicMock()
         svc = UnitService(db)
         existing = _make_assessment()
+        existing.status = "ready"
         question = _make_question()
 
         call_count = 0
@@ -234,9 +236,11 @@ class TestUnitServiceCreateAssessment:
         async def execute_side_effect(query):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                return _mock_scalar_result(existing)  # found existing
-            elif call_count == 2:
+            if call_count == 1:  # select(LearningPath)
+                return _mock_scalar_result(MagicMock(active_version_id="ver-1"))
+            elif call_count == 2:  # select(Assessment) — found existing
+                return _mock_scalar_result(existing)
+            elif call_count == 3:  # select(AssessmentQuestion)
                 return _mock_scalars([question])
             return _mock_scalar_result(None)
 
@@ -244,6 +248,8 @@ class TestUnitServiceCreateAssessment:
 
         result = await svc.create_assessment("path-1", "node-1", "user-1")
         assert result["assessment_id"] == "assess-1"
+        assert result["status"] == "ready"
+        assert len(result["questions"]) == 1
 
 
 class TestUnitServiceCreatePractice:
@@ -378,6 +384,7 @@ class TestUnitServiceSubmitAssessment:
 
         db = AsyncMock()
         db.add = MagicMock()
+        db.commit = AsyncMock()
         svc = UnitService(db)
 
         assessment = _make_assessment(status="ready")
@@ -391,11 +398,11 @@ class TestUnitServiceSubmitAssessment:
             call_count += 1
             if call_count == 1:  # assessment FOR UPDATE
                 return _mock_scalar_result(assessment)
-            elif call_count == 2:  # existing attempt FOR UPDATE
-                return _mock_scalar_result(None)
-            elif call_count == 3:  # questions
+            elif call_count == 2:  # questions
                 return _mock_scalars([q1, q2])
-            elif call_count == 4:  # aggregate scores
+            elif call_count == 3:  # in_progress attempt check
+                return _mock_scalar_result(None)
+            elif call_count == 4:  # aggregate scores (in finalizer)
                 return _mock_one((2.0, 2.0))
             return _mock_scalar_result(None)
 
@@ -416,7 +423,7 @@ class TestUnitServiceSubmitAssessment:
         ):
             result = await svc.submit_assessment("assess-1", "user-1", {"q1": "a", "q2": "b"})
             assert result["score"] == 100.0
-            assert result["passed"] is True
+            assert result["assessment_passed"] is True
 
     @pytest.mark.asyncio
     async def test_submit_fail_with_wrong_answers(self):
@@ -424,6 +431,7 @@ class TestUnitServiceSubmitAssessment:
 
         db = AsyncMock()
         db.add = MagicMock()
+        db.commit = AsyncMock()
         svc = UnitService(db)
 
         assessment = _make_assessment(status="ready")
@@ -436,10 +444,10 @@ class TestUnitServiceSubmitAssessment:
             call_count += 1
             if call_count == 1:  # assessment FOR UPDATE
                 return _mock_scalar_result(assessment)
-            elif call_count == 2:  # existing attempt FOR UPDATE
-                return _mock_scalar_result(None)
-            elif call_count == 3:  # questions
+            elif call_count == 2:  # questions
                 return _mock_scalars([q1])
+            elif call_count == 3:  # in_progress attempt check
+                return _mock_scalar_result(None)
             elif call_count == 4:  # aggregate scores
                 return _mock_one((0.0, 5.0))
             return _mock_scalar_result(None)
@@ -461,7 +469,7 @@ class TestUnitServiceSubmitAssessment:
         ):
             result = await svc.submit_assessment("assess-1", "user-1", {"q1": "b"})
             assert result["score"] == 0.0
-            assert result["passed"] is False
+            assert result["assessment_passed"] is False
 
     @pytest.mark.asyncio
     async def test_submit_multiple_choice(self):
@@ -469,6 +477,7 @@ class TestUnitServiceSubmitAssessment:
 
         db = AsyncMock()
         db.add = MagicMock()
+        db.commit = AsyncMock()
         svc = UnitService(db)
 
         assessment = _make_assessment(status="ready")
@@ -488,9 +497,9 @@ class TestUnitServiceSubmitAssessment:
             if call_count == 1:
                 return _mock_scalar_result(assessment)
             elif call_count == 2:
-                return _mock_scalar_result(None)
-            elif call_count == 3:
                 return _mock_scalars([q1])
+            elif call_count == 3:  # in_progress attempt check
+                return _mock_scalar_result(None)
             elif call_count == 4:  # aggregate scores
                 return _mock_one((2.0, 2.0))
             return _mock_scalar_result(None)
@@ -511,7 +520,7 @@ class TestUnitServiceSubmitAssessment:
         ):
             result = await svc.submit_assessment("assess-1", "user-1", {"q1": ["a", "b", "c"]})
             assert result["score"] == 100.0
-            assert result["passed"] is True
+            assert result["assessment_passed"] is True
 
     @pytest.mark.asyncio
     async def test_submit_with_short_answer(self):
@@ -519,6 +528,7 @@ class TestUnitServiceSubmitAssessment:
 
         db = AsyncMock()
         db.add = MagicMock()
+        db.commit = AsyncMock()
         svc = UnitService(db)
 
         assessment = _make_assessment(status="ready")
@@ -532,9 +542,9 @@ class TestUnitServiceSubmitAssessment:
             if call_count == 1:
                 return _mock_scalar_result(assessment)
             elif call_count == 2:
-                return _mock_scalar_result(None)
-            elif call_count == 3:
                 return _mock_scalars([q1])
+            elif call_count == 3:  # in_progress attempt check
+                return _mock_scalar_result(None)
             return _mock_scalar_result(None)
 
         db.execute = AsyncMock(side_effect=execute_side_effect)

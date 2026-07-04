@@ -1,12 +1,12 @@
 import React from "react";
-import { FolderOpen, History, Sparkles, X } from "lucide-react";
+import { FolderOpen, History, Loader2, Sparkles, X } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceStore, LeftTabType } from "../../stores/workspace";
 import { queryKeys } from "../../api/queryKeys";
 import { getLearningPath } from "../../api/paths";
+import { getRecommendations } from "../../api/recommendations";
 import { RecommendationCard } from "./RecommendationCard";
-import { mockRecommendations } from "../../mocks/recommendations";
 
 interface RecommendationPanelProps {
   className?: string;
@@ -26,20 +26,56 @@ export function RecommendationPanel({ className }: RecommendationPanelProps) {
     enabled: !!pathId,
   });
 
+  const {
+    data: recommendations,
+    isLoading: recsLoading,
+    isError: recsError,
+  } = useQuery({
+    queryKey: queryKeys.recommendations(pathId || ""),
+    queryFn: ({ signal }) => getRecommendations(pathId || "", signal),
+    enabled: !!pathId,
+    staleTime: 30_000, // 30s — recommendations don't change frequently
+  });
+
   const completedNodes = pathData?.nodes?.filter(
     (n) => n.status === "completed"
   ) || [];
-
-  const mockResources = [
-    { id: "res-1", title: "二叉树非递归遍历的栈实现图解", type: "PDF", size: "1.2 MB" },
-    { id: "res-2", title: "Dijkstra 堆优化算法详解视频", type: "Video", duration: "18:45" },
-    { id: "res-3", title: "Kahn 拓扑排序算法模拟交互网页", type: "Interactive", url: "#" },
-  ];
 
   const handleClearRecommendation = (e: React.MouseEvent) => {
     e.stopPropagation();
     clearHighlights();
     selectRecommendation(null);
+  };
+
+  const renderRecommendations = () => {
+    if (recsLoading) {
+      return (
+        <div className="flex items-center justify-center py-8 text-xs text-subtle gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在生成个性化建议...
+        </div>
+      );
+    }
+
+    if (recsError) {
+      return (
+        <div className="text-center py-8 text-xs text-danger">
+          加载推荐失败，请稍后重试
+        </div>
+      );
+    }
+
+    if (!recommendations || recommendations.length === 0) {
+      return (
+        <div className="text-center py-8 text-xs text-subtle">
+          暂无推荐建议
+        </div>
+      );
+    }
+
+    return recommendations.map((rec) => (
+      <RecommendationCard key={rec.id} recommendation={rec} />
+    ));
   };
 
   const renderTabContent = () => {
@@ -62,9 +98,7 @@ export function RecommendationPanel({ className }: RecommendationPanelProps) {
                 </button>
               )}
             </div>
-            {mockRecommendations.map((rec) => (
-              <RecommendationCard key={rec.id} recommendation={rec} />
-            ))}
+            {renderRecommendations()}
           </div>
         );
       case "resources":
@@ -74,22 +108,33 @@ export function RecommendationPanel({ className }: RecommendationPanelProps) {
               <FolderOpen className="h-3.5 w-3.5 text-primary" />
               配套学习资料
             </span>
-            {mockResources.map((res) => (
-              <div
-                key={res.id}
-                className="p-3 bg-panel border border-border rounded-xl hover:border-border-strong transition-all flex flex-col gap-1.5"
-              >
-                <h5 className="text-xs font-semibold text-ink line-clamp-1">
-                  {res.title}
-                </h5>
-                <div className="flex items-center gap-2 text-[10px] text-subtle">
-                  <span className="bg-panel-soft px-1.5 py-0.5 rounded font-mono">
-                    {res.type}
-                  </span>
-                  <span>{res.size || res.duration}</span>
+            {(recommendations || [])
+              .filter((r) => r.type === "resource" && r.resource)
+              .map((rec) => (
+                <div
+                  key={rec.id}
+                  className="p-3 bg-panel border border-border rounded-xl hover:border-border-strong transition-all flex flex-col gap-1.5"
+                >
+                  <h5 className="text-xs font-semibold text-ink line-clamp-1">
+                    {rec.resource?.fileName || rec.title}
+                  </h5>
+                  <div className="flex items-center gap-2 text-[10px] text-subtle">
+                    {rec.resource?.pageNumber && (
+                      <span className="bg-panel-soft px-1.5 py-0.5 rounded font-mono">
+                        第 {rec.resource.pageNumber} 页
+                      </span>
+                    )}
+                    {rec.resource?.sectionTitle && (
+                      <span className="truncate">{rec.resource.sectionTitle}</span>
+                    )}
+                  </div>
                 </div>
+              ))}
+            {(!recommendations || recommendations.filter((r) => r.type === "resource").length === 0) && (
+              <div className="text-center py-8 text-xs text-subtle">
+                暂无配套资料
               </div>
-            ))}
+            )}
           </div>
         );
       case "history":

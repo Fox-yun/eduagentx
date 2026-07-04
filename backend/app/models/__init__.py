@@ -12,6 +12,7 @@ from app.models.path import (
     LearningPathVersion,
     LearningStage,
 )
+from app.models.profile import ProfileConversationMessage, ProfileConversationSession, StudentProfile
 from app.models.progress import LearningProgress, MasterySnapshot, Recommendation
 from app.models.task import BackgroundTask, TaskEvent
 from app.models.unit import (
@@ -74,4 +75,8 @@ __all__ = [
     "ClarificationQuestion",
     "ClarificationAnswer",
     "StudentProfileEvidence",
+    # Profile (Phase 3.6)
+    "StudentProfile",
+    "ProfileConversationSession",
+    "ProfileConversationMessage",
 ]

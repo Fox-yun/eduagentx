@@ -1,12 +1,12 @@
 import React from "react";
 import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
-import { BookOpen, Award, CheckSquare, ChevronRight } from "lucide-react";
-import { MockRecommendation } from "./types";
+import { BookOpen, Award, CheckSquare, ChevronRight, PlayCircle } from "lucide-react";
+import { RecommendationModel } from "./types";
 import { useWorkspaceStore } from "../../stores/workspace";
 
 interface RecommendationCardProps {
-  recommendation: MockRecommendation;
+  recommendation: RecommendationModel;
 }
 
 export function RecommendationCard({ recommendation }: RecommendationCardProps) {
@@ -33,6 +33,10 @@ export function RecommendationCard({ recommendation }: RecommendationCardProps) 
     icon = <Award className="h-4 w-4" />;
     badgeText = "资料";
     badgeClass = "bg-accent-soft text-accent";
+  } else if (type === "continue") {
+    icon = <PlayCircle className="h-4 w-4" />;
+    badgeText = "继续";
+    badgeClass = "bg-success/15 text-success";
   }
 
   const handleCardClick = () => {

@@ -10,6 +10,9 @@ export const appRoutes = {
   learningPath: (pathId: string) => `/learning-paths/${pathId}`,
   learningUnit: (pathId: string, nodeId: string) => `/learning-paths/${pathId}/nodes/${nodeId}`,
   assessment: (pathId: string, nodeId: string) => `/learning-paths/${pathId}/nodes/${nodeId}/assessment`,
+  profileConversation: () => "/profile/conversation",
+  profileConversationSession: (sessionId: string) => `/profile/conversation/${sessionId}`,
+  profileSummary: () => "/profile",
 };
 
 export const routes = {

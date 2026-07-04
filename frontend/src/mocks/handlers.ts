@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { db, MockGoal, MockPath, MockTask, MockDocument, mockNowIso, trackTimeout } from "./statefulDb";
+import { mockRecommendationDtos } from "./recommendations";
 
 import { z } from "zod";
 
@@ -920,7 +921,7 @@ export const handlers = [
 
       return HttpResponse.json({
         score: 100,
-        passed: true,
+        assessment_passed: true,
         feedback: "非常好！您已完全掌握该节点的核心内容，后继学习章节已成功解锁。",
         mastery_delta: 25,
       });
@@ -1031,5 +1032,10 @@ export const handlers = [
       }
     ];
     return HttpResponse.json(results);
+  }),
+
+  // 18. Recommendations
+  http.get("/api/learning-paths/:pathId/recommendations", () => {
+    return HttpResponse.json({ items: mockRecommendationDtos });
   }),
 ];

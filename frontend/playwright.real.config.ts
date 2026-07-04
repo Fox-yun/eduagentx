@@ -56,6 +56,22 @@ export default defineConfig({
         baseURL: "http://127.0.0.1:5175",
       },
     },
+    {
+      name: "real-backend-assessment",
+      testMatch: [/assessment-real\.spec\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: "http://127.0.0.1:5175",
+      },
+    },
+    {
+      name: "real-backend-learning-full",
+      testMatch: [/learning-full-real\.spec\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: "http://127.0.0.1:5175",
+      },
+    },
   ],
   webServer: [
     {

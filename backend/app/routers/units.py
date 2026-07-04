@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,10 @@ router = APIRouter()
 
 
 class SubmitAssessmentRequest(BaseModel):
-    answers: dict[str, str | list[str]]
+    model_config = ConfigDict(extra="forbid")
+
+    answers: dict[str, str | list[str] | bool]
+    client_request_id: str | None = None
 
 
 class RegenerateContentRequest(BaseModel):
@@ -110,12 +113,76 @@ async def create_assessment(
 ) -> dict[str, Any]:
     """Create an assessment for a learning node.
 
+    Uses async background generation via learning_assessment_generation worker.
+    Returns generating status and active_task_id for SSE progress tracking.
+    Idempotent: returns existing if ready, or existing task_id if generating.
+
     Purpose defaults to 'formal' (scored, updates mastery). Use
-    `purpose=quiz_bank` for un-scored practice question sets.
+    `purpose=quiz_bank` for practice question sets.
     """
     await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
     return await service.create_assessment(path_id, node_id, user.id, purpose=purpose)
+
+
+@router.get("/{path_id}/nodes/{node_id}/assessments/{assessment_id}")
+async def get_assessment(
+    path_id: str,
+    node_id: str,
+    assessment_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get assessment status and questions (if ready).
+
+    Returns the current state of an assessment. When status is "ready",
+    includes the full question list (without answers). Use this endpoint
+    to poll for async generation completion.
+    """
+    await require_node_access(db, user.id, path_id, node_id)
+
+    # Resolve active version for validation
+    from app.models.path import LearningPath
+
+    path_result = await db.execute(select(LearningPath).where(LearningPath.id == path_id))
+    path = path_result.scalar_one_or_none()
+    active_version_id = path.active_version_id if path else None
+
+    result = await db.execute(
+        select(Assessment).where(
+            Assessment.id == assessment_id,
+            Assessment.user_id == user.id,
+            Assessment.path_id == path_id,
+            Assessment.node_id == node_id,
+            Assessment.path_version_id == active_version_id,
+        )
+    )
+    assessment = result.scalar_one_or_none()
+    if not assessment:
+        raise ApiError(code="ASSESSMENT_NOT_FOUND", message="Assessment not found", status_code=404)
+
+    if assessment.status == "ready":
+        q_result = await db.execute(
+            select(AssessmentQuestion)
+            .where(AssessmentQuestion.assessment_id == assessment.id)
+            .order_by(AssessmentQuestion.question_order)
+        )
+        questions = [_safe_question_dto(q) for q in q_result.scalars().all()]
+        return {
+            "assessment_id": assessment.id,
+            "purpose": assessment.purpose,
+            "status": "ready",
+            "active_task_id": None,
+            "questions": questions,
+        }
+
+    return {
+        "assessment_id": assessment.id,
+        "purpose": assessment.purpose,
+        "status": assessment.status,
+        "active_task_id": assessment.active_task_id,
+        "questions": [],
+    }
 
 
 @router.post("/{path_id}/nodes/{node_id}/practice")
@@ -125,10 +192,15 @@ async def create_practice(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Create a practice question set (repeatable, not scored)."""
+    """Create a practice question set (repeatable, not scored).
+
+    Delegates to the async assessment generation pipeline with
+    purpose=practice, ensuring consistent architecture with formal
+    assessments and quiz banks.
+    """
     await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
-    return await service.create_practice(path_id, node_id, user.id)
+    return await service.create_assessment(path_id, node_id, user.id, purpose="practice")
 
 
 @router.get("/{path_id}/nodes/{node_id}/mind-map")
@@ -171,12 +243,20 @@ async def get_quiz_bank(
     """Get existing quiz bank for a node, if ready."""
     await require_node_access(db, user.id, path_id, node_id)
 
+    # Resolve active version for filtering
+    from app.models.path import LearningPath
+
+    path_result = await db.execute(select(LearningPath).where(LearningPath.id == path_id))
+    path = path_result.scalar_one_or_none()
+    active_version_id = path.active_version_id if path else None
+
     result = await db.execute(
         select(Assessment).where(
             Assessment.path_id == path_id,
             Assessment.node_id == node_id,
             Assessment.user_id == user.id,
             Assessment.purpose == "quiz_bank",
+            Assessment.path_version_id == active_version_id,
         )
     )
     assessment = result.scalar_one_or_none()
@@ -211,7 +291,9 @@ async def submit_assessment(
 ) -> dict[str, Any]:
     """Submit an assessment attempt."""
     service = UnitService(db)
-    return await service.submit_assessment(assessment_id, user.id, body.answers)
+    return await service.submit_assessment(
+        assessment_id, user.id, body.answers, client_request_id=body.client_request_id
+    )
 
 
 @router.get("/{path_id}/nodes/{node_id}/attempts/{attempt_id}")
@@ -222,7 +304,11 @@ async def get_attempt_result(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Get the result of a completed assessment attempt."""
+    """Get the result of a completed assessment attempt.
+
+    Validates that the attempt belongs to an assessment for the given
+    path_id and node_id, preventing cross-path access.
+    """
     result = await db.execute(
         select(AssessmentAttempt).where(
             AssessmentAttempt.id == attempt_id,
@@ -232,6 +318,20 @@ async def get_attempt_result(
     attempt = result.scalar_one_or_none()
     if not attempt:
         raise ApiError(code="ATTEMPT_NOT_FOUND", message="Attempt not found", status_code=404)
+
+    # Validate attempt belongs to assessment for this path/node
+    assess_result = await db.execute(
+        select(Assessment).where(
+            Assessment.id == attempt.assessment_id,
+        )
+    )
+    assessment = assess_result.scalar_one_or_none()
+    if not assessment or assessment.path_id != path_id or assessment.node_id != node_id:
+        raise ApiError(
+            code="ATTEMPT_PATH_MISMATCH",
+            message="Attempt does not belong to the specified path/node",
+            status_code=404,
+        )
 
     prog = await db.execute(
         select(LearningProgress).where(
@@ -252,4 +352,5 @@ async def get_attempt_result(
         "node_completed": getattr(attempt, "node_completed", None),
         "mastery_updated": attempt.progress_applied_at is not None,
         "progress_status": progress.status if progress else None,
+        "unlocked_node_ids": attempt.unlocked_node_ids or [],
     }

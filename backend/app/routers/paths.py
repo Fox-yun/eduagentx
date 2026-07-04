@@ -159,3 +159,24 @@ async def create_revision_request(
         "active_task_id": task.id if task else None,
         "revision_request_id": revision_req.id,
     }
+
+
+@router.get("/{path_id}/recommendations")
+async def get_recommendations(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get rule-based learning recommendations for a path.
+
+    Generates recommendations based on:
+      - Review: nodes with mastery < 60% or failed assessments
+      - Practice: available nodes not yet completed
+      - Continue: earliest available node
+      - Resource: knowledge base search hits matching node titles
+    """
+    from app.services.recommendations import RecommendationService
+
+    service = RecommendationService(db)
+    items = await service.get_recommendations(path_id, user.id)
+    return {"items": items}

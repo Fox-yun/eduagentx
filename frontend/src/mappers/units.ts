@@ -146,12 +146,9 @@ function mapLecture(lectureData: any): LectureModel | null {
 export function mapAssessment(dto: AssessmentDto): AssessmentModel {
   return {
     assessmentId: dto.assessment_id,
-    pathId: dto.path_id,
-    pathVersion: dto.path_version,
-    nodeId: dto.node_id,
     status: dto.status,
     questions: dto.questions.map((q) => {
-      const base: { id: string; type: typeof q.type; text: string; options?: {value: string; label: string}[]; language?: string; codeSnippet?: string } = {
+      const base: { id: string; type: typeof q.type; text: string; options?: {value: string; label: string}[] } = {
         id: q.question_id,
         type: q.type,
         text: q.prompt,
@@ -159,11 +156,6 @@ export function mapAssessment(dto: AssessmentDto): AssessmentModel {
 
       if (q.type === "single_choice" || q.type === "multiple_choice") {
         base.options = q.options.map((o) => typeof o === "string" ? {value: o, label: o} : {value: o.value, label: o.label});
-      }
-
-      if (q.type === "code_text") {
-        base.language = q.language;
-        base.codeSnippet = q.code_snippet;
       }
 
       return base;
@@ -175,6 +167,32 @@ export function mapAssessment(dto: AssessmentDto): AssessmentModel {
     weakConcepts: dto.weak_concepts || [],
     explanations: dto.explanations || {},
     recommendedActions: dto.recommended_actions || [],
+    activeTaskId: dto.active_task_id || null,
+  };
+}
+
+export function mapAssessmentGenerationResult(dto: any): AssessmentModel {
+  return {
+    assessmentId: dto.assessment_id,
+    status: dto.status,
+    questions: (dto.questions || []).map((q: any) => ({
+      id: q.question_id,
+      type: q.type,
+      text: q.prompt,
+      options: q.options
+        ? q.options.map((o: any) =>
+            typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.label }
+          )
+        : undefined,
+    })),
+    savedAnswers: {},
+    score: null,
+    mastery: null,
+    passed: null,
+    weakConcepts: [],
+    explanations: {},
+    recommendedActions: [],
+    activeTaskId: dto.active_task_id || null,
   };
 }
 
@@ -185,7 +203,7 @@ export function mapAssessmentSubmitResponse(
     attemptId: dto.attempt_id,
     status: dto.status,
     score: dto.score,
-    passed: dto.passed,
+    passed: dto.assessment_passed,
     gradingQuality: dto.grading_quality,
     activeTaskId: dto.active_task_id || null,
     feedback: dto.feedback || null,

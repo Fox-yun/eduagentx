@@ -8,6 +8,7 @@ import {
   generateQuizBank,
   getQuizBank,
   getAttemptResult,
+  getAssessment,
 } from "../../api/units";
 import type { AssessmentSubmitResultModel, QuizBankResult } from "../../api/units";
 import { useTaskStream } from "../../api/taskStream";
@@ -50,13 +51,21 @@ export function AssessmentPage() {
   const queryClient = useQueryClient();
 
   // State
-  const [phase, setPhase] = useState<PagePhase>("quiz_bank_missing");
+  const [phase, setPhase] = useState<PagePhase>(() => {
+    // URL recovery: if attempt_id is present, start in grading phase
+    if (searchParams.get("attempt_id")) return "grading";
+    if (searchParams.get("assessment_id")) return "formal_assessment_creating";
+    return "quiz_bank_missing";
+  });
   const [quizBank, setQuizBank] = useState<QuizBankResult | null>(null);
-  const [formalAssessmentId, setFormalAssessmentId] = useState<string | null>(null);
+  const [formalAssessmentId, setFormalAssessmentId] = useState<string | null>(
+    searchParams.get("assessment_id") || null
+  );
   const [formalQuestions, setFormalQuestions] = useState<QuizBankQuestion[]>([]);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, string | string[] | null>>({});
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string | string[] | boolean | null>>({});
   const [assessmentResult, setAssessmentResult] = useState<AssessmentSubmitResultModel | null>(null);
   const [localActiveTaskId, setLocalActiveTaskId] = useState<string | null>(null);
+  const [formalTaskId, setFormalTaskId] = useState<string | null>(null);
 
   // Path data
   const { data: pathData } = useQuery({
@@ -90,6 +99,9 @@ export function AssessmentPage() {
   const qbTaskId = qbData?.activeTaskId || localActiveTaskId;
   const { status: qbTaskStatus } = useTaskStream(qbTaskId ?? null);
 
+  // Formal assessment generation SSE
+  const { status: formalTaskStatus } = useTaskStream(formalTaskId);
+
   // Auto-refresh quiz bank on task completion
   useEffect(() => {
     if (qbTaskStatus === "completed") {
@@ -98,7 +110,41 @@ export function AssessmentPage() {
     }
   }, [qbTaskStatus, refetchQuizBank]);
 
-  // ----- Formal assessment polling (for short-answer grading) -----
+  // Auto-fetch formal assessment questions when generation completes
+  useEffect(() => {
+    if (formalTaskStatus === "completed" && formalAssessmentId && pathId && nodeId) {
+      setFormalTaskId(null);
+      getAssessment(pathId, nodeId, formalAssessmentId)
+        .then((assessment) => {
+          const questions: QuizBankQuestion[] = (assessment.questions || []).map(
+            (q: any) => ({
+              questionId: q.id,
+              type: q.type,
+              text: q.text,
+              options: q.options || undefined,
+              difficulty: (q as any).difficulty || null,
+              knowledgePoint: (q as any).knowledgePoint || null,
+              maxScore: (q as any).maxScore || null,
+            })
+          );
+          setFormalQuestions(questions);
+          setQuizAnswers({});
+          setAssessmentResult(null);
+          setPhase("answering");
+        })
+        .catch(() => {
+          setFormalTaskId(formalAssessmentId);
+        });
+    }
+    // Handle failed formal assessment generation
+    if (formalTaskStatus === "failed" && formalAssessmentId) {
+      setFormalTaskId(null);
+      toast("正式评估生成失败，请重试", "error");
+      setPhase("quiz_bank_ready");
+    }
+  }, [formalTaskStatus, formalAssessmentId, pathId, nodeId, toast]);
+
+  // ----- Formal assessment polling (for short-answer grading / recovery) -----
   const gradingAttemptId = searchParams.get("attempt_id");
   const [pollAttemptId, setPollAttemptId] = useState<string | null>(
     gradingAttemptId || null
@@ -108,8 +154,13 @@ export function AssessmentPage() {
     queryKey: ["attempt-result", pathId, nodeId, pollAttemptId],
     queryFn: ({ signal }) =>
       getAttemptResult(pathId!, nodeId!, pollAttemptId!, signal),
-    enabled: !!pathId && !!nodeId && !!pollAttemptId && phase === "grading",
-    refetchInterval: phase === "grading" ? 2000 : false,
+    enabled: !!pathId && !!nodeId && !!pollAttemptId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      // Stop polling once completed (for completed state, still refetch slowly for recovery)
+      if (data?.status === "completed") return false;
+      return 2000;
+    },
   });
 
   useEffect(() => {
@@ -125,7 +176,7 @@ export function AssessmentPage() {
         masteryBefore: polledResult.mastery_before,
         masteryAfter: polledResult.mastery_after,
         nodeCompleted: polledResult.node_completed,
-        unlockedNodeIds: [],
+        unlockedNodeIds: (polledResult as any).unlocked_node_ids || [],
       };
       setAssessmentResult(res);
       setPhase("result");
@@ -133,9 +184,56 @@ export function AssessmentPage() {
     }
   }, [polledResult, phase, _invalidateQueries, pathId]);
 
+  // ----- Init: derive phase from quiz-bank data, or recover from URL params -----
+  // Recover from assessment_id URL param on initial load
+  useEffect(() => {
+    if (!pathId || !nodeId || !formalAssessmentId || phase !== "formal_assessment_creating") return;
+    // Only run this once on mount for recovery, not for fresh creation flow
+    if (formalTaskId) return; // already has a task tracking active
+
+    getAssessment(pathId, nodeId, formalAssessmentId)
+      .then((assessment) => {
+        if (assessment.status === "ready") {
+          const questions: QuizBankQuestion[] = (assessment.questions || []).map(
+            (q: any) => ({
+              questionId: q.id,
+              type: q.type,
+              text: q.text,
+              options: q.options || undefined,
+            })
+          );
+          setFormalQuestions(questions);
+          setQuizAnswers({});
+          setAssessmentResult(null);
+          setPhase("answering");
+        } else if (assessment.status === "generating" || assessment.status === "pending") {
+          setFormalTaskId(assessment.activeTaskId || null);
+        } else if (assessment.status === "failed") {
+          toast("评估生成失败，请重新开始", "error");
+          setFormalAssessmentId(null);
+          setPhase("quiz_bank_ready");
+        }
+      })
+      .catch(() => {
+        // Assessment not found or error — reset to quiz bank
+        setFormalAssessmentId(null);
+        setPhase("quiz_bank_missing");
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount
+
+  // Recover from attempt_id URL param: check if already completed
+  useEffect(() => {
+    if (!pollAttemptId || !pathId || !nodeId) return;
+    if (phase !== "grading") return;
+    // If polledResult is already completed, the other useEffect will handle it
+  }, [pollAttemptId, pathId, nodeId, phase]);
+
   // ----- Init: derive phase from quiz-bank data -----
   useEffect(() => {
     if (!qbData) return;
+    // Don't override recovery from URL params
+    if (gradingAttemptId || searchParams.get("assessment_id")) return;
     if (qbData.status === "not_generated" || !qbData.assessmentId) {
       setPhase("quiz_bank_missing");
     } else if (qbData.status === "generating" || qbData.status === "pending") {
@@ -144,8 +242,11 @@ export function AssessmentPage() {
     } else if (qbData.status === "ready") {
       setPhase("quiz_bank_ready");
       setQuizBank(qbData);
+    } else if (qbData.status === "failed") {
+      setPhase("quiz_bank_missing");
+      toast("题库生成失败，请重试", "error");
     }
-  }, [qbData]);
+  }, [qbData, gradingAttemptId, searchParams, toast]);
 
   // ----- Generate quiz bank -----
   const { mutate: doGenerateQuizBank, isPending: isGenQb } = useMutation({
@@ -157,34 +258,38 @@ export function AssessmentPage() {
     onError: (err) => toast(getErrorMessage(err, "生成题库失败"), "error"),
   });
 
-  // ----- Create formal assessment -----
+  // ----- Create formal assessment (async via background worker) -----
   const { mutate: doCreateFormal, isPending: isCreatingFormal } = useMutation({
     mutationFn: () => createAssessment(pathId!, nodeId!, "formal"),
-    onSuccess: (res: any) => {
-      setFormalAssessmentId(res.assessment_id);
-      const questions: QuizBankQuestion[] = (res.questions || []).map(
-        (q: any) => ({
-          questionId: q.question_id,
-          type: q.type,
-          text: q.prompt,
-          options: q.options || undefined,
-          difficulty: q.difficulty || null,
-          knowledgePoint: q.knowledge_point || null,
-          maxScore: q.max_score || null,
-        })
-      );
-      setFormalQuestions(questions);
-      setQuizAnswers({});
-      setAssessmentResult(null);
-      setPhase("answering");
+    onSuccess: (res) => {
+      setFormalAssessmentId(res.assessmentId);
+      if (res.status === "ready") {
+        // Already generated (idempotent return) — show questions immediately
+        const questions: QuizBankQuestion[] = (res.questions || []).map(
+          (q: any) => ({
+            questionId: q.id,
+            type: q.type,
+            text: q.text,
+            options: q.options || undefined,
+          })
+        );
+        setFormalQuestions(questions);
+        setQuizAnswers({});
+        setAssessmentResult(null);
+        setPhase("answering");
+      } else {
+        // Generating — track via SSE
+        setFormalTaskId(res.activeTaskId || null);
+        setPhase("formal_assessment_creating");
+      }
     },
     onError: (err) => toast(getErrorMessage(err, "创建正式评估失败"), "error"),
   });
 
   // ----- Submit assessment -----
   const { mutate: doSubmit, isPending: isSubmitting } = useMutation({
-    mutationFn: (answers: Record<string, string | string[] | null>) =>
-      submitAssessment(formalAssessmentId!, answers),
+    mutationFn: (answers: Record<string, string | string[] | boolean | null>) =>
+      submitAssessment(formalAssessmentId!, answers, crypto.randomUUID()),
     onSuccess: (res) => {
       if (res.status === "grading") {
         setPollAttemptId(res.attemptId);
@@ -204,7 +309,7 @@ export function AssessmentPage() {
   });
 
   // ----- Answer change handlers -----
-  const handleAnswerChange = (questionId: string, value: string) => {
+  const handleAnswerChange = (questionId: string, value: string | boolean) => {
     setQuizAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
   const handleCheckboxChange = (
@@ -343,14 +448,6 @@ export function AssessmentPage() {
                       </>
                     )}
                   </button>
-                  <button
-                    onClick={() => doGenerateQuizBank()}
-                    disabled={isGenQb}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-xs text-muted hover:text-ink transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    重新生成
-                  </button>
                 </div>
               </div>
 
@@ -387,6 +484,8 @@ export function AssessmentPage() {
                           ? "单选"
                           : q.type === "multiple_choice"
                           ? "多选"
+                          : q.type === "true_false"
+                          ? "判断"
                           : "简答"}
                       </span>
                     </div>
@@ -502,6 +601,35 @@ export function AssessmentPage() {
                           disabled={isSubmitting}
                           className="w-full px-3 py-2 bg-page border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y"
                         />
+                      </div>
+                    )}
+
+                    {q.type === "true_false" && (
+                      <div className="flex gap-3 pl-4">
+                        <button
+                          type="button"
+                          onClick={() => handleAnswerChange(q.questionId, true)}
+                          disabled={isSubmitting}
+                          className={`px-6 py-2 rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
+                            currentAns === true
+                              ? "border-success bg-success/10 text-success"
+                              : "border-border text-muted hover:border-success/50"
+                          }`}
+                        >
+                          正确
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAnswerChange(q.questionId, false)}
+                          disabled={isSubmitting}
+                          className={`px-6 py-2 rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
+                            currentAns === false
+                              ? "border-danger bg-danger/10 text-danger"
+                              : "border-border text-muted hover:border-danger/50"
+                          }`}
+                        >
+                          错误
+                        </button>
                       </div>
                     )}
                   </div>
@@ -669,6 +797,10 @@ export function AssessmentPage() {
                       onClick={() => {
                         setPhase("quiz_bank_ready");
                         setAssessmentResult(null);
+                        setFormalAssessmentId(null);
+                        setFormalQuestions([]);
+                        setQuizAnswers({});
+                        setPollAttemptId(null);
                       }}
                       className="px-6 py-3 border border-border text-muted hover:text-ink text-sm font-bold rounded-xl cursor-pointer transition-all"
                     >

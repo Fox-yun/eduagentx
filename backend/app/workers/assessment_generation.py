@@ -179,6 +179,9 @@ class AssessmentGenerationInput:
     diagnostic_weaknesses: tuple[str, ...]
     target_difficulty: str
     question_count: int
+    # Phase 3.6-D: Profile-driven personalisation fields
+    profile_context: str = ""
+    error_patterns: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +431,21 @@ async def _build_generation_context(
 
     question_count = _purpose_question_count(purpose)
 
+    # Phase 3.6-D: Load student profile for personalised assessment generation
+    profile_context = ""
+    error_patterns: list[str] = []
+    try:
+        from app.services.profile_merge import load_profile_context
+
+        profile, profile_context = await load_profile_context(db, user_id)
+        if profile and profile.dimensions:
+            ep = profile.dimensions.get("error_pattern", {})
+            ep_value = ep.get("value") if ep else None
+            if isinstance(ep_value, dict):
+                error_patterns = [k for k, v in ep_value.items() if v > 0.3][:5]
+    except Exception as e:
+        logger.warning("profile_load_failed_for_assessment", error=str(e))
+
     return AssessmentGenerationInput(
         assessment_id=assessment.id,
         purpose=purpose,
@@ -436,9 +454,11 @@ async def _build_generation_context(
         unit_summary=summary,
         key_terms=tuple(key_terms[:10]),
         common_mistakes=tuple(common_mistakes[:5]),
-        diagnostic_weaknesses=(),
+        diagnostic_weaknesses=tuple(error_patterns),
         target_difficulty=node_difficulty,
         question_count=question_count,
+        profile_context=profile_context,
+        error_patterns=tuple(error_patterns),
     )
 
 
@@ -498,6 +518,17 @@ def _build_user_prompt(ctx: AssessmentGenerationInput) -> str:
     terms_text = "、".join(ctx.key_terms) if ctx.key_terms else "（无关键词）"
     mistakes_text = "\n".join(f"- {m}" for m in ctx.common_mistakes) if ctx.common_mistakes else "（无常见错误记录）"
 
+    # Phase 3.6-D: Include error patterns from learner profile
+    error_text = (
+        "\n".join(f"- {e}" for e in ctx.error_patterns) if ctx.error_patterns else "（无已知薄弱点）"
+    )
+
+    profile_section = ""
+    if ctx.profile_context:
+        profile_section = f"\n
+{ctx.profile_context}
+请根据以上画像信息调整题目难度分布和考查重点，针对学习者的薄弱环节设计针对性题目。"
+
     return f"""请为以下学习节点生成{label}（{ctx.question_count} 道题）：
 
 ## 节点信息
@@ -516,6 +547,9 @@ def _build_user_prompt(ctx: AssessmentGenerationInput) -> str:
 
 ## 常见错误
 {mistakes_text}
+
+## 学习者薄弱点（请针对性出题）
+{error_text}{profile_section}
 
 请输出 JSON 格式：
 {{

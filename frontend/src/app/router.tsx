@@ -101,6 +101,8 @@ const KnowledgePage = lazy(() => import("../pages/KnowledgePage").then(m => ({ d
 const TasksPage = lazy(() => import("../pages/TasksPage").then(m => ({ default: m.TasksPage })));
 const ProfileSettingsPage = lazy(() => import("../pages/ProfileSettingsPage").then(m => ({ default: m.ProfileSettingsPage })));
 const SecuritySettingsPage = lazy(() => import("../pages/SecuritySettingsPage").then(m => ({ default: m.SecuritySettingsPage })));
+const ProfileConversationPage = lazy(() => import("../pages/ProfileConversationPage").then(m => ({ default: m.ProfileConversationPage })));
+const ProfileSummaryPage = lazy(() => import("../pages/ProfileSummaryPage").then(m => ({ default: m.ProfileSummaryPage })));
 const NotFoundPage = lazy(() => import("../pages/NotFoundPage").then(m => ({ default: m.NotFoundPage })));
 
 const AccountLockedPage = lazy(() => import("../pages/AccountLockedPage").then(m => ({ default: m.AccountLockedPage })));
@@ -149,6 +151,9 @@ export function AppRouter() {
                 <Route path="/onboarding" element={wrapLazy(OnboardingPage)} />
                 <Route path="/settings/profile" element={wrapLazy(ProfileSettingsPage)} />
                 <Route path="/settings/security" element={wrapLazy(SecuritySettingsPage)} />
+                <Route path="/profile" element={wrapLazy(ProfileSummaryPage)} />
+                <Route path="/profile/conversation" element={wrapLazy(ProfileConversationPage)} />
+                <Route path="/profile/conversation/:sessionId" element={wrapLazy(ProfileConversationPage)} />
 
                 {/* Core Onboarded Business Routes */}
                 <Route element={<OnboardingRoute />}>

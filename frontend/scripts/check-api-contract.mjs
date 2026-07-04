@@ -54,10 +54,10 @@ async function main() {
   const { TaskDtoSchema, TaskListDtoSchema } = await import("../src/schemas/tasks.ts");
   const { TaskEventDtoSchema } = await import("../src/schemas/taskEvents.ts");
   const { DiagnosticQuizDtoSchema } = await import("../src/schemas/diagnostic.ts");
-  const { UnitContentDtoSchema, AssessmentDtoSchema } = await import("../src/schemas/units.ts");
+  const { UnitContentDtoSchema, AssessmentDtoSchema, AssessmentGenerationResultSchema, AssessmentSubmitResponseSchema, AssessmentAttemptResultSchema, AssessmentAnswerValueSchema } = await import("../src/schemas/units.ts");
   const { KnowledgeDocumentDtoSchema, KnowledgeDocumentsResponseSchema } = await import("../src/schemas/knowledge.ts");
 
-  console.log("✅ Successfully imported all 14 target Zod schemas.");
+  console.log("✅ Successfully imported all target Zod schemas.");
 
   // 3. Validate nested error response structure (ApiErrorDtoSchema)
   logSection("3. Nested Error Response Shell validation");
@@ -337,6 +337,105 @@ async function main() {
     recommended_actions: [],
   };
   assertPass(AssessmentDtoSchema, validAssessment, "Valid Assessment payload");
+
+  // 13b. Test AssessmentGenerationResultSchema
+  logSection("13b. Assessment Generation Result Schema Validation");
+  const validGenResult = {
+    assessment_id: "assess-1",
+    purpose: "formal",
+    status: "generating",
+    active_task_id: "task-1",
+    questions: [],
+  };
+  assertPass(AssessmentGenerationResultSchema, validGenResult, "Valid Assessment Generation Result (generating)");
+  assertPass(AssessmentGenerationResultSchema, {
+    ...validGenResult,
+    status: "ready",
+    active_task_id: null,
+    questions: [
+      {
+        question_id: "q-1",
+        type: "single_choice",
+        prompt: "Choose one",
+        options: [{ value: "a", label: "A" }, { value: "b", label: "B" }],
+      },
+    ],
+  }, "Valid Assessment Generation Result (ready with questions)");
+  assertFail(AssessmentGenerationResultSchema, {
+    ...validGenResult,
+    status: "unknown-status",
+  }, "Fails with illegal generation status");
+
+  // 13c. Test AssessmentSubmitResponseSchema
+  logSection("13c. Assessment Submit Response Schema Validation");
+  const validSubmitResponse = {
+    attempt_id: "attempt-1",
+    status: "completed",
+    score: 85,
+    assessment_passed: true,
+    grading_quality: "final",
+    active_task_id: null,
+    mastery_before: 40,
+    mastery_after: 75,
+    node_completed: true,
+    unlocked_node_ids: ["node-2", "node-3"],
+  };
+  assertPass(AssessmentSubmitResponseSchema, validSubmitResponse, "Valid Submit Response (completed, final)");
+  assertPass(AssessmentSubmitResponseSchema, {
+    attempt_id: "attempt-2",
+    status: "grading",
+    score: null,
+    assessment_passed: null,
+    grading_quality: null,
+    active_task_id: "task-2",
+  }, "Valid Submit Response (grading status)");
+  assertFail(AssessmentSubmitResponseSchema, {
+    attempt_id: "attempt-3",
+    status: "invalid",
+    score: null,
+    assessment_passed: null,
+    grading_quality: null,
+    active_task_id: null,
+  }, "Fails with illegal submit status");
+
+  // 13d. Test AssessmentAttemptResultSchema
+  logSection("13d. Assessment Attempt Result Schema Validation");
+  const validAttemptResult = {
+    attempt_id: "attempt-1",
+    status: "completed",
+    grading_quality: "final",
+    score: 90,
+    assessment_passed: true,
+    mastery_before: 30,
+    mastery_after: 80,
+    node_completed: true,
+    mastery_updated: true,
+    progress_status: "completed",
+    unlocked_node_ids: ["node-2"],
+  };
+  assertPass(AssessmentAttemptResultSchema, validAttemptResult, "Valid Attempt Result (completed)");
+  assertPass(AssessmentAttemptResultSchema, {
+    attempt_id: "attempt-2",
+    status: "grading",
+    grading_quality: null,
+    score: null,
+    assessment_passed: null,
+    mastery_before: null,
+    mastery_after: null,
+    node_completed: null,
+    mastery_updated: false,
+    progress_status: null,
+  }, "Valid Attempt Result (grading)");
+
+  // 13e. Test AssessmentAnswerValueSchema (boolean for true_false)
+  logSection("13e. Assessment Answer Value Schema Validation");
+  assertPass(AssessmentAnswerValueSchema, "a", "String answer accepted");
+  assertPass(AssessmentAnswerValueSchema, ["a", "b"], "Array answer accepted");
+  assertPass(AssessmentAnswerValueSchema, true, "Boolean true accepted");
+  assertPass(AssessmentAnswerValueSchema, false, "Boolean false accepted");
+  assertPass(AssessmentAnswerValueSchema, null, "Null (unanswered) accepted");
+  assertFail(AssessmentAnswerValueSchema, 42, "Number rejected");
+  assertFail(AssessmentAnswerValueSchema, { key: "val" }, "Object rejected");
 
   // 14. Test KnowledgeDocumentDtoSchema
   logSection("14. Knowledge Document DTO Schema Validation");

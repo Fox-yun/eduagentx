@@ -37,7 +37,7 @@ async function createGoal(userId: string, csrfToken: string, accessToken: string
     headers: {
       "Content-Type": "application/json",
       "X-CSRF-Token": csrfToken,
-      Cookie: `access_token=${accessToken}`,
+      Cookie: `access_token=${accessToken}; csrftoken=${csrfToken}`,
     },
     body: JSON.stringify({
       raw_goal: "Learn Python programming for data science",
@@ -53,12 +53,22 @@ async function createGoal(userId: string, csrfToken: string, accessToken: string
 async function submitClarifications(
   goalId: string, csrfToken: string, accessToken: string
 ): Promise<void> {
+  // GET first to auto-create the clarification set
+  const getRes = await fetch(`${E2E_BASE}/api/learning-goals/${goalId}/clarifications`, {
+    headers: {
+      "X-CSRF-Token": csrfToken,
+      Cookie: `access_token=${accessToken}; csrftoken=${csrfToken}`,
+    },
+  });
+  if (!getRes.ok) throw new Error(`Get clarify failed: ${getRes.status} ${await getRes.text()}`);
+
+  // Now submit answers
   const res = await fetch(`${E2E_BASE}/api/learning-goals/${goalId}/clarifications`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-CSRF-Token": csrfToken,
-      Cookie: `access_token=${accessToken}`,
+      Cookie: `access_token=${accessToken}; csrftoken=${csrfToken}`,
     },
     body: JSON.stringify({ answers: { goal: "Data science with Python" } }),
   });

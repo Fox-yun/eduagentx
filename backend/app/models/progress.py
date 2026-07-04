@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -23,6 +23,14 @@ class LearningProgress(Base):
     """User's progress on a learning node."""
 
     __tablename__ = "learning_progress"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "path_id",
+            "node_id",
+            name="uq_learning_progress_user_path_node",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
@@ -42,6 +50,13 @@ class MasterySnapshot(Base):
     """Snapshot of mastery changes for audit trail."""
 
     __tablename__ = "mastery_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_type",
+            "source_id",
+            name="uq_mastery_snapshot_source",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)

@@ -292,6 +292,9 @@ async def finalize_assessment_attempt(
             version_id=path.active_version_id,
         )
 
+    # Persist unlocked_node_ids on attempt for result display
+    attempt.unlocked_node_ids = unlocked_node_ids
+
     # ------------------------------------------------------------------
     # 15. Record profile evidence (idempotent upsert)
     # ------------------------------------------------------------------
@@ -303,6 +306,23 @@ async def finalize_assessment_attempt(
         percentage=percentage,
         question_count=question_count,
     )
+
+    # ------------------------------------------------------------------
+    # 15b. Update StudentProfile via profile_merge (Phase 3.6-D)
+    # ------------------------------------------------------------------
+    try:
+        from app.services.profile_merge import apply_assessment_evidence
+
+        await apply_assessment_evidence(
+            db,
+            user_id=attempt.user_id,
+            attempt_id=attempt.id,
+            score=float(percentage),
+            passed=bool(assessment_passed),
+            node_title=assessment.node_id,
+        )
+    except Exception as e:
+        logger.warning("profile_merge_assessment_failed", error=str(e), attempt_id=attempt.id)
 
     # ------------------------------------------------------------------
     # 16. Mark progress as applied

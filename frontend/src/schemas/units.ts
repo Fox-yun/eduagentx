@@ -124,15 +124,13 @@ export const AssessmentQuestionSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     question_id: z.string(),
-    type: z.literal("short_answer"),
+    type: z.literal("true_false"),
     prompt: z.string(),
   }),
   z.object({
     question_id: z.string(),
-    type: z.literal("code_text"),
+    type: z.literal("short_answer"),
     prompt: z.string(),
-    language: z.string().optional().default("plaintext"),
-    code_snippet: z.string(),
   }),
 ]);
 
@@ -140,23 +138,23 @@ export type AssessmentQuestion = z.infer<typeof AssessmentQuestionSchema>;
 
 /**
  * Strict answer value schema — replaces z.any().
- * A single answer is either a string (single_choice, short_answer, code_text)
- * or an array of strings (multiple_choice), or null (unanswered).
+ * Supports string (single_choice, short_answer), string[] (multiple_choice),
+ * boolean (true_false), or null (unanswered).
  */
 export const AssessmentAnswerValueSchema = z.union([
   z.string(),
   z.array(z.string()),
+  z.boolean(),
   z.null(),
 ]);
 
 export const AssessmentDtoSchema = z.object({
   assessment_id: z.string(),
-  path_id: z.string(),
-  path_version: z.number().int().positive(),
-  node_id: z.string(),
-  status: z.enum(["pending", "submitted", "failed"]),
+  purpose: z.string().optional(),
+  status: z.enum(["pending", "generating", "ready", "submitted", "failed"]),
+  active_task_id: z.string().nullable().optional(),
   questions: z.array(AssessmentQuestionSchema),
-  saved_answers: z.record(z.string(), AssessmentAnswerValueSchema),
+  saved_answers: z.record(z.string(), AssessmentAnswerValueSchema).optional(),
   score: z.number().min(0).max(100).nullable(),
   mastery: z.number().min(0).max(100).nullable(),
   passed: z.boolean().nullable(),
@@ -174,40 +172,50 @@ export interface AssessmentQuestionOption {
 
 export interface AssessmentQuestionModel {
   id: string;
-  type: "single_choice" | "multiple_choice" | "short_answer" | "code_text";
+  type: "single_choice" | "multiple_choice" | "true_false" | "short_answer";
   text: string;
   options?: AssessmentQuestionOption[];
-  language?: string;
-  codeSnippet?: string;
 }
 
 export interface AssessmentModel {
   assessmentId: string;
-  pathId: string;
-  pathVersion: number;
-  nodeId: string;
-  status: "pending" | "submitted" | "failed";
+  status: "pending" | "generating" | "ready" | "submitted" | "failed";
   questions: AssessmentQuestionModel[];
-  savedAnswers: Record<string, string | string[] | null>;
+  savedAnswers: Record<string, string | string[] | boolean | null>;
   score: number | null;
   mastery: number | null;
   passed: boolean | null;
   weakConcepts: string[];
   explanations: Record<string, string>;
   recommendedActions: string[];
+  activeTaskId?: string | null;
 }
+
+/**
+ * Schema for async assessment creation response (D0-A).
+ * When status is "generating", use activeTaskId for SSE progress tracking.
+ */
+export const AssessmentGenerationResultSchema = z.object({
+  assessment_id: z.string(),
+  purpose: z.string().optional(),
+  status: z.enum(["generating", "ready", "pending", "failed"]),
+  active_task_id: z.string().nullable().optional(),
+  questions: z.array(AssessmentQuestionSchema),
+});
 
 export const AssessmentSubmitResponseSchema = z.object({
   attempt_id: z.string(),
   status: z.enum(["completed", "grading", "submitted", "failed"]),
   score: z.number().nullable(),
-  passed: z.boolean().nullable(),
+  assessment_passed: z.boolean().nullable(),
   grading_quality: z.enum(["final", "provisional"]).nullable(),
   active_task_id: z.string().nullable(),
   feedback: z.string().optional().nullable(),
   mastery_before: z.number().optional().nullable(),
   mastery_after: z.number().optional().nullable(),
   node_completed: z.boolean().optional().nullable(),
+  mastery_updated: z.boolean().optional(),
+  progress_status: z.string().optional().nullable(),
   unlocked_node_ids: z.array(z.string()).optional(),
 });
 
@@ -241,6 +249,7 @@ export const AssessmentAttemptResultSchema = z.object({
   node_completed: z.boolean().nullable(),
   mastery_updated: z.boolean(),
   progress_status: z.string().nullable(),
+  unlocked_node_ids: z.array(z.string()).optional(),
 });
 
 // Practice question set (repeatable, not scored)

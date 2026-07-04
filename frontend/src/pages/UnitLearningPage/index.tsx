@@ -32,6 +32,7 @@ import {
   RefreshCw,
   MessageCircle,
   Send,
+  BookOpen,
 } from "lucide-react";
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -680,6 +681,21 @@ export function UnitLearningPage() {
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p> }}>
                         {msg.content}
                       </ReactMarkdown>
+                      {msg.citations && msg.citations.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-border/40 flex flex-wrap gap-1.5">
+                          {msg.citations.map((cit) => (
+                            <span
+                              key={cit.chunk_id}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/8 text-[10px] text-primary font-medium"
+                              title={cit.section_title || undefined}
+                            >
+                              <BookOpen className="h-2.5 w-2.5 shrink-0" />
+                              <span className="truncate max-w-[120px]">{cit.file_name}</span>
+                              {cit.page_number != null && <span className="opacity-70">p.{cit.page_number}</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

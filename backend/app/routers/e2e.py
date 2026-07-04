@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.datetime import utc_now
@@ -390,3 +391,335 @@ async def bootstrap_path_version(
         "version_id": version_id,
         "goal_id": goal_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# Assessment E2E helpers
+# ---------------------------------------------------------------------------
+
+
+@router.post("/bootstrap-assessment")
+async def bootstrap_assessment(
+    request: Request,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a path + ready objective-only assessment for E2E tests.
+
+    Creates: LearningGoal → LearningPath → LearningPathVersion (active)
+             → LearningStage (1) → LearningNode (3) → LearningEdge (2)
+             → Assessment (ready) → AssessmentQuestion (5, objective only)
+
+    Returns: { path_id, version_id, node_ids, assessment_id, correct_answers }
+    """
+    import json
+
+    from app.models.unit import Assessment, AssessmentQuestion
+
+    user_id = request.headers.get("X-E2E-User-Id", "")
+    if not user_id:
+        raise ApiError(code="BAD_REQUEST", message="X-E2E-User-Id required", status_code=400)
+
+    now = utc_now()
+    goal_id = str(uuid.uuid4())
+    path_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+
+    # LearningGoal
+    goal = LearningGoal(
+        id=goal_id,
+        user_id=user_id,
+        title="E2E Assessment Test Goal",
+        raw_description="Test learning goal for assessment E2E",
+        use_diagnostic=False,
+    )
+    db.add(goal)
+
+    # LearningPath
+    path = LearningPath(
+        id=path_id,
+        user_id=user_id,
+        goal_id=goal_id,
+        status="active",
+    )
+    db.add(path)
+    await db.flush()
+
+    # LearningPathVersion (active)
+    version = LearningPathVersion(
+        id=version_id,
+        path_id=path_id,
+        version_number=1,
+        source="initial_generation",
+        status="active",
+        summary="E2E test path for assessment",
+        estimated_total_minutes=90,
+        created_by="system",
+        activated_at=now,
+    )
+    db.add(version)
+    await db.flush()
+
+    path.active_version_id = version_id
+
+    # LearningStage (1 stage)
+    stage_id = str(uuid.uuid4())
+    stage = LearningStage(
+        id=stage_id,
+        version_id=version_id,
+        title="核心概念",
+        description="Core concepts",
+        stage_order=1,
+    )
+    db.add(stage)
+    await db.flush()
+
+    # LearningNode (3 nodes: A → B → C)
+    node_a_id = str(uuid.uuid4())
+    node_b_id = str(uuid.uuid4())
+    node_c_id = str(uuid.uuid4())
+
+    nodes = [
+        LearningNode(
+            id=node_a_id,
+            version_id=version_id,
+            stage_id=stage_id,
+            logical_key="e2e-assess-node-a",
+            title="评估节点A",
+            description="E2E assessment node A",
+            node_order=1,
+            level=1,
+            difficulty="beginner",
+            estimated_minutes=30,
+            status="unlocked",
+            content_status="not_generated",
+        ),
+        LearningNode(
+            id=node_b_id,
+            version_id=version_id,
+            stage_id=stage_id,
+            logical_key="e2e-assess-node-b",
+            title="评估节点B",
+            description="E2E assessment node B",
+            node_order=2,
+            level=1,
+            difficulty="intermediate",
+            estimated_minutes=30,
+            status="locked",
+            content_status="not_generated",
+        ),
+        LearningNode(
+            id=node_c_id,
+            version_id=version_id,
+            stage_id=stage_id,
+            logical_key="e2e-assess-node-c",
+            title="评估节点C",
+            description="E2E assessment node C",
+            node_order=3,
+            level=2,
+            difficulty="intermediate",
+            estimated_minutes=30,
+            status="locked",
+            content_status="not_generated",
+        ),
+    ]
+    for n in nodes:
+        db.add(n)
+    await db.flush()
+
+    # LearningEdge: A → B, B → C
+    edges = [
+        LearningEdge(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            source_node_id=node_a_id,
+            target_node_id=node_b_id,
+        ),
+        LearningEdge(
+            id=str(uuid.uuid4()),
+            version_id=version_id,
+            source_node_id=node_b_id,
+            target_node_id=node_c_id,
+        ),
+    ]
+    for e in edges:
+        db.add(e)
+
+    # Create ready Assessment with only objective questions
+    assessment_id = str(uuid.uuid4())
+    assessment = Assessment(
+        id=assessment_id,
+        user_id=user_id,
+        path_id=path_id,
+        path_version_id=version_id,
+        node_id=node_a_id,
+        purpose="formal",
+        status="ready",
+    )
+    db.add(assessment)
+    await db.flush()
+
+    # 5 objective questions with known correct answers
+    # Q1: single_choice (correct: "a", max_score: 1)
+    # Q2: single_choice (correct: "b", max_score: 1)
+    # Q3: multiple_choice (correct: ["a", "b"], max_score: 2)
+    # Q4: true_false (correct: false, max_score: 1)
+    # Q5: single_choice (correct: "c", max_score: 1)
+    # Total: 6 points
+
+    questions_data: list[dict[str, Any]] = [
+        {
+            "type": "single_choice",
+            "prompt": "E2E测试：以下哪个是正确的基本概念描述？",
+            "options": json.dumps(
+                [
+                    {"value": "a", "label": "正确的概念描述"},
+                    {"value": "b", "label": "错误的概念描述"},
+                    {"value": "c", "label": "不相关的描述"},
+                    {"value": "d", "label": "完全错误的描述"},
+                ]
+            ),
+            "correct_answer": json.dumps("a"),
+            "max_score": 1.0,
+        },
+        {
+            "type": "single_choice",
+            "prompt": "E2E测试：以下哪个选项最准确？",
+            "options": json.dumps(
+                [
+                    {"value": "a", "label": "不准确的选项"},
+                    {"value": "b", "label": "最准确的选项"},
+                    {"value": "c", "label": "部分正确的选项"},
+                    {"value": "d", "label": "完全错误的选项"},
+                ]
+            ),
+            "correct_answer": json.dumps("b"),
+            "max_score": 1.0,
+        },
+        {
+            "type": "multiple_choice",
+            "prompt": "E2E测试：以下哪些是正确的？（多选）",
+            "options": json.dumps(
+                [
+                    {"value": "a", "label": "正确的选项A"},
+                    {"value": "b", "label": "正确的选项B"},
+                    {"value": "c", "label": "错误的选项C"},
+                    {"value": "d", "label": "错误的选项D"},
+                ]
+            ),
+            "correct_answer": json.dumps(["a", "b"]),
+            "max_score": 2.0,
+        },
+        {
+            "type": "true_false",
+            "prompt": "E2E测试：理论与实践相结合是高效的学习方式。",
+            "options": None,
+            "correct_answer": json.dumps(False),
+            "max_score": 1.0,
+        },
+        {
+            "type": "single_choice",
+            "prompt": "E2E测试：遇到问题时应采取什么策略？",
+            "options": json.dumps(
+                [
+                    {"value": "a", "label": "直接重写所有代码"},
+                    {"value": "b", "label": "忽略错误信息"},
+                    {"value": "c", "label": "系统性排查并定位问题"},
+                    {"value": "d", "label": "等待他人帮助"},
+                ]
+            ),
+            "correct_answer": json.dumps("c"),
+            "max_score": 1.0,
+        },
+    ]
+
+    correct_answers: dict[str, Any] = {}
+    for idx, q_data in enumerate(questions_data):
+        q_id = str(uuid.uuid4())
+        aq = AssessmentQuestion(
+            id=q_id,
+            assessment_id=assessment_id,
+            question_type=q_data["type"],
+            prompt=q_data["prompt"],
+            options=q_data["options"],
+            correct_answer=q_data["correct_answer"],
+            difficulty="easy" if idx < 2 else "medium",
+            knowledge_point=f"E2E测试知识点{idx + 1}",
+            explanation=f"E2E测试题目{idx + 1}的解析",
+            points=int(q_data["max_score"]),
+            max_score=q_data["max_score"],
+            question_order=idx + 1,
+        )
+        db.add(aq)
+
+        # Build correct_answers for the response
+        parsed = json.loads(q_data["correct_answer"])
+        if q_data["type"] == "true_false":
+            correct_answers[q_id] = bool(parsed)
+        elif q_data["type"] == "multiple_choice":
+            correct_answers[q_id] = list(parsed)
+        else:
+            correct_answers[q_id] = str(parsed)
+
+    await db.commit()
+
+    return {
+        "path_id": path_id,
+        "version_id": version_id,
+        "node_ids": [node_a_id, node_b_id, node_c_id],
+        "assessment_id": assessment_id,
+        "correct_answers": correct_answers,
+    }
+
+
+@router.get("/assessment-answers/{assessment_id}")
+async def get_assessment_answers(
+    assessment_id: str,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Return correct answers for an assessment (E2E test only).
+
+    Parses the stored correct_answer JSON strings into native types:
+    - single_choice → str
+    - multiple_choice → list[str]
+    - true_false → bool
+    - short_answer → None (no deterministic correct answer)
+    """
+    import json
+
+    from app.models.unit import AssessmentQuestion
+
+    result = await db.execute(
+        select(AssessmentQuestion)
+        .where(AssessmentQuestion.assessment_id == assessment_id)
+        .order_by(AssessmentQuestion.question_order)
+    )
+    questions = list(result.scalars().all())
+
+    if not questions:
+        raise ApiError(code="NOT_FOUND", message="Assessment has no questions", status_code=404)
+
+    answers: dict[str, Any] = {}
+    for q in questions:
+        if q.question_type == "short_answer":
+            answers[q.id] = None
+            continue
+        if not q.correct_answer:
+            answers[q.id] = None
+            continue
+        try:
+            parsed = json.loads(q.correct_answer)
+        except (json.JSONDecodeError, TypeError):
+            answers[q.id] = q.correct_answer
+            continue
+        if q.question_type == "true_false":
+            answers[q.id] = bool(parsed)
+        elif q.question_type == "multiple_choice":
+            answers[q.id] = list(parsed) if isinstance(parsed, list) else [str(parsed)]
+        else:
+            answers[q.id] = str(parsed)
+
+    return {"assessment_id": assessment_id, "correct_answers": answers}

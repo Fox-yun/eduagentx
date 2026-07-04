@@ -1,6 +1,7 @@
 import React from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
+import { Routes, Route } from "react-router-dom";
 import { RecommendationPanel } from "../features/recommendations/RecommendationPanel";
 import { useWorkspaceStore } from "../stores/workspace";
 import { mockRecommendations } from "../mocks/recommendations";
@@ -37,20 +38,22 @@ describe("RecommendationPanel Component", () => {
     expect(screen.getByText("已通关节点历史")).toBeInTheDocument();
   });
 
-  it("should mark recommendation read and update URL node selection on card click", () => {
+  it("should mark recommendation read and update URL node selection on card click", async () => {
     let currentPath = "";
     
     // Custom wrapper to capture search parameter shifts
     renderWithProviders(
       <>
-        <RecommendationPanel />
+        <Routes>
+          <Route path="/learning-paths/:pathId" element={<RecommendationPanel />} />
+        </Routes>
         <RouteSpy onChange={(path) => { currentPath = path; }} />
       </>,
       { route: "/learning-paths/mock-path" }
     );
 
     const firstRec = mockRecommendations[0];
-    const recCard = screen.getByText(firstRec.title);
+    const recCard = await screen.findByText(firstRec.title);
     expect(recCard).toBeInTheDocument();
 
     // Card should not be read initially

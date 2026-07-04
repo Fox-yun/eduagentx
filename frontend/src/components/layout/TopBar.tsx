@@ -157,6 +157,14 @@ export function TopBar({ title, courseName }: TopBarProps) {
                   个人设置
                 </Link>
                 <Link
+                  to="/profile"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-ink hover:bg-page transition-colors"
+                >
+                  <User className="h-3.5 w-3.5 text-muted" />
+                  学习画像
+                </Link>
+                <Link
                   to="/settings/security"
                   onClick={() => setMenuOpen(false)}
                   className="flex items-center gap-2 px-3 py-2 text-xs text-ink hover:bg-page transition-colors"

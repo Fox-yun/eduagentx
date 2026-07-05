@@ -16,6 +16,8 @@ data/
 # Archives and office docs
 *.xlsx
 *.xls
+*.doc
+*.docx
 *.zip
 
 # Python cache

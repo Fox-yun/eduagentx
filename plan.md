@@ -2145,7 +2145,7 @@ Evidence:
 - `recommendations.py`：修复破损代码，所有推荐方法接受 `profile` 参数，推荐理由融入 learning_pace、knowledge_depth、error_pattern、concept_grasp、practice_ability、resource_preference
 - `assessment_finalization.py`：评估完成时调用 `apply_assessment_evidence()` 更新画像
 
-### 3.6-E：Frontend + E2E 🔄 进行中
+### 3.6-E：Frontend + E2E ✅ 已完成
 
 | 组件 | 文件 | 状态 |
 |---|---|---|
@@ -2156,7 +2156,7 @@ Evidence:
 | ProfileSummaryPage (八维卡片展示) | `frontend/src/pages/ProfileSummaryPage/index.tsx` | ✅ |
 | Routes & Router | `frontend/src/app/routes.ts`, `router.tsx` | ✅ |
 | TopBar 画像入口 | `frontend/src/components/layout/TopBar.tsx` | ✅ |
-| Profile E2E (对话→画像→路径) | `frontend/e2e/` | ⏳ |
+| Profile E2E (对话→画像→路径) | `frontend/e2e/` | ✅ |
 
 **实现细节：**
 - **Schema & Types**：定义完整的 Zod schemas（CreateConversation, SendMessage, Finalize, ProfileSummary, Evidence）和 TypeScript models，包含 8 维枚举常量和标签映射
@@ -2188,3 +2188,78 @@ Evidence:
 | 后端 MyPy (84 source files) | ✅ Success, no issues |
 | 后端 Pytest | ✅ 813 passed |
 | Alembic heads | ✅ Single head: d4e5f6a7b8c9 (024) |
+
+---
+
+## Phase 3.6-E0/E1/F + 3.7 完成报告 — Profile Correctness Closure & Full Integration ✅ 已完成
+
+**日期：** 2026-07-05
+**状态：** ✅ 全部完成
+
+### Phase 3.6-E0：Profile Correctness Closure ✅
+
+| 子项 | 状态 | 说明 |
+|---|---|---|
+| E0-A1: 学习目标持久化 | ✅ | `ProfileConversationSession` 新增 `learning_goal_text` / `target_context` 字段 (Migration 025) |
+| E0-A2: JSON 字段复制后整体赋值 | ✅ | 所有 `dimensions` / `extracted_dimensions` 修改使用 copy-then-assign |
+| E0-A3: finalize() 统一调用 profile_merge | ✅ | `ProfileConversationService.finalize()` 只构造 evidence 并调用 `apply_profile_evidence()` |
+| E0-A4: Evidence 幂等写入 | ✅ | `apply_profile_evidence()` 先检查 evidence 是否存在，仅新 evidence 参与合并 |
+| E0-A5: finalize 规则不可绕过 | ✅ | `can_finalize()` 检查最少 3 轮、至少 6/8 维、置信度 ≥ 0.65 |
+| E0-A6: API 请求模型 `extra="forbid"` | ✅ | `CreateConversationRequest` / `SendMessageRequest` / `ManualCorrectionRequest` |
+| E0-B1: 前端 Schema 支持 error_pattern dict | ✅ | `DimensionValueSchema` 支持 `z.record(z.string(), z.number())` |
+| E0-B2: 八维枚举统一 | ✅ | `ProfileDimensionSchema` Zod enum + 后端 `ProfileDimension` Literal |
+| E0-B3: Profile 空状态处理 | ✅ | `ProfileSummaryPage` 正确处理 `PROFILE_NOT_FOUND` 显示空状态 |
+| E0-C: 测试补齐 | ✅ | 单元测试 + 集成测试覆盖全部场景 |
+
+### Phase 3.6-E1：Profile Real E2E ✅
+
+| 子项 | 状态 | 说明 |
+|---|---|---|
+| E2E 1: 画像对话 | ✅ | `profile-conversation-real.spec.ts` — 对话→抽取→完成→展示 |
+| E2E 2: Profile 空状态 | ✅ | `profile-summary-real.spec.ts` — 新用户→PROFILE_NOT_FOUND→空状态 |
+| E2E 3: 画像影响路径 | ✅ | `profile-to-path-real.spec.ts` — 画像→路径生成→推荐理由体现画像 |
+| E2E 4: Assessment Evidence | ✅ | `profile-assessment-evidence-real.spec.ts` — 评估→画像更新→版本递增 |
+
+### Phase 3.6-F：画像接入全链路回归 ✅
+
+| 子项 | 状态 | 说明 |
+|---|---|---|
+| F-A: 统一 Profile Context Loader | ✅ | `profile_context.py` — `load_profile_context()` / `load_learner_profile_context()` |
+| F-B: Diagnostic 接入画像 | ✅ | `test_diagnostic_uses_profile_context.py` — 基础弱→基础题、节奏慢→分步题 |
+| F-C: Path Planning 接入画像 | ✅ | `test_path_planning_uses_profile_context.py` — 基础弱→补基础、时间少→短节点 |
+| F-D: Unit Content 接入画像 | ✅ | `test_unit_generation_uses_profile_context.py` — 概念弱→类比、偏代码→code example |
+| F-E: Assessment Generation 接入画像 | ✅ | `test_assessment_generation_uses_profile_context.py` — error_pattern→变式题 |
+| F-F: Recommendation 接入画像 | ✅ | `test_recommendations_use_profile_and_progress.py` — 推荐理由可解释 |
+
+### Phase 3.7：Knowledge / RAG / Tutor Closure ✅
+
+| 子项 | 状态 | 说明 |
+|---|---|---|
+| 3.7-A: Knowledge Runtime | ✅ | 上传/索引/搜索/reindex/delete 全链路验证 |
+| 3.7-B: RAG Context Builder | ✅ | `rag_context.py` — `build_rag_context()` 输出 chunks/citations/confidence |
+| 3.7-C: Tutor 接入 RAG | ✅ | Tutor 回答引用知识库 chunk，给出 citations |
+| 3.7-D: 前端 Knowledge/Tutor E2E | ✅ | `knowledge-rag-real.spec.ts` / `tutor-rag-real.spec.ts` |
+
+### 门禁验证结果（E0/E1/F/3.7 完整门禁）
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| 后端 Alembic heads | `alembic heads` | ✅ Single head: e5f6a7b8c9d0 (025) |
+| 后端 Ruff check | `ruff check .` | ✅ All checks passed (221 files) |
+| 后端 Ruff format | `ruff format --check .` | ✅ 221 files already formatted |
+| 后端 MyPy | `mypy app` | ✅ Success, no issues in 86 source files |
+| 后端 Pytest | `pytest tests -ra -v` | ✅ **1004 passed** in 233s |
+| 前端 TypeScript | `npm run typecheck` | ✅ 0 errors |
+| 前端 ESLint | `npm run lint` | ✅ 0 warnings |
+| 前端 Vitest | `npm test` | ✅ **259 passed** (31 files) |
+| 前端 Contract | `npm run check:contract` | ✅ ALL PASSED |
+| 前端 Build | `npm run build` | ✅ built successfully |
+
+### 关键修复
+
+| 修复项 | 文件 | 说明 |
+|---|---|---|
+| Evidence 幂等检查增加 user_id 过滤 | `backend/app/services/profile_merge.py` | 确保证据去重检查是用户级别的 |
+| 测试 evidence_id 唯一化 | 4 个集成测试文件 | 使用 `f"xxx-test-session-{user_id[:8]}"` 避免 DB 唯一约束冲突 |
+| Profile context 格式化 | `backend/app/services/profile_context.py` | Ruff 格式修正 |
+| Tutor 文件尾部清理 | `backend/app/services/tutor.py` | 移除多余空行 |

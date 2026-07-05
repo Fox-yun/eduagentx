@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
+from app.models.progress import RecommendationFeedback
 from app.models.user import User
 from app.services.path import PathService
 
@@ -167,16 +169,71 @@ async def get_recommendations(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Get rule-based learning recommendations for a path.
+    """Get dynamic learning recommendations for a path.
 
     Generates recommendations based on:
       - Review: nodes with mastery < 60% or failed assessments
+      - Review Weak Point: error_pattern from profile triggers targeted review
       - Practice: available nodes not yet completed
       - Continue: earliest available node
+      - Ask Tutor: low concept_grasp suggests asking the tutor
       - Resource: knowledge base search hits matching node titles
+      - Revise Path: consecutive assessment failures suggest path revision
+
+    Each recommendation includes evidence, priority, confidence, and action.
     """
     from app.services.recommendations import RecommendationService
 
     service = RecommendationService(db)
     items = await service.get_recommendations(path_id, user.id)
     return {"items": items}
+
+
+class RecommendationFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recommendation_key: str = Field(min_length=1, max_length=100)
+    recommendation_type: str = Field(min_length=1, max_length=30)
+    node_id: str | None = None
+    action: Literal["accept", "ignore", "later"]
+
+
+@router.post("/{path_id}/recommendations/feedback")
+async def submit_recommendation_feedback(
+    path_id: str,
+    body: RecommendationFeedbackRequest,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Submit user feedback on a recommendation (accept / ignore / later).
+
+    The feedback is persisted to track user preferences and improve
+    future recommendation ordering. The recommendation_key uniquely
+    identifies a recommendation type+node combination for deduplication.
+    """
+    # Check if feedback already exists (idempotent update)
+    existing = await db.execute(
+        select(RecommendationFeedback).where(
+            RecommendationFeedback.user_id == user.id,
+            RecommendationFeedback.recommendation_key == body.recommendation_key,
+        )
+    )
+    existing_feedback = existing.scalar_one_or_none()
+
+    if existing_feedback:
+        # Update existing feedback
+        existing_feedback.action = body.action
+    else:
+        # Create new feedback
+        feedback = RecommendationFeedback(
+            user_id=user.id,
+            path_id=path_id,
+            recommendation_key=body.recommendation_key,
+            recommendation_type=body.recommendation_type,
+            node_id=body.node_id,
+            action=body.action,
+        )
+        db.add(feedback)
+
+    await db.commit()
+    return {"status": "ok", "action": body.action}

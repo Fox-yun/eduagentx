@@ -1,6 +1,11 @@
+import type {
+  RecommendationType,
+  RecommendationAction,
+} from "../../schemas/recommendations";
+
 export interface RecommendationModel {
   id: string;
-  type: "review" | "practice" | "continue" | "resource";
+  type: RecommendationType;
   title: string;
   reason: string;
   nodeIds: string[];
@@ -12,7 +17,12 @@ export interface RecommendationModel {
     pageNumber?: number | null;
     sectionTitle?: string | null;
   } | null;
+  evidence: string[];
+  priority: number;
+  confidence: number;
+  action: RecommendationAction;
+  feedbackKey: string;
 }
 
-// Re-export for backward compatibility — old MockRecommendation is now RecommendationModel
+// Re-export for backward compatibility
 export type MockRecommendation = RecommendationModel;

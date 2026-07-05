@@ -145,6 +145,11 @@ describe("Mock Data DAG Integrity", () => {
         nodeIds: ["non-existent"],
         status: "new",
         resource: null,
+        evidence: [],
+        priority: 1,
+        confidence: 0.5,
+        action: "review_node",
+        feedbackKey: "review:none",
       },
     ];
 
@@ -260,6 +265,11 @@ describe("Mock Data DAG Integrity", () => {
         nodeIds: ["ds-intro"],
         status: "new",
         resource: null,
+        evidence: [],
+        priority: 1,
+        confidence: 0.5,
+        action: "review_node",
+        feedbackKey: "review:ds-intro",
       },
     ];
 

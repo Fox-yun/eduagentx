@@ -19,5 +19,11 @@ export const server = setupServer(
   // Recommendations
   http.get("*/api/learning-paths/:pathId/recommendations", () => {
     return HttpResponse.json({ items: mockRecommendationDtos });
+  }),
+
+  // Recommendation Feedback
+  http.post("*/api/learning-paths/:pathId/recommendations/feedback", async ({ request }) => {
+    const body = (await request.json()) as { action: string };
+    return HttpResponse.json({ status: "ok", action: body.action });
   })
 );

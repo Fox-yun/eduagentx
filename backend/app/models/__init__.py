@@ -13,7 +13,7 @@ from app.models.path import (
     LearningStage,
 )
 from app.models.profile import ProfileConversationMessage, ProfileConversationSession, StudentProfile
-from app.models.progress import LearningProgress, MasterySnapshot, Recommendation
+from app.models.progress import LearningProgress, MasterySnapshot, Recommendation, RecommendationFeedback
 from app.models.task import BackgroundTask, TaskEvent
 from app.models.unit import (
     Assessment,
@@ -61,6 +61,7 @@ __all__ = [
     # Progress
     "LearningProgress",
     "MasterySnapshot",
+    "RecommendationFeedback",
     # Unit
     "Assessment",
     "AssessmentQuestion",

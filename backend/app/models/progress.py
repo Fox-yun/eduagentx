@@ -84,3 +84,26 @@ class Recommendation(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RecommendationFeedback(Base):
+    """User feedback on a recommendation (accept / ignore / later)."""
+
+    __tablename__ = "recommendation_feedback"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    path_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_paths.id"), nullable=False, index=True)
+    recommendation_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    recommendation_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "recommendation_key",
+            name="uq_recommendation_feedback_user_key",
+        ),
+    )

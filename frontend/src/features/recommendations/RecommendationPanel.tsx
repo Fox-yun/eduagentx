@@ -74,7 +74,7 @@ export function RecommendationPanel({ className }: RecommendationPanelProps) {
     }
 
     return recommendations.map((rec) => (
-      <RecommendationCard key={rec.id} recommendation={rec} />
+      <RecommendationCard key={rec.id} recommendation={rec} pathId={pathId || undefined} />
     ));
   };
 

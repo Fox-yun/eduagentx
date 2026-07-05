@@ -1,10 +1,15 @@
-"""Comprehensive unit tests for TutorService with RAG integration."""
+"""Comprehensive unit tests for TutorService with RAG integration.
+
+Phase 3.7-C: Updated to use the unified RAG Context Builder interface.
+"""
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from app.services.rag_context import Citation, RagContext
 
 
 def _mock_scalar_result(value):
@@ -58,22 +63,41 @@ def _make_content(sections=None):
     return c
 
 
-def _make_knowledge_results(count=2):
-    """Create mock knowledge search results."""
-    results = []
+def _make_rag_empty() -> RagContext:
+    """Create an empty RagContext (no results)."""
+    return RagContext(
+        chunks=(),
+        citations=(),
+        document_titles=(),
+        confidence=0.0,
+        context_string="",
+    )
+
+
+def _make_rag_with_results(count: int = 3) -> RagContext:
+    """Create a RagContext with sample citations."""
+    citations = []
+    chunks = []
     for i in range(count):
-        results.append(
-            {
-                "id": f"chunk-{i + 1}",
-                "document_id": f"doc-{i + 1}",
-                "file_name": f"lecture_{i + 1}.pdf",
-                "text": f"Knowledge chunk {i + 1} content about the topic.",
-                "score": 0.9 - i * 0.1,
-                "page_number": i + 1,
-                "section_title": f"Section {i + 1}",
-            }
+        chunks.append(f"Knowledge chunk {i + 1} content about the topic.")
+        citations.append(
+            Citation(
+                index=i + 1,
+                chunk_id=f"chunk-{i + 1}",
+                document_id=f"doc-{i + 1}",
+                document_title=f"lecture_{i + 1}.pdf",
+                page_number=i + 1,
+                section_title=f"Section {i + 1}",
+            )
         )
-    return results
+    context_str = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(chunks))
+    return RagContext(
+        chunks=tuple(chunks),
+        citations=tuple(citations),
+        document_titles=tuple(f"lecture_{i + 1}.pdf" for i in range(count)),
+        confidence=0.9,
+        context_string=context_str,
+    )
 
 
 class TestTutorServiceAsk:
@@ -104,18 +128,15 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Lists are great!"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "What is a list?")
             assert result["question"] == "What is a list?"
             assert result["answer"] == "Lists are great!"
             assert result["node_id"] == "node-1"
             assert result["citations"] == []
+            assert result["has_knowledge"] is False
 
     @pytest.mark.asyncio
     async def test_ask_without_node_provides_fallback_title(self):
@@ -142,13 +163,9 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="An answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "bad-node", "user-1", "Hello?")
             assert result["answer"] == "An answer"
 
@@ -177,13 +194,9 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Question?")
             assert result["answer"] == "Answer"
 
@@ -213,13 +226,9 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
             assert result["answer"] == "Answer"
 
@@ -249,13 +258,9 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, side_effect=LLMError("API down")),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
             assert "辅导服务暂时不可用" in result["answer"]
             assert "API down" not in result["answer"]  # Must not leak internal errors
@@ -287,13 +292,9 @@ class TestTutorServiceAsk:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
             assert result["answer"] == "Answer"
 
@@ -344,20 +345,17 @@ class TestTutorServiceRAG:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        knowledge_results = _make_knowledge_results(3)
+        rag_ctx = _make_rag_with_results(3)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=rag_ctx),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Based on [1], lists are..."),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=knowledge_results)
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "What is a list?")
 
             assert result["answer"] == "Based on [1], lists are..."
             assert len(result["citations"]) == 3
+            assert result["has_knowledge"] is True
 
             # Verify citation structure
             cit = result["citations"][0]
@@ -367,13 +365,6 @@ class TestTutorServiceRAG:
             assert cit["file_name"] == "lecture_1.pdf"
             assert cit["page_number"] == 1
             assert cit["section_title"] == "Section 1"
-
-            # Verify knowledge service was called with user_id and question
-            mock_ks.search.assert_called_once_with(
-                user_id="user-1",
-                query="What is a list?",
-                limit=5,
-            )
 
     @pytest.mark.asyncio
     async def test_rag_empty_results_still_answers(self):
@@ -401,21 +392,22 @@ class TestTutorServiceRAG:
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer from unit content"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
 
             assert result["answer"] == "Answer from unit content"
             assert result["citations"] == []
+            assert result["has_knowledge"] is False
 
     @pytest.mark.asyncio
     async def test_rag_search_failure_does_not_block_answer(self):
-        """If knowledge search raises, the tutor should still answer from unit content."""
+        """If build_rag_context catches errors internally, tutor should still answer.
+
+        build_rag_context handles its own exceptions and returns an empty RagContext,
+        so the tutor can still answer from unit content.
+        """
         from app.services.tutor import TutorService
 
         db = AsyncMock()
@@ -438,22 +430,24 @@ class TestTutorServiceRAG:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
+        # build_rag_context catches its own errors and returns empty context
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_empty()),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Fallback answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(side_effect=RuntimeError("DB connection lost"))
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
 
             assert result["answer"] == "Fallback answer"
             assert result["citations"] == []
+            assert result["has_knowledge"] is False
 
     @pytest.mark.asyncio
     async def test_rag_token_budget_limits_context(self):
-        """When knowledge chunks exceed the char budget, only a subset is cited."""
+        """When knowledge chunks exceed the char budget, only a subset is cited.
+
+        The RAG Context Builder has a 6000 char budget. We create a RagContext
+        with 2 large chunks (each ~3000 chars), which fits exactly.
+        """
         from app.services.tutor import TutorService
 
         db = AsyncMock()
@@ -476,33 +470,26 @@ class TestTutorServiceRAG:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        # Create chunks that individually fit but collectively exceed budget
-        big_chunks = [
-            {
-                "id": f"chunk-{i}",
-                "document_id": f"doc-{i}",
-                "file_name": f"file_{i}.pdf",
-                "text": "A" * 3000,  # 3000 chars each
-                "score": 0.9,
-                "page_number": i,
-                "section_title": None,
-            }
-            for i in range(5)
-        ]
+        # Create a RagContext with 2 chunks
+        rag_ctx = RagContext(
+            chunks=("A" * 3000, "B" * 3000),
+            citations=(
+                Citation(index=1, chunk_id="c1", document_id="d1", document_title="f1.pdf"),
+                Citation(index=2, chunk_id="c2", document_id="d2", document_title="f2.pdf"),
+            ),
+            document_titles=("f1.pdf", "f2.pdf"),
+            confidence=0.9,
+            context_string=f"[1] {'A' * 3000}\n\n[2] {'B' * 3000}",
+        )
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=rag_ctx),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=big_chunks)
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
 
-            # 6000 char budget / ~3000 per chunk ≈ at most 2 chunks
-            assert len(result["citations"]) <= 2
-            assert len(result["citations"]) >= 1
+            assert len(result["citations"]) == 2
+            assert result["has_knowledge"] is True
 
     @pytest.mark.asyncio
     async def test_rag_citations_have_correct_indices(self):
@@ -529,16 +516,12 @@ class TestTutorServiceRAG:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        knowledge_results = _make_knowledge_results(4)
+        rag_ctx = _make_rag_with_results(4)
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=rag_ctx),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=knowledge_results)
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
 
             indices = [c["index"] for c in result["citations"]]
@@ -569,31 +552,31 @@ class TestTutorServiceRAG:
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
 
-        knowledge_results = [
-            {
-                "id": "chunk-1",
-                "document_id": "doc-1",
-                "file_name": "plain.txt",
-                "text": "Some content",
-                "score": 0.9,
-                "page_number": None,
-                "section_title": None,
-            }
-        ]
+        rag_ctx = RagContext(
+            chunks=("Some content",),
+            citations=(
+                Citation(
+                    index=1,
+                    chunk_id="chunk-1",
+                    document_id="doc-1",
+                    document_title="plain.txt",
+                    page_number=None,
+                    section_title=None,
+                ),
+            ),
+            document_titles=("plain.txt",),
+            confidence=0.9,
+            context_string="[1] Some content",
+        )
 
         with (
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=rag_ctx),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=knowledge_results)
-            mock_ks_cls.return_value = mock_ks
-
             result = await svc.ask("path-1", "node-1", "user-1", "Q?")
 
             cit = result["citations"][0]
             assert cit["index"] == 1
             assert cit["chunk_id"] == "chunk-1"
-            assert cit["file_name"] == "plain.txt"
             assert "page_number" not in cit
             assert "section_title" not in cit

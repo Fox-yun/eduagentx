@@ -405,6 +405,7 @@ class TestLLMFallback:
     async def test_tutor_returns_safe_message_on_llm_error(self):
         """Tutor returns a user-safe message, not the internal error."""
         from app.services.llm import LLMError
+        from app.services.rag_context import RagContext
         from app.services.tutor import TutorService
 
         db = AsyncMock()
@@ -415,15 +416,19 @@ class TestLLMFallback:
         ctx.node = MagicMock()
         ctx.node.title = "Test Node"
 
+        empty_rag = RagContext(
+            chunks=(),
+            citations=(),
+            document_titles=(),
+            confidence=0.0,
+            context_string="",
+        )
+
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock, return_value=ctx),
-            patch("app.services.tutor.KnowledgeService") as mock_ks_cls,
+            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=empty_rag),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, side_effect=LLMError("Connection refused")),
         ):
-            mock_ks = AsyncMock()
-            mock_ks.search = AsyncMock(return_value=[])
-            mock_ks_cls.return_value = mock_ks
-
             # Also need to mock the unit content query
             content_result = MagicMock()
             content_result.scalar_one_or_none.return_value = None
@@ -431,8 +436,8 @@ class TestLLMFallback:
 
             result = await svc.ask("path-1", "node-1", "user-1", "What is X?")
 
-        assert "辅导服务暂时不可用" in result["answer"]
-        assert "Connection refused" not in result["answer"]
+            assert "辅导服务暂时不可用" in result["answer"]
+            assert "Connection refused" not in result["answer"]
         assert result["citations"] == []
 
     @pytest.mark.asyncio

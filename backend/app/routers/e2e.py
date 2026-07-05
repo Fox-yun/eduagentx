@@ -817,3 +817,260 @@ async def bootstrap_profile_user(
         secure=False,
     )
     return response
+
+
+# ---------------------------------------------------------------------------
+# Knowledge + Tutor E2E bootstrap
+# ---------------------------------------------------------------------------
+
+
+@router.post("/bootstrap-knowledge")
+async def bootstrap_knowledge(
+    request: Request,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+    x_e2e_user_id: str = Header(..., alias="X-E2E-User-Id"),
+) -> JSONResponse:
+    """Create a ready knowledge document with chunks for RAG testing."""
+    from app.services.knowledge import KnowledgeService
+    from app.services.storage import InMemoryObjectStorage
+    from app.workers.tasks import _execute_knowledge_index
+
+    storage = InMemoryObjectStorage()
+    content = b"""
+    Python Programming Fundamentals
+
+    Python is a high-level, interpreted programming language known for its
+    readability and simplicity. It supports multiple programming paradigms
+    including procedural, object-oriented, and functional programming.
+
+    Key concepts:
+    - Variables and data types (int, float, str, list, dict, tuple, set)
+    - Control flow (if, for, while, break, continue)
+    - Functions (def, lambda, *args, **kwargs)
+    - Classes and objects (class, __init__, self, inheritance)
+    - Modules and packages (import, from...import)
+    - Exception handling (try, except, finally, raise)
+
+    Python's design philosophy emphasizes code readability with its notable
+    use of significant indentation.
+    """
+
+    storage_key = f"knowledge/{x_e2e_user_id}/{uuid.uuid4()}_python_fundamentals.txt"
+    await storage.put(storage_key, content, "text/plain")
+
+    service = KnowledgeService(db, storage=storage)
+    doc = await service.create_document(
+        user_id=x_e2e_user_id,
+        title="Python Fundamentals",
+        filename="python_fundamentals.txt",
+        mime_type="text/plain",
+        size_bytes=len(content),
+        storage_key=storage_key,
+    )
+    await db.commit()
+
+    task = BackgroundTask(
+        id=str(uuid.uuid4()),
+        user_id=x_e2e_user_id,
+        task_type="knowledge_index",
+        target_type="document",
+        target_id=doc.id,
+        status="pending",
+    )
+    db.add(task)
+    await db.commit()
+
+    import app.services.storage as storage_mod
+
+    original_get = storage_mod.get_object_storage
+    storage_mod.get_object_storage = lambda: storage
+
+    try:
+        await _execute_knowledge_index(db, task)
+    finally:
+        storage_mod.get_object_storage = original_get
+
+    return JSONResponse(
+        content={
+            "document_id": doc.id,
+            "title": "Python Fundamentals",
+            "status": "ready",
+            "storage_key": storage_key,
+            "content_preview": content.decode()[:200],
+        }
+    )
+
+
+@router.post("/bootstrap-tutor-session")
+async def bootstrap_tutor_session(
+    request: Request,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+    x_e2e_user_id: str = Header(..., alias="X-E2E-User-Id"),
+) -> JSONResponse:
+    """Bootstrap a full tutor session: path + version + node + unit content + knowledge.
+
+    Creates a minimal learning path with one unlocked node, unit content,
+    and a ready knowledge document — everything needed to call /api/chat.
+    """
+    now = utc_now()
+    goal_id = str(uuid.uuid4())
+    path_id = str(uuid.uuid4())
+    version_id = str(uuid.uuid4())
+    node_id = str(uuid.uuid4())
+    stage_id = str(uuid.uuid4())
+
+    # LearningGoal
+    goal = LearningGoal(
+        id=goal_id,
+        user_id=x_e2e_user_id,
+        title="E2E Tutor Test Goal",
+        raw_description="Test learning goal for tutor RAG E2E",
+        use_diagnostic=False,
+    )
+    db.add(goal)
+
+    # LearningPath
+    path = LearningPath(
+        id=path_id,
+        user_id=x_e2e_user_id,
+        goal_id=goal_id,
+        status="active",
+    )
+    db.add(path)
+    await db.flush()
+
+    # LearningPathVersion
+    version = LearningPathVersion(
+        id=version_id,
+        path_id=path_id,
+        version_number=1,
+        source="initial_generation",
+        status="active",
+        summary="E2E tutor test path",
+        estimated_total_minutes=60,
+        created_by="system",
+        activated_at=now,
+    )
+    db.add(version)
+    await db.flush()
+    path.active_version_id = version_id
+
+    # LearningStage
+    stage = LearningStage(
+        id=stage_id,
+        version_id=version_id,
+        title="Python基础",
+        description="Foundation",
+        stage_order=1,
+    )
+    db.add(stage)
+    await db.flush()
+
+    # LearningNode (1 unlocked node)
+    node = LearningNode(
+        id=node_id,
+        version_id=version_id,
+        stage_id=stage_id,
+        logical_key="e2e-tutor-node-1",
+        title="Python编程基础",
+        description="E2E tutor test node",
+        node_order=1,
+        level=1,
+        difficulty="beginner",
+        estimated_minutes=30,
+        status="unlocked",
+        content_status="generated",
+    )
+    db.add(node)
+    await db.commit()
+
+    # Create unit content for the node
+    from app.models.unit import LearningUnitContent
+
+    unit_content = LearningUnitContent(
+        id=str(uuid.uuid4()),
+        path_id=path_id,
+        node_id=node_id,
+        user_id=x_e2e_user_id,
+        content={
+            "sections": [
+                {
+                    "title": "Python Basics",
+                    "content": "Python is a versatile programming language used for web development, data science, and automation.",
+                },
+            ],
+            "summary": "Introduction to Python programming fundamentals.",
+        },
+        status="ready",
+    )
+    db.add(unit_content)
+    await db.commit()
+
+    # Bootstrap knowledge document
+    from app.services.knowledge import KnowledgeService
+    from app.services.storage import InMemoryObjectStorage
+    from app.workers.tasks import _execute_knowledge_index
+
+    storage = InMemoryObjectStorage()
+    content_bytes = b"""
+    Python Programming Fundamentals
+
+    Python is a high-level, interpreted programming language known for its
+    readability and simplicity. It supports multiple programming paradigms
+    including procedural, object-oriented, and functional programming.
+
+    Key concepts include variables, data types, control flow, functions,
+    classes, modules, and exception handling.
+
+    Python's design philosophy emphasizes code readability with its notable
+    use of significant indentation.
+    """
+
+    storage_key = f"knowledge/{x_e2e_user_id}/{uuid.uuid4()}_python_fundamentals.txt"
+    await storage.put(storage_key, content_bytes, "text/plain")
+
+    service = KnowledgeService(db, storage=storage)
+    doc = await service.create_document(
+        user_id=x_e2e_user_id,
+        title="Python Fundamentals",
+        filename="python_fundamentals.txt",
+        mime_type="text/plain",
+        size_bytes=len(content_bytes),
+        storage_key=storage_key,
+    )
+    await db.commit()
+
+    task = BackgroundTask(
+        id=str(uuid.uuid4()),
+        user_id=x_e2e_user_id,
+        task_type="knowledge_index",
+        target_type="document",
+        target_id=doc.id,
+        status="pending",
+    )
+    db.add(task)
+    await db.commit()
+
+    import app.services.storage as storage_mod
+
+    original_get = storage_mod.get_object_storage
+    storage_mod.get_object_storage = lambda: storage
+
+    try:
+        await _execute_knowledge_index(db, task)
+    finally:
+        storage_mod.get_object_storage = original_get
+
+    return JSONResponse(
+        content={
+            "path_id": path_id,
+            "version_id": version_id,
+            "node_id": node_id,
+            "document_id": doc.id,
+            "knowledge_status": "ready",
+        }
+    )

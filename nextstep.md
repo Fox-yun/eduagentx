@@ -1061,7 +1061,7 @@ git commit -m "feat(profile): integrate learner profile across learning pipeline
 
 ---
 
-## 3.7-A：Knowledge Runtime 验证
+## 3.7-A：Knowledge Runtime 验证 ✅
 
 必须验证：
 
@@ -1087,7 +1087,7 @@ backend/tests/integration/test_knowledge_storage_failure.py
 
 ---
 
-## 3.7-B：RAG Context Builder
+## 3.7-B：RAG Context Builder ✅
 
 新增：
 
@@ -1129,7 +1129,7 @@ unfiltered prompt
 
 ---
 
-## 3.7-C：Tutor 接入 RAG
+## 3.7-C：Tutor 接入 RAG ✅
 
 Tutor 回答必须：
 
@@ -1149,7 +1149,7 @@ backend/tests/contract/test_tutor_citations_contract.py
 
 ---
 
-## 3.7-D：前端 Knowledge / Tutor E2E
+## 3.7-D：前端 Knowledge / Tutor E2E ✅
 
 新增：
 

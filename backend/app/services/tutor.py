@@ -1,4 +1,8 @@
-"""Tutor service — real-time Q&A for learning nodes with RAG."""
+"""Tutor service — real-time Q&A for learning nodes with RAG.
+
+Phase 3.7-C: Now uses the unified RAG Context Builder for knowledge retrieval,
+ensuring structured citations and safe context that never leaks internal keys.
+"""
 
 from __future__ import annotations
 
@@ -10,18 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.unit import LearningUnitContent
 from app.prompts.agents import TUTOR_SYSTEM, tutor_context
-from app.services.knowledge import KnowledgeService
 from app.services.learning_access import require_node_access
 from app.services.llm import LLMError, llm_chat
+from app.services.rag_context import build_rag_context
 
 logger = structlog.get_logger()
-
-# Maximum characters of knowledge context to inject into the prompt.
-# ~4 chars ≈ 1 token, so 6000 chars ≈ ~1500 tokens of knowledge context.
-_MAX_KNOWLEDGE_CONTEXT_CHARS = 6000
-
-# Top-K chunks to retrieve from the knowledge base.
-_KNOWLEDGE_TOP_K = 5
 
 
 class TutorService:
@@ -78,17 +75,22 @@ class TutorService:
                 )
 
         # 4. Knowledge search (RAG) — best-effort, failures don't block answering
-        knowledge_context = ""
-        citations: list[dict[str, Any]] = []
-        try:
-            knowledge_context, citations = await self._build_knowledge_context(
-                user_id=user_id,
-                question=question,
-            )
-        except Exception as e:
-            logger.warning("tutor_knowledge_search_failed", error=str(e), user_id=user_id)
+        rag_ctx = await build_rag_context(
+            db=self.db,
+            user_id=user_id,
+            query=question,
+            path_id=path_id,
+            node_id=node_id,
+        )
+        knowledge_context = rag_ctx.context_string
+        citations = [c.to_dict() for c in rag_ctx.citations]
+        has_knowledge = rag_ctx.has_results
 
         # 5. Build final context and call LLM
+        # If no knowledge results, explicitly note it in the context
+        if not has_knowledge:
+            knowledge_context = "（当前知识库中没有找到相关资料，请基于已有知识回答。）"
+
         context = tutor_context(
             node_title=node_title,
             node_content=node_content,
@@ -108,6 +110,7 @@ class TutorService:
                 "answer": answer,
                 "node_id": node_id,
                 "citations": citations,
+                "has_knowledge": has_knowledge,
             }
         except LLMError as e:
             logger.error(
@@ -121,60 +124,7 @@ class TutorService:
                 "answer": "辅导服务暂时不可用，请稍后重试。",
                 "node_id": node_id,
                 "citations": [],
+                "has_knowledge": has_knowledge,
             }
 
-    async def _build_knowledge_context(
-        self,
-        user_id: str,
-        question: str,
-    ) -> tuple[str, list[dict[str, Any]]]:
-        """Search the knowledge base and build a token-limited context string.
 
-        Returns a tuple of ``(knowledge_context, citations)`` where
-        *knowledge_context* is a numbered string suitable for the LLM prompt
-        and *citations* is a list of metadata dicts for the API response.
-        """
-        ks = KnowledgeService(self.db)
-        results = await ks.search(
-            user_id=user_id,
-            query=question,
-            limit=_KNOWLEDGE_TOP_K,
-        )
-
-        if not results:
-            return "", []
-
-        # Build numbered context with token budget
-        parts: list[str] = []
-        citations: list[dict[str, Any]] = []
-        total_chars = 0
-
-        for idx, chunk in enumerate(results, start=1):
-            chunk_text = chunk.get("text", "")
-            chunk_id = chunk.get("id", "")
-            document_id = chunk.get("document_id", "")
-            file_name = chunk.get("file_name", "")
-            page_number = chunk.get("page_number")
-            section_title = chunk.get("section_title")
-
-            # Stop if we'd exceed the budget
-            entry = f"[{idx}] {chunk_text}"
-            if total_chars + len(entry) > _MAX_KNOWLEDGE_CONTEXT_CHARS:
-                break
-
-            parts.append(entry)
-            total_chars += len(entry)
-
-            citation: dict[str, Any] = {
-                "index": idx,
-                "chunk_id": chunk_id,
-                "document_id": document_id,
-                "file_name": file_name,
-            }
-            if page_number is not None:
-                citation["page_number"] = page_number
-            if section_title:
-                citation["section_title"] = section_title
-            citations.append(citation)
-
-        return "\n\n".join(parts), citations

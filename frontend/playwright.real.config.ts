@@ -80,6 +80,22 @@ export default defineConfig({
         baseURL: "http://127.0.0.1:5175",
       },
     },
+    {
+      name: "real-backend-knowledge-rag",
+      testMatch: [/knowledge-rag-real\.spec\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: "http://127.0.0.1:5175",
+      },
+    },
+    {
+      name: "real-backend-tutor-rag",
+      testMatch: [/tutor-rag-real\.spec\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: "http://127.0.0.1:5175",
+      },
+    },
   ],
   webServer: [
     {

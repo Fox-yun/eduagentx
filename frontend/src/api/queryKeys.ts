@@ -40,4 +40,7 @@ export const queryKeys = {
   profileEvidence: () => ["profile", "evidence"] as const,
   profileConversation: (sessionId: string) =>
     ["profile", "conversation", sessionId] as const,
+
+  resource: (pathId: string, nodeId: string, resourceType: string) =>
+    ["resource", pathId, nodeId, resourceType] as const,
 };

@@ -20,6 +20,7 @@ from app.models.unit import (
     AssessmentAnswer,
     AssessmentAttempt,
     AssessmentQuestion,
+    LearningResource,
     LearningUnitContent,
 )
 from app.models.user import (
@@ -68,6 +69,7 @@ __all__ = [
     "AssessmentAttempt",
     "AssessmentAnswer",
     "LearningUnitContent",
+    "LearningResource",
     # Knowledge
     "KnowledgeDocument",
     "KnowledgeChunk",

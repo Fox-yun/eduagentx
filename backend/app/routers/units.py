@@ -13,9 +13,10 @@ from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
 from app.core.errors import ApiError
 from app.models.progress import LearningProgress
-from app.models.unit import Assessment, AssessmentAttempt, AssessmentQuestion
+from app.models.unit import Assessment, AssessmentAttempt, AssessmentQuestion, LearningResource
 from app.models.user import User
 from app.services.learning_access import require_node_access
+from app.services.resources import ResourceService
 from app.services.unit import UnitService, _safe_question_dto
 
 router = APIRouter()
@@ -216,6 +217,23 @@ async def get_mind_map(
     return await service.get_mind_map(path_id, node_id, user.id)
 
 
+@router.get("/{path_id}/nodes/{node_id}/interactive-cards")
+async def get_interactive_cards(
+    path_id: str,
+    node_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get interactive learning cards generated from unit content (deterministic, no LLM).
+
+    Returns flip cards with front (question) and back (answer),
+    covering concepts, key terms, and practice tasks.
+    """
+    await require_node_access(db, user.id, path_id, node_id)
+    service = UnitService(db)
+    return await service.get_interactive_cards(path_id, node_id, user.id)
+
+
 @router.post("/{path_id}/nodes/{node_id}/quiz-bank")
 async def generate_quiz_bank(
     path_id: str,
@@ -354,3 +372,51 @@ async def get_attempt_result(
         "progress_status": progress.status if progress else None,
         "unlocked_node_ids": attempt.unlocked_node_ids or [],
     }
+
+
+# ---------------------------------------------------------------------------#
+# Multimodal Resources API (Phase 3.9)
+# ---------------------------------------------------------------------------#
+
+
+@router.post("/{path_id}/nodes/{node_id}/resources/{resource_type}")
+async def generate_resource(
+    path_id: str,
+    node_id: str,
+    resource_type: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Generate a multimodal learning resource.
+
+    Supported resource types:
+    - pptx: PowerPoint presentation
+    - code_zip: Code project ZIP archive
+    - interactive_cards: Flip card learning resources
+    - walkthrough: Step-by-step case study
+    - simulation: Concept simulation with state transitions
+
+    Returns generating status with active_task_id for SSE progress tracking.
+    Idempotent: returns existing resource if ready, or existing task_id if generating.
+    """
+    await require_node_access(db, user.id, path_id, node_id)
+    service = ResourceService(db)
+    return await service.get_or_create_resource(path_id, node_id, user.id, resource_type)
+
+
+@router.get("/{path_id}/nodes/{node_id}/resources/{resource_type}")
+async def get_resource(
+    path_id: str,
+    node_id: str,
+    resource_type: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a multimodal learning resource.
+
+    For binary resources (PPTX, ZIP), returns metadata including storage key.
+    For JSON resources (interactive cards, walkthrough, simulation), returns full content.
+    """
+    await require_node_access(db, user.id, path_id, node_id)
+    service = ResourceService(db)
+    return await service.get_resource_content(path_id, node_id, user.id, resource_type)

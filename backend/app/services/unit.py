@@ -512,6 +512,165 @@ class UnitService:
             "node_id": node_id,
         }
 
+    async def get_interactive_cards(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+    ) -> dict[str, object]:
+        """Generate interactive learning cards from existing unit content.
+
+        Returns flip cards with front (question) and back (answer),
+        derived deterministically from content sections, objectives,
+        and key terms. Does NOT use LLM.
+
+        Card types:
+          - concept: Key concept Q&A
+          - key_term: Important term definitions
+          - common_mistake: Common pitfalls and corrections
+        """
+        from sqlalchemy.orm import selectinload
+
+        result = await self.db.execute(
+            select(LearningUnitContent)
+            .options(selectinload(LearningUnitContent.versions))
+            .where(
+                LearningUnitContent.path_id == path_id,
+                LearningUnitContent.node_id == node_id,
+                LearningUnitContent.user_id == user_id,
+            )
+        )
+        content = result.scalar_one_or_none()
+        if not content:
+            raise ApiError(code="CONTENT_NOT_FOUND", message="No content found for this node", status_code=404)
+
+        # Get content data from active version or legacy
+        if content.active_version_id and content.versions:
+            active_version = next((v for v in content.versions if v.id == content.active_version_id), None)
+            content_data = (
+                active_version.content if active_version and active_version.content else (content.content or {})
+            )
+        else:
+            content_data = content.content or {}
+
+        title = (
+            content_data.get("introduction", "").strip("# \n").split("\n")[0]
+            if content_data.get("introduction")
+            else "未知节点"
+        )
+        objectives = content_data.get("objectives", [])
+        sections = content_data.get("sections", [])
+        key_terms = content_data.get("key_terms", [])
+        practice_tasks = content_data.get("practice_tasks", [])
+        summary = content_data.get("summary", "")
+
+        cards: list[dict[str, Any]] = []
+
+        # 1. Concept cards from objectives
+        for i, obj in enumerate(objectives):
+            cards.append(
+                {
+                    "id": f"card-obj-{i}",
+                    "card_type": "concept",
+                    "front": f"学习目标：{obj}",
+                    "back": f"请回顾《{title}》中关于「{obj}」的内容，确保你能够解释和应用这个概念。",
+                    "hint": "查看对应章节的详细讲解",
+                    "knowledge_point": obj,
+                    "difficulty": "easy",
+                }
+            )
+
+        # 2. Key term cards
+        if isinstance(key_terms, list):
+            for i, term in enumerate(key_terms):
+                if isinstance(term, dict):
+                    term_name = term.get("term", term.get("name", f"术语 {i + 1}"))
+                    term_def = term.get("definition", term.get("description", ""))
+                elif isinstance(term, str):
+                    term_name = term
+                    term_def = ""
+                else:
+                    continue
+                cards.append(
+                    {
+                        "id": f"card-term-{i}",
+                        "card_type": "key_term",
+                        "front": f"什么是「{term_name}」？",
+                        "back": term_def or f"请回顾课程内容中关于「{term_name}」的定义和用法。",
+                        "hint": f"在《{title}》中查找",
+                        "knowledge_point": term_name,
+                        "difficulty": "easy",
+                    }
+                )
+
+        # 3. Section concept cards
+        for i, sec in enumerate(sections):
+            sec_title = sec.get("title", f"章节 {i + 1}")
+            sec_content = sec.get("content", "")
+            # Extract first meaningful sentence as the answer
+            first_sentence = ""
+            for line in sec_content.split("\n"):
+                clean = line.strip("# *-").strip()
+                if len(clean) > 10:
+                    first_sentence = clean[:200]
+                    break
+            if first_sentence:
+                cards.append(
+                    {
+                        "id": f"card-sec-{i}",
+                        "card_type": "concept",
+                        "front": f"章节「{sec_title}」的核心要点是什么？",
+                        "back": first_sentence,
+                        "hint": f"参考《{title}》{sec_title}章节",
+                        "knowledge_point": sec_title,
+                        "difficulty": "medium",
+                    }
+                )
+
+        # 4. Practice task cards
+        for i, task in enumerate(practice_tasks):
+            if isinstance(task, dict):
+                task_desc = task.get("description", task.get("task", str(task)))
+            elif isinstance(task, str):
+                task_desc = task
+            else:
+                continue
+            cards.append(
+                {
+                    "id": f"card-practice-{i}",
+                    "card_type": "practice",
+                    "front": f"练习题：{task_desc[:100]}",
+                    "back": "请尝试独立完成这道练习，然后对照课程内容检查你的答案。",
+                    "hint": "结合所学知识点思考",
+                    "knowledge_point": title,
+                    "difficulty": "hard",
+                }
+            )
+
+        # 5. Summary card
+        if summary:
+            cards.append(
+                {
+                    "id": "card-summary",
+                    "card_type": "summary",
+                    "front": f"《{title}》的核心总结是什么？",
+                    "back": summary[:300],
+                    "hint": "回顾全部章节",
+                    "knowledge_point": title,
+                    "difficulty": "easy",
+                }
+            )
+
+        return {
+            "title": f"{title} — 交互式学习卡片",
+            "interactive_type": "cards",
+            "description": f"基于《{title}》课程内容自动生成的 {len(cards)} 张学习卡片，帮助巩固核心知识点。",
+            "items": cards,
+            "knowledge_points": list({c["knowledge_point"] for c in cards if c.get("knowledge_point")}),
+            "estimated_minutes": max(5, len(cards) * 2),
+            "node_id": node_id,
+        }
+
     async def generate_quiz_bank(
         self,
         path_id: str,

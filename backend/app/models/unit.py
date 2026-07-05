@@ -228,3 +228,37 @@ class LearningLecture(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class LearningResource(Base):
+    """Multimodal learning resources (PPTX, Code ZIP, Interactive).
+
+    Stores artifacts generated for learning nodes.
+    """
+
+    __tablename__ = "learning_resources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    path_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_paths.id"), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, index=True
+    )  # pptx, code_zip, interactive_cards, walkthrough, simulation
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_generated")  # not_generated, generating, ready, failed
+    active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    content: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Resource-specific data (e.g., slide count)
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Optional: link to MinIO storage key for binary files (PPTX, ZIP)
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    storage_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)  # minio, local
+
+    __table_args__ = (
+        UniqueConstraint("node_id", "resource_type", name="uq_resource_per_node_type"),
+    )

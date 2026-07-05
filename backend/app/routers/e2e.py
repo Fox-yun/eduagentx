@@ -723,3 +723,97 @@ async def get_assessment_answers(
             answers[q.id] = str(parsed)
 
     return {"assessment_id": assessment_id, "correct_answers": answers}
+
+
+# ---------------------------------------------------------------------------
+# Profile E2E helpers
+# ---------------------------------------------------------------------------
+
+
+@router.post("/bootstrap-profile-user")
+async def bootstrap_profile_user(
+    request: Request,
+    _token: None = Depends(_require_e2e_token),
+    _db_check: None = Depends(_require_test_db),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Create a fully-authenticated user for profile E2E tests.
+
+    Unlike ``bootstrap-learning-session``, this endpoint:
+      - Does NOT create any goal, path, or assessment
+      - Does NOT create a StudentProfile (the E2E test must use real
+        conversation → finalize to build one)
+      - Returns auth tokens so the browser can interact directly
+
+    The caller is expected to drive the profile conversation, finalize,
+    and verification entirely through real API code paths.
+    """
+    from app.config import get_settings
+    from app.core.security import (
+        create_access_token,
+        generate_csrf_token,
+        generate_jti,
+        generate_token,
+        hash_password,
+        hash_token,
+    )
+
+    uid = str(uuid.uuid4())[:8]
+    email = f"e2e-profile-{uid}@example.com"
+    password = "E2E-Profile-Pass-123!"
+    now = utc_now()
+
+    user = User(
+        id=str(uuid.uuid4()),
+        email=email,
+        email_normalized=email.lower(),
+        display_name=f"E2E Profile User {uid}",
+        password_hash=hash_password(password),
+        status="active",
+        email_verified_at=now,
+        onboarding_completed_at=now,
+    )
+    db.add(user)
+    await db.flush()
+
+    jti = generate_jti()
+    family_id = str(uuid.uuid4())
+    refresh_token = generate_token()
+
+    session = AuthSession(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        refresh_token_hash=hash_token(refresh_token),
+        refresh_token_jti=jti,
+        token_family_id=family_id,
+        user_agent="e2e-profile-test",
+        ip_address="127.0.0.1",
+        expires_at=utc_now().replace(year=utc_now().year + 1),
+    )
+    db.add(session)
+    await db.flush()
+    await db.commit()
+
+    access_token = create_access_token(user.id, session.id)
+    csrf_token = generate_csrf_token()
+    settings = get_settings()
+
+    response = JSONResponse(
+        content={
+            "user_id": user.id,
+            "email": email,
+            "password": password,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "csrf_token": csrf_token,
+            "session_id": session.id,
+        },
+    )
+    response.set_cookie(
+        key=settings.csrf_cookie_name,
+        value=csrf_token,
+        httponly=False,
+        samesite="lax",
+        secure=False,
+    )
+    return response

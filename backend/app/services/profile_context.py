@@ -211,9 +211,7 @@ async def load_learner_profile_context(
         .limit(20)
     )
     evidence_rows = list(evidence_result.scalars().all())
-    evidence_summary = tuple(
-        f"{e.evidence_type}:{e.dimension}" for e in evidence_rows
-    )
+    evidence_summary = tuple(f"{e.evidence_type}:{e.dimension}" for e in evidence_rows)
 
     return LearnerProfileContext(
         user_id=user_id,

@@ -41,9 +41,7 @@ async def _create_user(db_session, prefix: str = "rec-profile") -> str:
     return uid
 
 
-async def _create_path_with_nodes(
-    db_session, user_id: str, goal_id: str
-) -> tuple[str, list[str]]:
+async def _create_path_with_nodes(db_session, user_id: str, goal_id: str) -> tuple[str, list[str]]:
     """Create a learning path with version and nodes. Returns (path_id, node_ids)."""
     path_id = str(uuid.uuid4())
     version_id = str(uuid.uuid4())
@@ -52,7 +50,6 @@ async def _create_path_with_nodes(
         id=path_id,
         user_id=user_id,
         goal_id=goal_id,
-        title="Test Path",
         status="active",
         active_version_id=version_id,
     )
@@ -66,6 +63,7 @@ async def _create_path_with_nodes(
         created_by="system",
     )
     db_session.add(version)
+    await db_session.flush()
 
     node_ids: list[str] = []
     for i in range(3):
@@ -106,57 +104,57 @@ async def _create_goal(db_session, user_id: str) -> str:
 
 async def _create_profile(db_session, user_id: str) -> str:
     """Create a profile with meaningful dimensions for recommendation testing."""
+    session_id = f"rec-test-session-{user_id[:8]}"
     evidence = [
         ProfileEvidenceInput(
             dimension="knowledge_depth",
             value=0.2,
             confidence=0.8,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="concept_grasp",
             value=0.3,
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="practice_ability",
             value=0.25,
             confidence=0.6,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="learning_pace",
             value="slow",
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="resource_preference",
             value=["quiz", "reading"],
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="error_pattern",
             value={"loops": 0.8, "functions": 0.6},
             confidence=0.65,
             evidence_type="conversation_profile",
-            evidence_id="rec-test-session",
+            evidence_id=session_id,
         ),
     ]
     profile = await apply_profile_evidence(db_session, user_id=user_id, evidence=evidence)
+    await db_session.commit()
     return profile.id
 
 
-async def _create_progress(
-    db_session, user_id: str, path_id: str, node_id: str, status: str, mastery: float
-) -> None:
+async def _create_progress(db_session, user_id: str, path_id: str, node_id: str, status: str, mastery: float) -> None:
     progress = LearningProgress(
         id=str(uuid.uuid4()),
         user_id=user_id,

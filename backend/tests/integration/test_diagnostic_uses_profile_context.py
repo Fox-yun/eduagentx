@@ -35,13 +35,9 @@ def _make_profile_context(
     """Build a LearnerProfileContext with specified dimensions."""
     dimensions: dict[str, ProfileDimensionValue] = {}
     if knowledge_depth is not None:
-        dimensions["knowledge_depth"] = ProfileDimensionValue(
-            value=knowledge_depth, confidence=0.8, source="test"
-        )
+        dimensions["knowledge_depth"] = ProfileDimensionValue(value=knowledge_depth, confidence=0.8, source="test")
     if learning_pace is not None:
-        dimensions["learning_pace"] = ProfileDimensionValue(
-            value=learning_pace, confidence=0.7, source="test"
-        )
+        dimensions["learning_pace"] = ProfileDimensionValue(value=learning_pace, confidence=0.7, source="test")
     return LearnerProfileContext(
         user_id="test-user",
         dimensions=dimensions,

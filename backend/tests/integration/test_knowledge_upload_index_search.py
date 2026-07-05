@@ -66,14 +66,14 @@ async def _create_document(
     return doc.id
 
 
-async def _index_document(db_session, doc_id: str, storage: InMemoryObjectStorage) -> None:
+async def _index_document(db_session, doc_id: str, storage: InMemoryObjectStorage, user_id: str = "") -> None:
     """Run the knowledge index pipeline for a document."""
     from app.models.task import BackgroundTask
     from app.workers.tasks import _execute_knowledge_index
 
     task = BackgroundTask(
         id=str(uuid.uuid4()),
-        user_id="system",
+        user_id=user_id,
         task_type="knowledge_index",
         target_type="document",
         target_id=doc_id,
@@ -81,7 +81,6 @@ async def _index_document(db_session, doc_id: str, storage: InMemoryObjectStorag
     )
     db_session.add(task)
     await db_session.commit()
-
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("app.services.storage.get_object_storage", lambda: storage)
@@ -107,7 +106,7 @@ class TestKnowledgeUploadIndexSearch:
             storage=storage,
         )
 
-        await _index_document(db_session, doc_id, storage)
+        await _index_document(db_session, doc_id, storage, user_id)
 
         # Verify document is ready
         service = KnowledgeService(db_session, storage=storage)
@@ -168,7 +167,7 @@ startxref
             storage=storage,
         )
 
-        await _index_document(db_session, doc_id, storage)
+        await _index_document(db_session, doc_id, storage, user_id)
 
         service = KnowledgeService(db_session, storage=storage)
         doc = await service.get_document(doc_id, user_id)
@@ -224,7 +223,7 @@ startxref
             storage=storage,
         )
 
-        await _index_document(db_session, doc_id, storage)
+        await _index_document(db_session, doc_id, storage, user_id)
 
         service = KnowledgeService(db_session, storage=storage)
         doc = await service.get_document(doc_id, user_id)

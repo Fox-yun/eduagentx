@@ -87,6 +87,7 @@ async def apply_profile_evidence(
 
         existing = await db.execute(
             select(StudentProfileEvidence.id).where(
+                StudentProfileEvidence.user_id == user_id,
                 StudentProfileEvidence.evidence_type == ev.evidence_type,
                 StudentProfileEvidence.evidence_id == ev.evidence_id,
                 StudentProfileEvidence.dimension == ev.dimension,

@@ -38,27 +38,28 @@ async def _create_user(db_session, prefix: str = "unit-profile") -> str:
 
 async def _create_profile_with_preferences(db_session, user_id: str) -> str:
     """Create a profile with resource preference for code/project."""
+    session_id = f"unit-test-session-{user_id[:8]}"
     evidence = [
         ProfileEvidenceInput(
             dimension="concept_grasp",
             value=0.3,
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="unit-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="resource_preference",
             value=["code", "reading"],
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="unit-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="learning_pace",
             value="slow",
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="unit-test-session",
+            evidence_id=session_id,
         ),
     ]
     profile = await apply_profile_evidence(db_session, user_id=user_id, evidence=evidence)
@@ -85,7 +86,7 @@ class TestUnitGenerationUsesProfileContext:
                 return_value=(MagicMock(), "## 学习者画像\n- 资源偏好: code, reading"),
             ) as mock_load,
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
-            patch("app.workers.tasks.llm_json", new_callable=AsyncMock) as mock_llm,
+            patch("app.services.llm.llm_json", new_callable=AsyncMock) as mock_llm,
         ):
             mock_llm.return_value = {
                 "introduction": "# Test\n\nIntro",
@@ -112,7 +113,7 @@ class TestUnitGenerationUsesProfileContext:
             await db_session.commit()
 
             with contextlib.suppress(Exception):
-                await _execute_unit_generation(db_session, task)  # noqa: expected failure
+                await _execute_unit_generation(db_session, task)  # noqa
 
             # load_profile_context should have been called
             mock_load.assert_called_once()
@@ -132,7 +133,7 @@ class TestUnitGenerationUsesProfileContext:
                 return_value=(None, ""),
             ) as mock_load,
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
-            patch("app.workers.tasks.llm_json", new_callable=AsyncMock) as mock_llm,
+            patch("app.services.llm.llm_json", new_callable=AsyncMock) as mock_llm,
         ):
             mock_llm.return_value = {
                 "introduction": "# Test\n\nIntro",
@@ -157,7 +158,7 @@ class TestUnitGenerationUsesProfileContext:
             await db_session.commit()
 
             with contextlib.suppress(Exception):
-                await _execute_unit_generation(db_session, task)  # noqa: expected failure
+                await _execute_unit_generation(db_session, task)  # noqa
 
             # load_profile_context should have been called and returned empty
             mock_load.assert_called_once()

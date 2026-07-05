@@ -108,9 +108,7 @@ class TestKnowledgeDeleteCleanup:
         doc_id = await _create_ready_document(db_session, user_id, storage)
 
         # Verify chunks exist before delete
-        result = await db_session.execute(
-            select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id)
-        )
+        result = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id))
         chunks_before = list(result.scalars().all())
         assert len(chunks_before) > 0
 
@@ -118,9 +116,7 @@ class TestKnowledgeDeleteCleanup:
         await service.delete_document(doc_id, user_id)
 
         # Chunks should be deleted
-        result = await db_session.execute(
-            select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id)
-        )
+        result = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id))
         chunks_after = list(result.scalars().all())
         assert len(chunks_after) == 0
 
@@ -191,9 +187,7 @@ class TestKnowledgeDeleteCleanup:
         assert doc.status == "deleted"
 
         # Chunks should still be cleaned from DB
-        result = await db_session.execute(
-            select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id)
-        )
+        result = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id))
         assert len(list(result.scalars().all())) == 0
 
         # Restore for cleanup

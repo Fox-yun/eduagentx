@@ -70,7 +70,9 @@ class TestTutorCitationsContract:
 
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock) as mock_access,
-            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()),
+            patch(
+                "app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()
+            ),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer text"),
         ):
             mock_node = MagicMock()
@@ -96,7 +98,9 @@ class TestTutorCitationsContract:
 
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock) as mock_access,
-            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()),
+            patch(
+                "app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()
+            ),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
             mock_node = MagicMock()
@@ -125,7 +129,9 @@ class TestTutorCitationsContract:
 
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock) as mock_access,
-            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()),
+            patch(
+                "app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()
+            ),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
             mock_node = MagicMock()
@@ -152,7 +158,9 @@ class TestTutorCitationsContract:
 
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock) as mock_access,
-            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()),
+            patch(
+                "app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()
+            ),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
             mock_node = MagicMock()
@@ -203,7 +211,9 @@ class TestTutorCitationsContract:
 
         with (
             patch("app.services.tutor.require_node_access", new_callable=AsyncMock) as mock_access,
-            patch("app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()),
+            patch(
+                "app.services.tutor.build_rag_context", new_callable=AsyncMock, return_value=_make_rag_with_citations()
+            ),
             patch("app.services.tutor.llm_chat", new_callable=AsyncMock, return_value="Answer"),
         ):
             mock_node = MagicMock()

@@ -126,5 +126,3 @@ class TutorService:
                 "citations": [],
                 "has_knowledge": has_knowledge,
             }
-
-

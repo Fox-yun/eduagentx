@@ -91,9 +91,7 @@ class TestKnowledgeReindex:
         user_id = await _create_user(db_session, "kb-reidx-ver")
 
         content = b"Original content about Python programming basics."
-        doc_id = await _upload_and_index(
-            db_session, user_id, "Python Basics", "basics.txt", content, storage
-        )
+        doc_id = await _upload_and_index(db_session, user_id, "Python Basics", "basics.txt", content, storage)
 
         service = KnowledgeService(db_session, storage=storage)
         doc = await service.get_document(doc_id, user_id)
@@ -139,9 +137,7 @@ class TestKnowledgeReindex:
         user_id = await _create_user(db_session, "kb-reidx-del")
 
         content = b"Original content for testing reindex cleanup."
-        doc_id = await _upload_and_index(
-            db_session, user_id, "Reindex Test", "reindex.txt", content, storage
-        )
+        doc_id = await _upload_and_index(db_session, user_id, "Reindex Test", "reindex.txt", content, storage)
 
         # Verify chunks exist for version 1
         result = await db_session.execute(
@@ -204,9 +200,7 @@ class TestKnowledgeReindex:
         user_id = await _create_user(db_session, "kb-reidx-search")
 
         content = b"Original content about database design and normalization."
-        doc_id = await _upload_and_index(
-            db_session, user_id, "DB Design", "db.txt", content, storage
-        )
+        doc_id = await _upload_and_index(db_session, user_id, "DB Design", "db.txt", content, storage)
 
         # Verify search works
         service = KnowledgeService(db_session, storage=storage)

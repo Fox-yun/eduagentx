@@ -55,27 +55,28 @@ async def _create_goal(db_session, user_id: str) -> str:
 
 async def _create_profile_with_weak_foundation(db_session, user_id: str) -> str:
     """Create a profile indicating weak foundation."""
+    session_id = f"path-test-session-{user_id[:8]}"
     evidence = [
         ProfileEvidenceInput(
             dimension="knowledge_depth",
             value=0.2,
             confidence=0.8,
             evidence_type="conversation_profile",
-            evidence_id="path-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="prerequisite_mastery",
             value=0.15,
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="path-test-session",
+            evidence_id=session_id,
         ),
         ProfileEvidenceInput(
             dimension="learning_pace",
             value="slow",
             confidence=0.7,
             evidence_type="conversation_profile",
-            evidence_id="path-test-session",
+            evidence_id=session_id,
         ),
     ]
     profile = await apply_profile_evidence(db_session, user_id=user_id, evidence=evidence)
@@ -111,7 +112,7 @@ class TestPathPlanningUsesProfileContext:
         from app.workers.tasks import _execute_path_generation
 
         with (
-            patch("app.workers.tasks.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
+            patch("app.services.llm.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
         ):
             from app.models.task import BackgroundTask
@@ -170,7 +171,7 @@ class TestPathPlanningUsesProfileContext:
         await db_session.commit()
 
         with (
-            patch("app.workers.tasks.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
+            patch("app.services.llm.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
         ):
             # Should not raise
@@ -214,7 +215,7 @@ class TestPathPlanningUsesProfileContext:
         await db_session.commit()
 
         with (
-            patch("app.workers.tasks.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
+            patch("app.services.llm.llm_json", new_callable=AsyncMock, side_effect=mock_llm_json),
             patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
         ):
             await _execute_path_generation(db_session, task)

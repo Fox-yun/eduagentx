@@ -88,7 +88,16 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     # Generate questions from the same bank the router uses
     from app.routers.diagnostics import _generate_diagnostic_questions
 
-    questions = _generate_diagnostic_questions(goal)
+    # Phase 3.6-F: Load profile context for consistent question generation
+    profile_context = None
+    try:
+        from app.services.profile_context import load_learner_profile_context
+
+        profile_context = await load_learner_profile_context(db, user_id=attempt.user_id)
+    except Exception:
+        pass
+
+    questions = _generate_diagnostic_questions(goal, profile_context)
     q_map: dict[str, dict[str, Any]] = {q["question_id"]: q for q in questions}
 
     # Load existing answers

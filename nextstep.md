@@ -1022,13 +1022,13 @@ backend/tests/integration/test_recommendations_use_profile_and_progress.py
 ## 3.6-F 完成门禁
 
 ```text
-[ ] 所有核心生成模块调用 load_profile_context()
-[ ] 画像不存在时有 fallback
-[ ] 画像存在时影响生成策略
-[ ] 推荐理由可解释
-[ ] Contract 不泄露内部 prompt
-[ ] 后端全量测试通过
-[ ] 前端全量门禁通过
+[x] 所有核心生成模块调用 load_profile_context() / load_learner_profile_context()
+[x] 画像不存在时有 fallback
+[x] 画像存在时影响生成策略
+[x] 推荐理由可解释
+[x] Contract 不泄露内部 prompt
+[x] 后端全量测试通过
+[x] 前端全量门禁通过
 ```
 
 提交：

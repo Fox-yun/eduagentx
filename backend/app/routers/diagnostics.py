@@ -225,15 +225,61 @@ def _detect_topic(goal: Any) -> str:
     return "general"
 
 
-def _generate_diagnostic_questions(goal: Any) -> list[dict[str, Any]]:
-    """Generate diagnostic questions based on goal context."""
+def _generate_diagnostic_questions(
+    goal: Any,
+    profile_context: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Generate diagnostic questions based on goal context and learner profile.
+
+    Phase 3.6-F: When a learner profile is available, the question selection
+    is adjusted:
+      - knowledge_depth < 0.4 → include more fundamental questions
+      - knowledge_depth > 0.7 → include more advanced/comprehensive questions
+      - learning_pace == 'slow' → include step-by-step guidance hints
+    """
     topic = _detect_topic(goal)
     questions: list[dict[str, Any]] = []
 
     if topic in _QUESTION_BANK and topic != "general":
-        questions.extend(_QUESTION_BANK[topic])
+        # Phase 3.6-F: Profile-aware question selection
+        topic_questions = list(_QUESTION_BANK[topic])
+
+        if profile_context is not None:
+            # Weak foundation: keep all basic questions, add self-assessment first
+            kd = profile_context.dimensions.get("knowledge_depth")
+            kd_value = kd.value if kd else None
+
+            if isinstance(kd_value, (int, float)) and kd_value < 0.4:
+                # For weak foundation, ensure all topic questions are included
+                # (they are fundamental) and add a note to the prompt
+                for q in topic_questions:
+                    q = dict(q)
+                    q["prompt"] = f"【基础题】{q['prompt']}"
+                    questions.append(q)
+            elif isinstance(kd_value, (int, float)) and kd_value > 0.7:
+                # For strong foundation, mark as comprehensive
+                for q in topic_questions:
+                    q = dict(q)
+                    q["prompt"] = f"【综合题】{q['prompt']}"
+                    questions.append(q)
+            else:
+                questions.extend(topic_questions)
+
+            # Slow pace: add step-by-step hint to short_answer questions (topic only here;
+            # general questions are handled below after they are added)
+        else:
+            questions.extend(topic_questions)
 
     questions.extend(_QUESTION_BANK["general"])
+
+    # Phase 3.6-F: Apply slow pace hint to ALL short_answer questions
+    # (both topic and general) after all questions are assembled
+    if profile_context is not None:
+        lp = profile_context.dimensions.get("learning_pace")
+        if lp and lp.value == "slow":
+            for i, q in enumerate(questions):
+                if q.get("type") == "short_answer":
+                    questions[i] = {**q, "prompt": q["prompt"] + "\n（请分步骤作答，逐步说明你的思路。）"}
 
     for i, q in enumerate(questions):
         q = {**q, "question_id": f"diag-{goal.id[:8]}-{i + 1}"}
@@ -271,7 +317,19 @@ async def get_diagnostic(
     """
     service = GoalService(db)
     goal = await service.get_goal(goal_id, user.id)
-    questions = _generate_diagnostic_questions(goal)
+
+    # Phase 3.6-F: Load learner profile for personalised diagnostic questions
+    profile_context = None
+    try:
+        from app.services.profile_context import load_learner_profile_context
+
+        profile_context = await load_learner_profile_context(db, user_id=user.id)
+    except Exception as e:
+        import structlog
+
+        structlog.get_logger().warning("profile_load_failed_for_diagnostic", error=str(e))
+
+    questions = _generate_diagnostic_questions(goal, profile_context)
 
     # Find or create draft attempt
     result = await db.execute(
@@ -357,7 +415,17 @@ async def submit_diagnostic(
     # Load goal and regenerate questions for correct answers
     goal_service = GoalService(db)
     goal = await goal_service.get_goal(goal_id, user.id)
-    questions = _generate_diagnostic_questions(goal)
+
+    # Phase 3.6-F: Load profile context for consistent question generation
+    profile_context = None
+    try:
+        from app.services.profile_context import load_learner_profile_context
+
+        profile_context = await load_learner_profile_context(db, user_id=user.id)
+    except Exception:
+        pass
+
+    questions = _generate_diagnostic_questions(goal, profile_context)
     q_map: dict[str, dict[str, Any]] = {q["question_id"]: q for q in questions}
 
     # Save answers and score objective questions

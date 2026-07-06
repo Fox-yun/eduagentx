@@ -33,6 +33,7 @@ class TaskType(enum.StrEnum):
     KNOWLEDGE_INDEX = "knowledge_index"
     KNOWLEDGE_REINDEX = "knowledge_reindex"
     LEARNING_LECTURE_GENERATION = "learning_lecture_generation"
+    INTERACTIVE_RESOURCE_GENERATION = "interactive_resource_generation"
 
 
 class TaskEventType(enum.StrEnum):

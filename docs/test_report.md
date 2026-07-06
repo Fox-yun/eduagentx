@@ -35,7 +35,7 @@ EduAgentX 采用多层测试策略，确保系统质量和可靠性：
 | 知识库 | 2 | 服务逻辑、知识状态 |
 | 任务 | 5 | 任务状态、事件、Handler 注册、运行时、服务 |
 | 推荐 | 1 | 推荐服务逻辑 |
-| 多模态资源 | 1 | PPTX、Code ZIP、Interactive 生成器 |
+| 多模态资源 | 2 | PPTX、Code ZIP、Interactive 生成器、资源下载安全校验 |
 | 其他 | 15+ | 配置、错误处理、分页、LLM、Prompt 等 |
 | **合计** | **42+** | |
 
@@ -44,7 +44,7 @@ EduAgentX 采用多层测试策略，确保系统质量和可靠性：
 | 测试文件 | 覆盖场景 |
 |---|---|
 | test_profile_conversation.py | 创建对话、发送消息、画像抽取 |
-| test_profile_finalize.py | 完成画像、幂等性、规则强制 |
+| test_profile_finalize.py | 完成画像、幂等性、规则强制、Fallback 路径 |
 | test_profile_manual_correction.py | 手动修正维度 |
 | test_profile_evidence_merge.py | 证据合并、幂等性 |
 | test_profile_personalization_context.py | 画像上下文加载 |

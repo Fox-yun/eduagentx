@@ -269,3 +269,67 @@ class ResourceService:
             resource.error_message = error_message
             resource.updated_at = utc_now()
             await self.db.commit()
+
+    async def download_resource_binary(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+        resource_type: str,
+    ) -> tuple[bytes, str, str]:
+        """Download binary resource (PPTX/ZIP) after access validation.
+
+        Returns:
+            Tuple of (file_bytes, filename, content_type)
+
+        Raises:
+            ApiError: RESOURCE_NOT_FOUND, RESOURCE_NOT_READY, RESOURCE_NOT_BINARY
+        """
+        if resource_type not in ("pptx", "code_zip"):
+            raise ApiError(
+                code="RESOURCE_NOT_BINARY",
+                message=f"Resource type '{resource_type}' is not downloadable",
+                status_code=400,
+            )
+
+        result = await self.db.execute(
+            select(LearningResource).where(
+                LearningResource.path_id == path_id,
+                LearningResource.node_id == node_id,
+                LearningResource.user_id == user_id,
+                LearningResource.resource_type == resource_type,
+            )
+        )
+        resource = result.scalar_one_or_none()
+
+        if not resource:
+            raise ApiError(code="RESOURCE_NOT_FOUND", message="Resource not found", status_code=404)
+
+        if resource.status != "ready":
+            raise ApiError(code="RESOURCE_NOT_READY", message="Resource is not ready", status_code=409)
+
+        if not resource.storage_key:
+            raise ApiError(
+                code="RESOURCE_ARTIFACT_NOT_FOUND",
+                message="Storage key not available for this resource",
+                status_code=404,
+            )
+
+        try:
+            file_bytes = await self.storage.get(resource.storage_key)
+        except Exception:
+            raise ApiError(
+                code="RESOURCE_ARTIFACT_NOT_FOUND",
+                message="Artifact file not found in storage",
+                status_code=404,
+            )
+
+        # Safe filename
+        if resource_type == "pptx":
+            filename = f"{node_id}-presentation.pptx"
+            content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        else:
+            filename = f"{node_id}-code-project.zip"
+            content_type = "application/zip"
+
+        return file_bytes, filename, content_type

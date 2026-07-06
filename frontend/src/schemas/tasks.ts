@@ -28,6 +28,7 @@ export const TaskTypeSchema = z.enum([
   "knowledge_index",
   "knowledge_reindex",
   "learning_lecture_generation",
+  "interactive_resource_generation",
 ]);
 
 export type TaskType = z.infer<typeof TaskTypeSchema>;

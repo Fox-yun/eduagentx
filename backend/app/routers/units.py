@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import io
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -420,3 +423,35 @@ async def get_resource(
     await require_node_access(db, user.id, path_id, node_id)
     service = ResourceService(db)
     return await service.get_resource_content(path_id, node_id, user.id, resource_type)
+
+
+@router.get("/{path_id}/nodes/{node_id}/resources/{resource_type}/download")
+async def download_resource(
+    path_id: str,
+    node_id: str,
+    resource_type: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Download a binary learning resource (PPTX or ZIP).
+
+    Validates user access and resource readiness before streaming the
+    binary artifact from object storage.  The storage key is never exposed
+    to the client — only a safe filename is returned in the
+    Content-Disposition header.
+
+    Supported resource types: ``pptx``, ``code_zip``.
+    """
+    await require_node_access(db, user.id, path_id, node_id)
+    service = ResourceService(db)
+    file_bytes, filename, content_type = await service.download_resource_binary(
+        path_id, node_id, user.id, resource_type
+    )
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(file_bytes)),
+        },
+    )

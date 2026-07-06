@@ -226,8 +226,20 @@ class ProfileConversationService:
         """Check whether a session meets the minimum requirements for finalize.
 
         Enforced server-side so the frontend cannot bypass it (E0-A5).
+
+        Fallback path: when ``turn_count`` reaches ``MAX_TURNS`` the session
+        is always finalizable.  This guarantees that conversations running
+        under rule-based fallback (LLM unavailable) — which can only extract
+        a limited number of low-confidence dimensions — are not permanently
+        blocked from completing.
         """
         extracted = session.extracted_dimensions or {}
+
+        # Fallback: max turns reached → allow finalize regardless of
+        # dimension coverage or confidence (E0-A5 fallback).
+        if session.turn_count >= MAX_TURNS:
+            return True
+
         if session.turn_count < MIN_TURNS:
             return False
         if len(extracted) < MIN_DIMENSIONS_COVERED:

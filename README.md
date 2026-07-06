@@ -1,34 +1,64 @@
 # EduAgentX — 多智能体个性化教辅系统
 
-![Version](https://img.shields.io/badge/Version-4.0-blue.svg) ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg) ![React](https://img.shields.io/badge/Frontend-React-61DAFB.svg) ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1.svg) ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D.svg) ![MinIO](https://img.shields.io/badge/Storage-MinIO-C72E49.svg) ![LLM](https://img.shields.io/badge/AI-DeepSeek%20V4%20Pro-FF6F00.svg) ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED.svg)
+![Version](https://img.shields.io/badge/Version-4.1-blue.svg) ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg) ![React](https://img.shields.io/badge/Frontend-React-61DAFB.svg) ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1.svg) ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D.svg) ![MinIO](https://img.shields.io/badge/Storage-MinIO-C72E49.svg) ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED.svg)
 
 > 2026 年"中国软件杯"大学生软件设计大赛参赛项目
 
+---
+
+## 目录
+
+- [项目简介](#项目简介)
+- [核心功能](#核心功能)
+- [系统架构](#系统架构)
+- [项目结构](#项目结构)
+- [部署手册](#部署手册)
+  - [环境要求](#环境要求)
+  - [方式一：Docker Compose 一键部署（推荐）](#方式一docker-compose-一键部署推荐)
+  - [方式二：本地开发部署](#方式二本地开发部署)
+  - [环境变量配置](#环境变量配置)
+  - [健康检查](#健康检查)
+  - [常用运维命令](#常用运维命令)
+  - [常见问题排查](#常见问题排查)
+
+---
+
 ## 项目简介
 
-EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性化教辅系统**。基于大语言模型、RAG（检索增强生成）和多智能体协作，为学生提供：
+EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性化教辅系统**。系统基于大语言模型、RAG（检索增强生成）和多智能体协作技术，为学生提供从学习画像构建、知识诊断、路径规划、内容生成到通关评估的全链路个性化学习体验。
 
-- **八维学习画像** — 自然语言对话式采集，LLM 抽取八维学习特征，持续证据更新
-- **学生画像诊断** — 自动评估知识基础、认知偏好与学习目标
-- **课程知识库检索** — MinIO 对象存储 + PostgreSQL 全文搜索，支持 PDF/TXT/MD/DOCX/CSV/JSON 六种文档格式
-- **个性化学习路径规划** — 基于 DAG 的可视化学习路径生成与修订
-- **自适应学习单元** — 讲义级教学内容、思维导图、题库、代码案例等多模态学习资源
-- **通关评估与掌握度** — 异步评估生成 / 客观题即时评分 / 简答题 LLM 评分 / Mastery 追踪与节点解锁
-- **智能答疑与推荐** — 常驻侧栏答疑辅导面板（RAG 增强），基于学习进度的规则引擎个性化推荐
+系统包含 **9 个专业智能体**协同工作，通过 **八维学习画像** 驱动全链路个性化：诊断 → 路径规划 → 内容生成 → 题库生成 → 推荐。后端提供 **47+ RESTful API 端点**，前端包含 **22 个页面**，覆盖完整的学习生命周期。
+
+---
+
+## 核心功能
+
+| 功能模块 | 说明 |
+|---------|------|
+| **八维学习画像** | 自然语言对话式采集（3-7 轮），LLM 抽取八维学习特征，加权合并引擎持续证据更新，画像参与全链路个性化 |
+| **知识水平诊断** | 学习前自动评估知识基础、认知偏好与学习目标 |
+| **课程知识库** | MinIO 对象存储 + PostgreSQL 全文搜索，支持 PDF / TXT / MD / DOCX / CSV / JSON 六种格式 |
+| **学习路径规划** | 基于 DAG 的可视化学习路径生成，支持版本管理与修订请求，@xyflow/react + ELK.js 自动布局 |
+| **自适应学习单元** | 讲义级教学内容（≥500 字/章节）、思维导图、题库、代码案例，融入画像偏好定制 |
+| **通关评估** | 四种题型（单选/多选/判断/简答），客观题即时评分，简答题 LLM 异步评分，Mastery 追踪与节点解锁 |
+| **多模态学习资源** | PPTX 课件 / 代码 ZIP / 交互式学习卡片 / 案例推演 / 概念模拟，确定性生成不依赖 LLM |
+| **智能答疑** | 常驻侧栏答疑辅导面板，基于知识点上下文 + 知识库 RAG 增强问答 |
+| **个性化推荐** | 基于掌握度（Mastery）的规则引擎，推荐复习/练习/继续/资料 |
+| **安全认证** | Argon2id 密码哈希、Cookie JWT + Refresh Token 轮换、CSRF Double-Submit、速率限制与审计日志 |
+
+---
 
 ## 系统架构
 
-系统经历了四个阶段的迭代演进，当前主系统为 **Phase 3 后端 + Phase 2 前端**：
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    React SPA (Phase 2 前端)                       │
+│                       React SPA 前端                              │
 │  React 18 + TypeScript 5.2 + Vite 5.2                           │
 │  TanStack Query + Zustand + @xyflow/react + TailwindCSS         │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ HTTP / SSE
 ┌──────────────────────────▼──────────────────────────────────────┐
-│                 FastAPI (Phase 3 后端)                            │
+│                      FastAPI 后端                                 │
 │  13 API 路由器 · 47+ 端点 · Cookie JWT · CSRF Double-Submit     │
 ├──────────┬──────────┬──────────────┬────────────────────────────┤
 │PostgreSQL│ Redis 7  │  MinIO       │ Celery Worker / Beat       │
@@ -48,12 +78,12 @@ EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性�
 | 数据库 | PostgreSQL 16 (asyncpg) |
 | 缓存 | Redis 7 |
 | 对象存储 | MinIO |
-| 迁移 | Alembic (24 版本) |
+| 迁移 | Alembic (27 版本) |
 | 认证 | Argon2id + JWT (Cookie-based, CSRF Double-Submit) |
 | 任务队列 | Celery + Redis Broker (生产) / Inline Runner (开发) |
 | 日志 | structlog |
 | 测试 | pytest + httpx, Ruff, MyPy, Bandit |
-| 容器 | Docker + Docker Compose (6 服务) |
+| 容器 | Docker + Docker Compose |
 
 ### 前端技术栈
 
@@ -71,549 +101,320 @@ EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性�
 
 ---
 
-## 快速开始
-
-### 环境要求
-
-- **后端**: Python 3.12+, Docker & Docker Compose
-- **前端**: Node.js >= 18.0.0, npm >= 9.0.0
-
-### 方式一：Docker Compose（推荐）
-
-```bash
-# 1. 配置环境变量
-cd backend
-cp .env.example .env
-# 编辑 .env 填入 APP_SECRET_KEY 等配置
-
-# 2. 启动所有服务（PostgreSQL + Redis + MinIO + Backend + Celery）
-cd docker
-docker-compose up -d
-
-# 3. 执行数据库迁移
-docker-compose exec backend alembic upgrade head
-
-# 4. 启动前端
-cd ../../frontend
-npm install
-npm run dev
-```
-
-访问 `http://localhost:5173` 即可使用。
-
-### 方式二：本地开发
-
-```bash
-# 1. 启动 PostgreSQL 和 Redis（需要本地安装或单独 Docker）
-# 2. 配置后端
-cd backend
-cp .env.example .env
-# 编辑 .env 填入数据库和 Redis 连接信息
-
-pip install -e ".[worker]"
-alembic upgrade head
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-
-# 注：开发模式下 Inline Runner 自动处理异步任务，无需启动 Celery Worker
-
-# 3. 启动前端（新终端）
-cd frontend
-npm install
-npm run dev
-```
-
----
-
 ## 项目结构
 
 ```
 cnsoftcup/
-├── backend/                  # ✅ 活跃后端 (Phase 3)
+├── backend/                       # 后端服务
 │   ├── app/
-│   │   ├── main.py           # FastAPI 应用工厂
-│   │   ├── config.py         # Pydantic Settings 配置
-│   │   ├── lifespan.py       # 启动/关闭生命周期
-│   │   ├── routers/          # 13 个 API 路由器
-│   │   ├── models/           # 30 个 SQLAlchemy ORM 模型
-│   │   ├── services/         # 16 个业务逻辑服务
-│   │   ├── workers/          # Celery Worker + Inline Runner (开发模式自动启用)
-│   │   ├── core/             # 基础设施 (DB, Redis, CSRF, Auth)
-│   │   └── common/           # 共享工具 (枚举, Schema, 日期)
-│   ├── alembic/              # 24 个数据库迁移版本
-│   ├── docker/               # docker-compose.yml
-│   ├── tests/                # 单元测试 + 集成测试
-│   ├── scripts/              # 运维脚本（全流程 Smoke 测试）
-│   ├── pyproject.toml        # 依赖与项目配置
-│   └── Dockerfile            # 多阶段 Docker 构建
+│   │   ├── main.py                # FastAPI 应用工厂
+│   │   ├── config.py              # Pydantic Settings 配置
+│   │   ├── lifespan.py            # 启动/关闭生命周期
+│   │   ├── routers/               # 13 个 API 路由器
+│   │   ├── models/                # 30 个 SQLAlchemy ORM 模型
+│   │   ├── services/              # 16 个业务逻辑服务
+│   │   ├── workers/               # Celery Worker + Inline Runner
+│   │   ├── core/                  # 基础设施 (DB, Redis, CSRF, Auth)
+│   │   ├── common/                # 共享工具 (枚举, Schema, 日期)
+│   │   └── prompts/               # LLM Prompt 模板
+│   ├── alembic/                   # 数据库迁移 (27 版本)
+│   ├── docker/                    # docker-compose.yml + 环境配置
+│   ├── tests/                     # 单元测试 + 集成测试 + 契约测试
+│   ├── scripts/                   # 运维脚本 (Smoke 测试, DB 初始化)
+│   ├── Dockerfile                 # 多阶段 Docker 构建
+│   ├── pyproject.toml             # 依赖与项目配置
+│   └── openapi.json               # OpenAPI 规范
 │
-├── frontend/                 # ✅ 活跃前端 (Phase 2)
+├── frontend/                      # 前端服务
 │   ├── src/
-│   │   ├── api/              # API 客户端层 (17 文件)
-│   │   ├── app/              # App Shell, 路由, QueryClient
-│   │   ├── auth/             # 认证守卫组件 (7 文件)
-│   │   ├── components/       # 通用 UI 组件
-│   │   ├── features/         # 业务功能模块
-│   │   │   ├── learning-path/   # 学习路径图谱 (@xyflow)
-│   │   │   ├── knowledge/       # 知识库管理
-│   │   │   ├── node-details/    # 节点详情面板
-│   │   │   ├── recommendations/ # 推荐卡片（真实 API）
-│   │   │   └── tasks/           # 任务流与 SSE 事件
-│   │   ├── mappers/          # DTO → Model 转换器
-│   │   ├── mocks/            # MSW Mock 数据 (离线开发)
-│   │   ├── pages/            # 22 个页面组件
-│   │   ├── schemas/          # Zod DTO Schema (14 文件)
-│   │   └── stores/           # Zustand 状态管理
-│   ├── e2e/                  # Playwright E2E 测试
+│   │   ├── api/                   # API 客户端层
+│   │   ├── app/                   # App Shell, 路由, QueryClient
+│   │   ├── auth/                  # 认证守卫组件
+│   │   ├── components/            # 通用 UI 组件
+│   │   ├── features/              # 业务功能模块 (学习路径/知识库/任务等)
+│   │   ├── mappers/               # DTO → Model 转换器
+│   │   ├── mocks/                 # MSW Mock 数据 (离线开发)
+│   │   ├── pages/                 # 22 个页面组件
+│   │   ├── schemas/               # Zod DTO Schema
+│   │   └── stores/                # Zustand 状态管理
+│   ├── e2e/                       # Playwright E2E 测试
+│   ├── Dockerfile                 # Nginx 生产构建
+│   ├── nginx.conf                 # Nginx 反向代理配置
 │   └── package.json
 │
-├── src/                      # 📦 遗留后端 (Phase 1/2, 仅参考)
-├── desktop_client/           # 📦 遗留 PyQt6 桌面客户端 (仅参考)
-├── app.py                    # 📦 遗留 Streamlit 入口 (仅参考)
-├── docs/                     # API 契约文档 + 阶段报告
-├── data/                     # 运行时数据
-├── CLAUDE.md                 # Claude Code 架构说明
-└── plan.md                   # 项目规划与实施方案文档
+├── docs/                          # 文档
+│   ├── api-contracts/             # API 契约
+│   ├── reports/                   # 阶段报告
+│   └── 作品说明书.md
+│
+├── CLAUDE.md                      # AI 辅助开发架构说明
+└── README.md                      # 本文件
 ```
 
 ---
 
-## API 概览
+## 部署手册
 
-后端提供 **47+ RESTful API 端点**，分为 13 个路由模块：
+### 环境要求
 
-| 路由模块 | 路径前缀 | 端点数 | 说明 |
-|---------|---------|--------|------|
-| 认证 | `/api/auth` | 8 | 注册、登录、刷新、登出、邮箱验证 |
-| 用户 | `/api/users` | 3 | 个人信息、新手引导 |
-| 学习目标 | `/api/learning-goals` | 5 | 目标 CRUD |
-| 澄清 | `/api/learning-goals` | - | 学习目标澄清问答 |
-| 诊断 | `/api/learning-goals` | - | 知识水平诊断 |
-| 续学 | `/api/learning/resume` | 1 | 断点续学恢复 |
-| 任务 | `/api/tasks` | 4 | 后台任务管理 + SSE 实时推送 |
-| 学习路径 | `/api/learning-paths` | 6 | DAG 学习路径管理、版本激活、推荐 |
-| 学习单元 | `/api/learning-paths` | 4 | 单元内容、讲义、题库、思维导图 |
-| 评估 | `/api/assessments` | 2 | 通关评估生成、提交与评分 |
-| 知识库 | `/api/knowledge` | 6 | 文档上传、索引、搜索、删除 |
-| 答疑 | `/api/chat` | 2 | 智能辅导问答（RAG 增强） |
-| 学习画像 | `/api/profile` | 7 | 对话式画像采集、八维画像查看与修正 |
-| 健康检查 | `/health` | 2 | 存活探针 + 就绪探针 |
+| 组件 | 版本要求 |
+|------|---------|
+| Python | 3.12+ |
+| Node.js | 20+ |
+| PostgreSQL | 16+ |
+| Redis | 7+ |
+| MinIO | 最新版 |
+| Docker | 24+ |
+| Docker Compose | 2.20+ |
 
-完整 OpenAPI 规范见 `backend/openapi.json`。
+### 方式一：Docker Compose 一键部署（推荐）
 
----
+Docker Compose 编排了以下服务：PostgreSQL、Redis、MinIO、Mailpit（邮件测试）、后端 API、Celery Worker、Celery Beat、Outbox Publisher、前端 Nginx。
 
-## 数据模型
-
-系统包含 **30 个 ORM 模型**，覆盖完整的学习生命周期：
-
-| 领域 | 模型 |
-|------|------|
-| 用户与认证 | User, UserProfile, AuthSession, RefreshToken, VerificationToken, AuthAuditLog |
-| 学习目标 | LearningGoal |
-| 后台任务 | BackgroundTask, TaskEvent |
-| 学习路径 | LearningPath, LearningPathVersion, LearningStage, LearningNode, LearningEdge, LearningPathRevisionRequest |
-| 学习进度 | LearningProgress, MasterySnapshot, Recommendation |
-| 学习单元与评估 | Assessment, AssessmentQuestion, AssessmentAttempt, AssessmentAnswer, LearningUnitContent, LearningUnitContentVersion |
-| 知识库 | KnowledgeDocument, KnowledgeChunk |
-| 澄清问答 | ClarificationSet, ClarificationQuestion, ClarificationAnswer |
-| 学习画像 | StudentProfile, ProfileConversationSession, ProfileConversationMessage |
-
----
-
-## 核心功能详解
-
-### 🧠 八维学习画像 (Phase 3.6)
-
-系统通过**自然语言对话式采集**构建八维学习画像，替代静态表单：
-
-| 维度 | 说明 | 证据来源 |
-|------|------|---------|
-| 知识深度 (knowledge_depth) | 前置知识掌握程度 | 诊断 / 评估 / 对话 |
-| 概念掌握 (concept_grasp) | 新概念学习速度 | 评估 / 对话 |
-| 先修掌握 (prerequisite_mastery) | 前置课程掌握度 | 诊断 |
-| 解题能力 (problem_solving) | 复杂问题解决能力 | 评估 |
-| 实践能力 (practice_ability) | 动手实践水平 | 评估 / 对话 |
-| 学习节奏 (learning_pace) | 偏好学习速度 | 对话 / 行为分析 |
-| 资源偏好 (resource_preference) | 偏好的学习资源类型 | 对话 / 行为分析 |
-| 错误模式 (error_pattern) | 常见错误类型与模式 | 评估 / 诊断 |
-
-**核心特性：**
-- 对话式采集：最少 3 轮、最多 7 轮多轮对话，覆盖 ≥6/8 维度，置信度 ≥0.65
-- LLM 抽取 + 关键词 Fallback
-- 加权合并引擎：数值维度加权合并、列表维度频次排序、错误模式累加衰减 (15%)
-- 画像参与全链路个性化：诊断 → 路径规划 → 内容生成 → 题库生成 → 推荐
-- 评估完成自动更新画像证据
-
-### 🤖 多智能体协作
-
-系统包含 **9 个专业智能体**，各司其职协同完成教学任务：
-
-| 智能体 | 职责 |
-|--------|------|
-| 学习路径规划智能体 | 基于目标与画像生成 DAG 学习路径（5-15 节点） |
-| 讲义内容生成智能体 | 生成深度教学内容（≥500 字/章节），融入画像偏好 |
-| 教育评估设计智能体 | 生成单选/多选/判断/简答评估题目，融入画像薄弱点 |
-| 答疑辅导智能体 | 基于知识点上下文 + 知识库 RAG 的智能问答 |
-| 补弱辅导智能体 | 针对评估未通过的薄弱环节分析 |
-| 质量审核智能体 | 审核生成内容的事实准确性与逻辑完整性 |
-| 学生画像智能体 | 多轮对话提取八维学习特征，持续证据更新 |
-| 画像对话智能体 | 自然语言对话式画像采集与追问策略 |
-| 讲义扩展智能体 | 从已有内容扩展生成更详尽的教学讲义 |
-
-### 🔐 安全认证体系
-
-- **密码**: Argon2id 哈希（抗暴力破解）
-- **会话**: Cookie-based JWT + Refresh Token 轮换 + 重放检测
-- **CSRF**: Double-Submit Cookie 模式
-- **速率限制**: 5 次登录失败 → 15 分钟锁定
-- **审计**: 登录日志全量记录
-
-### 📊 学习路径 DAG
-
-- 基于有向无环图（DAG）的学习路径建模
-- 前端使用 @xyflow/react + ELK.js 自动布局
-- 支持路径版本管理与修订请求（Revision）
-- 基于 logical_key 的进度迁移与 Diff 可视化
-- 拓扑排序验证确保依赖关系正确
-
-### 📝 通关评估与掌握度 (Phase 3.5)
-
-- **异步生成**：评估题目通过 Celery Worker 后台生成（双事务模式），不阻塞 HTTP 请求
-- **四种题型**：单选 (single_choice)、多选 (multiple_choice)、判断 (true_false)、简答 (short_answer)
-- **客观题即时评分**：提交后同步评分，即时反馈
-- **简答题 LLM 异步评分**：双事务 Worker，LLM 调用期间不持有数据库事务
-- **Mastery 追踪**：评估通过 → 更新掌握度 → 标记节点完成 → 解锁后继节点
-- **多次评估**：支持多次重试，`client_request_id` 幂等提交
-- **Fallback 题库**：LLM 不可用时生成确定性模板题目（8-10 题）
-- **多前置节点**：必须全部完成才解锁后续节点
-
-### ⚡ 异步任务系统
-
-- **Transactional Outbox** 模式确保任务可靠发布
-- Celery Worker 执行长时间任务（路径生成、单元生成、评估生成、知识索引、画像对话）
-- **开发模式 Inline Runner**：无需 Celery，进程内直接执行异步任务
-- **SSE (Server-Sent Events)** 实时推送任务进度
-- 僵尸任务自动检测与恢复
-
-### 📚 知识库管理 (Phase 3.7)
-
-- **对象存储**：MinIO 存储知识文档，UUID storage_key 防路径遍历
-- **流式上传**：分块读取 + SHA-256 校验 + MIME 白名单 + 事务回滚
-- **多格式解析**：PDF、TXT、Markdown、DOCX、CSV、JSON 六种格式
-- **确定性分块**：800-1200 tokens，12% overlap，优先级按段落/标题边界切分
-- **全文搜索**：PostgreSQL `to_tsvector` + `plainto_tsquery` + `ts_rank_cd` + GIN 索引
-- **版本化索引**：Reindex 先写新版本 Chunks → 成功后原子切换 active_index_version
-- **安全删除**：级联删除对象存储文件 + 数据库 Chunks + Document 状态机
-
-### 🎯 自适应学习
-
-- 学习前诊断评估知识水平 + 八维画像采集
-- 基于掌握度（Mastery）的规则引擎个性化推荐（复习/练习/继续/资料）
-- 学习进度实时追踪
-- 断点续学（Resume）功能
-- 画像持续更新：评估结果 → 画像证据 → 维度合并
-
-### 📖 讲义级内容生成
-
-- 基于大语言模型的深度教学内容生成（每章节 ≥500 字）
-- Step-by-step 步骤拆解、深度解析、常见误区分析
-- 完整可运行代码示例
-- 支持画像偏好定制（难度、风格、重点方向、薄弱点强化）
-- LLM 不可用时自动降级到模板内容
-- 思维导图（Mermaid 树）、题库等配套资源
-
-### 💬 常驻答疑辅导 (RAG 增强)
-
-- 节点学习页右侧常驻答疑面板
-- 基于当前知识点上下文 + 知识库检索的 RAG 增强问答
-- Markdown 格式回复，支持代码高亮 + 引用标注（文件名、页码）
-- 对话历史保持，滚动自动定位
-- 安全错误响应（不泄露 LLM Provider 错误细节）
-
----
-
-## 环境变量
-
-### 后端 (`backend/.env`)
-
-```ini
-# 应用
-APP_ENV=development
-APP_SECRET_KEY=<至少 64 位随机字符>
-
-# 数据库
-DATABASE_URL=postgresql+asyncpg://eduagentx:eduagentx@localhost:5432/eduagentx
-
-# Redis
-REDIS_URL=redis://localhost:6379/0
-
-# MinIO (知识库对象存储)
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=eduagentx
-MINIO_SECRET_KEY=<your-secret-key>
-MINIO_BUCKET_NAME=eduagentx-knowledge
-
-# Cookie 安全
-COOKIE_SECURE=false          # 生产环境设为 true
-COOKIE_SAMESITE=lax
-COOKIE_DOMAIN=               # 生产环境填域名
-
-# CSRF
-CSRF_COOKIE_NAME=csrftoken
-CSRF_HEADER_NAME=X-CSRF-Token
-
-# Token 有效期
-ACCESS_TOKEN_TTL_SECONDS=900       # 15 分钟
-REFRESH_TOKEN_TTL_SECONDS=2592000  # 30 天
-
-# CORS
-CORS_ALLOWED_ORIGINS=["http://localhost:5173"]
-
-# 日志
-LOG_LEVEL=INFO
-
-# LLM (内容生成、路径规划、画像对话等)
-LLM_API_BASE=https://api.siliconflow.cn/v1
-LLM_API_KEY=<your-api-key>
-LLM_MODEL=deepseek-ai/DeepSeek-V4-Pro
-```
-
-### 前端 (`frontend/.env`)
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `VITE_ENABLE_MSW` | `true` | 启用 MSW Mock API（离线开发） |
-| `VITE_API_PROXY_TARGET` | `http://127.0.0.1:8000` | Vite 代理目标地址（端口 8000 被占用时可改为 8080） |
-| `VITE_EXPOSE_TEST_API` | `false` | 暴露测试用 API |
-| `VITE_CSRF_COOKIE_NAME` | `csrftoken` | CSRF Cookie 名称 |
-| `VITE_CSRF_HEADER_NAME` | `X-CSRF-Token` | CSRF 请求头名称 |
-
----
-
-## 前端页面路由
-
-| 页面 | 路由 | 说明 |
-|------|------|------|
-| LoginPage | `/auth/login` | 登录 |
-| RegisterPage | `/auth/register` | 注册 |
-| VerifyEmailPage | `/auth/verify-email` | 邮箱验证 |
-| ForgotPasswordPage | `/auth/forgot-password` | 忘记密码 |
-| ResetPasswordPage | `/auth/reset-password` | 重置密码 |
-| OnboardingPage | `/onboarding` | 新手引导 |
-| ResumePage | `/` | 首页 / 断点续学 |
-| GoalCreatePage | `/goals/new` | 创建学习目标 |
-| GoalClarifyPage | `/goals/:goalId/clarify` | 学习目标澄清 |
-| DiagnosticPage | `/goals/:goalId/diagnostic` | 知识诊断 |
-| PathGeneratingPage | `/goals/:goalId/generating` | 路径生成中 |
-| PathReviewPage | `/learning-paths/:pathId/review` | 路径审核与版本 Diff |
-| LearningPathPage | `/learning-paths/:pathId` | 学习路径图谱 |
-| UnitLearningPage | `/learning-paths/:pathId/nodes/:nodeId` | 单元学习（资源 Tabs: 内容/讲义/思维导图/题库 + 常驻答疑面板） |
-| AssessmentPage | `/learning-paths/:pathId/nodes/:nodeId/assessment` | 通关评估（URL 参数恢复: `?assessment_id=` / `?attempt_id=`） |
-| KnowledgePage | `/knowledge` | 知识库管理 |
-| ProfileConversationPage | `/profile/conversation` `/profile/conversation/:sessionId` | 学习画像对话采集 |
-| ProfileSummaryPage | `/profile` | 八维画像卡片展示 |
-| TasksPage | `/tasks` | 后台任务面板 |
-| ProfileSettingsPage | `/settings/profile` | 个人设置 |
-| SecuritySettingsPage | `/settings/security` | 安全设置 |
-
-前端采用分层路由守卫：`GuestOnlyRoute` → `ProtectedRoute` → `AccountStatusRoute` → `VerifiedUserRoute` → `OnboardingRoute`，所有页面均使用 `React.lazy` 懒加载。
-
----
-
-## 前端常用命令
+#### 步骤
 
 ```bash
-cd frontend
+# 1. 配置后端环境变量
+cd backend/docker
+cp .env.docker.example .env.docker
+# 编辑 .env.docker，填入 APP_SECRET_KEY、LLM_API_KEY 等配置
 
-# 开发
-npm run dev                   # 启动开发服务器 (默认启用 MSW)
-npm run typecheck             # TypeScript 类型检查
-npm run lint                  # ESLint 检查 (零警告)
+# 2. 启动全部服务
+docker-compose up -d
 
-# 测试
-npm run test                  # 单元测试 (243+ tests)
-npm run test:watch            # 监听模式
-npm run test:coverage         # 覆盖率报告 (四项 ≥ 80%)
-
-# 构建
-npm run build                 # 生产构建
-npm run verify:production     # 检查 Mock 代码泄露
-npm run check:bundle          # Bundle 大小预算检查
-npm run check:contract        # DTO Schema 契约检查
-
-# E2E 测试
-npm run e2e:install           # 安装 Playwright 浏览器
-npm run e2e                   # 运行 E2E 测试
-npm run e2e:ui                # Playwright UI 模式
-npm run e2e:real              # 真实后端 E2E 测试
+# 3. 验证服务状态
+docker-compose ps
 ```
 
----
+启动完成后：
+- 前端访问 `http://localhost:8081`
+- 后端 API 文档 `http://localhost:8000/docs`
+- MinIO Console `http://localhost:9001`（账号 `minioadmin` / `minioadmin`）
+- Mailpit 邮件查看 `http://localhost:8025`
 
-## 后端常用命令
+> 数据库迁移由 `migrate` 服务自动执行，无需手动运行 `alembic upgrade head`。
 
-```bash
-cd backend
-
-# 开发
-# 开发模式自动启用 Inline Runner，无需启动 Celery
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-
-# 数据库迁移
-alembic upgrade head          # 执行迁移
-alembic downgrade -1          # 回退一步
-alembic revision --autogenerate -m "description"  # 生成迁移
-
-# Celery
-celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
-celery -A app.workers.celery_app beat --loglevel=info
-
-# 测试
-pytest                        # 运行测试 (813+ tests)
-pytest --cov=app --cov-report=term-missing  # 带覆盖率
-ruff check .                  # 代码风格
-mypy app/                     # 类型检查
-bandit -r app/                # 安全扫描
-
-# 全流程验证
-python scripts/smoke_full_learning_flow.py --base-url http://127.0.0.1:8000 --timeout 300
-```
-
----
-
-## Docker 服务
-
-`backend/docker/docker-compose.yml` 定义了 6 个服务：
+#### Docker 服务列表
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | `postgres` | 5432 | PostgreSQL 16 Alpine |
 | `redis` | 6379 | Redis 7 Alpine |
 | `minio` | 9000 / 9001 | MinIO 对象存储（API / Console） |
-| `backend` | 8000 | FastAPI 应用（含 Inline Runner） |
-| `celery-worker` | - | Celery 异步任务执行器（生产环境） |
-| `celery-beat` | - | Celery 定时任务调度器（生产环境） |
+| `mailpit` | 1025 / 8025 | 邮件测试服务（SMTP / Web UI） |
+| `migrate` | — | 一次性数据库迁移服务 |
+| `backend` | 8000 | FastAPI 应用 |
+| `celery-worker` | — | Celery 异步任务执行器 |
+| `celery-beat` | — | Celery 定时任务调度器 |
+| `outbox-publisher` | — | Transactional Outbox 事件发布器 |
+| `frontend` | 8081 | Nginx 前端（反向代理至 backend） |
+
+### 方式二：本地开发部署
+
+适用于开发调试场景。开发模式下后端自动启用 **Inline Runner**，无需启动 Celery Worker。
+
+#### 1. 启动基础设施服务
+
+使用 Docker 单独启动 PostgreSQL、Redis、MinIO：
+
+```bash
+cd backend/docker
+docker-compose up -d postgres redis minio mailpit
+```
+
+#### 2. 配置并启动后端
+
+```bash
+cd backend
+cp .env.example .env
+# 编辑 .env，填入数据库、Redis、MinIO、LLM 等配置
+
+# 创建虚拟环境
+python -m venv .venv
+# Linux/Mac:  source .venv/bin/activate
+# Windows:    .venv\Scripts\activate
+
+# 安装依赖
+pip install -e ".[dev]"
+
+# 执行数据库迁移
+alembic upgrade head
+
+# 启动后端
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+#### 3. 启动前端
+
+```bash
+cd frontend
+cp .env.example .env.local
+# 默认启用 MSW Mock，可离线开发；如需连接真实后端，将 VITE_ENABLE_MSW 设为 false
+
+npm install
+npm run dev
+```
+
+前端访问 `http://localhost:5173`。
+
+### 环境变量配置
+
+#### 后端 (`backend/.env`)
+
+```ini
+# ── 应用 ──
+APP_ENV=development
+APP_SECRET_KEY=<至少 64 位随机字符>
+
+# ── 数据库 ──
+DATABASE_URL=postgresql+asyncpg://eduagentx:eduagentx@localhost:5432/eduagentx
+
+# ── Redis ──
+REDIS_URL=redis://localhost:6379/0
+
+# ── MinIO 对象存储 ──
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET_NAME=eduagentx-knowledge
+
+# ── Cookie 安全 ──
+COOKIE_SECURE=false          # 生产环境设为 true
+COOKIE_SAMESITE=lax
+COOKIE_DOMAIN=               # 生产环境填域名
+
+# ── CSRF ──
+CSRF_COOKIE_NAME=csrftoken
+CSRF_HEADER_NAME=X-CSRF-Token
+
+# ── Token 有效期 ──
+ACCESS_TOKEN_TTL_SECONDS=900       # 15 分钟
+REFRESH_TOKEN_TTL_SECONDS=2592000  # 30 天
+
+# ── CORS ──
+CORS_ALLOWED_ORIGINS=["http://localhost:5173"]
+
+# ── 日志 ──
+LOG_LEVEL=INFO
+
+# ── LLM (内容生成、路径规划、画像对话等) ──
+# 未配置时系统自动降级到模板生成
+LLM_API_BASE=https://api.openai.com/v1
+LLM_API_KEY=<your-api-key>
+LLM_MODEL=gpt-4o-mini
+```
+
+#### 前端 (`frontend/.env.local`)
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VITE_ENABLE_MSW` | `true` | 启用 MSW Mock API（离线开发） |
+| `VITE_API_PROXY_TARGET` | `http://127.0.0.1:8000` | Vite 代理目标地址 |
+| `VITE_EXPOSE_TEST_API` | `false` | 暴露测试用 API（仅 E2E） |
+| `VITE_CSRF_COOKIE_NAME` | `csrftoken` | CSRF Cookie 名称 |
+| `VITE_CSRF_HEADER_NAME` | `X-CSRF-Token` | CSRF 请求头名称 |
+
+### 健康检查
+
+```bash
+# 后端存活探针
+curl http://localhost:8000/health/live
+
+# 后端就绪探针（检查 DB + Redis 连接）
+curl http://localhost:8000/health/ready
+
+# 前端健康检查
+curl http://localhost:8081/health
+
+# 数据库连接检查
+docker exec -it eduagentx-postgres psql -U eduagentx -d eduagentx -c "SELECT 1;"
+```
+
+### 常用运维命令
+
+#### 后端
+
+```bash
+cd backend
+
+# 数据库迁移
+alembic upgrade head                              # 执行迁移
+alembic downgrade -1                              # 回退一步
+alembic revision --autogenerate -m "description"  # 生成新迁移
+
+# Celery Worker（生产环境）
+celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+celery -A app.workers.celery_app beat --loglevel=info
+
+# 代码质量
+ruff check .          # 代码风格检查
+mypy app/             # 类型检查
+bandit -r app/        # 安全扫描
+pytest --cov=app      # 测试 + 覆盖率
+
+# 全流程 Smoke 测试
+python scripts/smoke_full_learning_flow.py --base-url http://127.0.0.1:8000
+```
+
+#### 前端
+
+```bash
+cd frontend
+
+npm run dev              # 开发服务器
+npm run typecheck        # TypeScript 类型检查
+npm run lint             # ESLint 检查
+npm run test             # 单元测试
+npm run test:coverage    # 覆盖率报告
+npm run build            # 生产构建
+npm run e2e              # E2E 测试 (Mock)
+npm run e2e:real         # E2E 测试 (真实后端)
+```
+
+#### Docker
 
 ```bash
 cd backend/docker
 
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f backend
-
-# 停止并清理
-docker-compose down -v
+docker-compose up -d              # 启动所有服务
+docker-compose down               # 停止服务
+docker-compose down -v            # 停止并清除数据卷
+docker-compose logs -f backend    # 查看后端日志
+docker-compose restart backend    # 重启后端
 ```
 
----
-
-## 测试体系
-
-### 后端测试
-
-- **框架**: pytest + pytest-asyncio + httpx
-- **测试数量**: 813+ passed
-- **覆盖率要求**: ≥ 85%
-- **类型检查**: MyPy strict mode (84 source files, 0 errors)
-- **代码风格**: Ruff (198 files, 0 errors)
-- **安全扫描**: Bandit + pip-audit
-- **测试分类**: 单元测试 (10+ 文件) + 集成测试 + 契约测试 + 故障恢复测试 (22 tests)
-
-### 前端测试
-
-- **单元测试**: Vitest + Testing Library (29 文件, 243+ tests)
-- **E2E 测试**: Playwright (32 tests, 29 real-backend passed)
-- **覆盖率要求**: 语句/分支/函数/行 四项 ≥ 80%
-- **契约测试**: Zod Schema 与 OpenAPI 契约一致性验证 (16 sections)
-- **Mock 系统**: MSW 离线开发 + 有状态 Mock DB
-
----
-
-## 遗留系统（Phase 1/2，仅参考）
-
-> ⚠️ 以下系统已不再作为主系统使用，代码保留在仓库中供架构参考。
-
-### 遗留技术栈
-
-| 组件 | 技术 |
-|------|------|
-| Web UI | Streamlit 1.38 (`app.py`) |
-| 桌面客户端 | PyQt6 6.7.1 (`desktop_client/`) |
-| 后端 API | FastAPI 0.115 + Uvicorn |
-| Agent 框架 | LangGraph 0.2 + LangChain 0.2 |
-| RAG | ChromaDB 0.5.5, pypdf 4.3.1 |
-| 持久化 | SQLite (`data/tasks.db`) |
-
-### 遗留启动方式
-
-```bash
-# 遗留后端
-uvicorn src.api.server:app --host 127.0.0.1 --port 8000
-
-# 遗留桌面客户端
-python -m desktop_client.main
-
-# 遗留 Web 客户端
-streamlit run app.py
-```
-
----
-
-## 项目版本演进
-
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| Phase 1/2 | 遗留系统 (Streamlit + PyQt6 + LangGraph) | 📦 仅参考 |
-| Phase 3.0 | Task Handler Registry + 访问控制 + Tutor 安全 | ✅ |
-| Phase 3.3 | Path Revision 完整闭环（版本管理与激活） | ✅ |
-| Phase 3.4 | Unit Content & Lecture（版本化内容 + 资源 Tabs） | ✅ |
-| Phase 3.5 | Assessment & Mastery（异步评估 + 掌握度 + 节点解锁） | ✅ |
-| Phase 3.6 | 8D Learner Profile（对话式画像 + 合并引擎 + 全链路个性化） | ✅ |
-| Phase 3.7 | Knowledge Base MVP（MinIO + 文档解析 + FTS 搜索） | ✅ |
-| Phase 3.8 | Rule-Based Recommendations（规则引擎 + 去 Mock） | ✅ |
-| Phase 4-A | Release Hardening（全量门禁 813 tests + 29 E2E） | ✅ |
-| Phase 4-B/C | 故障恢复验收 + Staging 验证 | ✅ |
-
----
-
-## 常见问题 (FAQ)
+### 常见问题排查
 
 **Q: Docker Compose 启动后数据库连接失败？**
-> A: 确认 PostgreSQL 容器已就绪：`docker-compose logs postgres`。首次启动需要执行 `alembic upgrade head` 创建表结构。
+
+确认 PostgreSQL 容器已就绪：
+
+```bash
+docker-compose logs postgres
+docker-compose ps postgres
+```
+
+`migrate` 服务会在 PostgreSQL 健康后自动执行迁移。如迁移失败，检查 `.env.docker` 中的 `DATABASE_URL` 配置。
 
 **Q: 前端 MSW Mock 模式下如何连接真实后端？**
-> A: 将 `frontend/.env` 中的 `VITE_ENABLE_MSW` 设为 `false`，并确认后端已启动。
+
+将 `frontend/.env.local` 中的 `VITE_ENABLE_MSW` 设为 `false`，并确认后端已启动在 `http://127.0.0.1:8000`。
 
 **Q: Celery Worker 没有处理任务？**
-> A: 开发模式下使用 Inline Runner 自动处理任务，无需启动 Celery。生产环境下检查 Redis 连接是否正常，确认 Worker 已启动且绑定到了正确的 Broker URL。
 
-**Q: 学习路径图谱不显示？**
-> A: 确认已完成学习目标创建、知识诊断等前置步骤。路径生成是异步任务，需等待 Worker 完成。
+开发模式下使用 Inline Runner 自动处理任务，无需启动 Celery。生产环境下检查 Redis 连接是否正常，确认 Worker 已启动且绑定到了正确的 Broker URL。
 
 **Q: MinIO 连接失败？**
-> A: 确认 Docker Compose 中 minio 服务已启动且健康。开发模式下可使用 InMemoryObjectStorage 作为默认存储后端。访问 `http://localhost:9001` 可打开 MinIO Console。
+
+确认 Docker Compose 中 minio 服务已启动且健康。访问 `http://localhost:9001` 可打开 MinIO Console（账号 `minioadmin` / `minioadmin`）。
+
+**Q: LLM 相关功能不工作？**
+
+检查 `.env` 中的 `LLM_API_BASE`、`LLM_API_KEY`、`LLM_MODEL` 是否正确配置。未配置时系统自动降级到模板生成，功能可用但内容质量降低。
 
 **Q: 如何查看 API 文档？**
-> A: 启动后端后访问 `http://localhost:8000/docs`（Swagger UI）或 `http://localhost:8000/redoc`（ReDoc）。完整 OpenAPI 规范见 `backend/openapi.json`。
 
-**Q: 学习画像如何参与个性化？**
-> A: 完成 `/profile/conversation` 对话采集后，画像自动参与诊断、路径规划、内容生成、题库生成和推荐。评估完成后画像证据自动更新，无需手动操作。
-
-**Q: 知识库支持哪些文件格式？**
-> A: 支持 PDF、TXT、Markdown、DOCX、CSV、JSON 六种格式。上传后自动解析、分块、索引，可通过搜索或 Tutor 面板检索使用。
-
----
-
-## 开发规范
-
-- **后端代码风格**: Ruff (lint + format) + MyPy (strict)
-- **前端代码风格**: ESLint (零警告) + Prettier
-- **提交规范**: Conventional Commits
-- **API 契约**: DTO Schema 定义在 `frontend/src/schemas/`，冻结契约在 `docs/api-contracts/`
-- **数据库迁移**: 所有 Schema 变更必须通过 Alembic 迁移脚本
-- **安全**: 密钥不得提交到 Git，所有敏感配置通过环境变量注入
+启动后端后访问 `http://localhost:8000/docs`（Swagger UI）或 `http://localhost:8000/redoc`（ReDoc）。
 
 ---
 

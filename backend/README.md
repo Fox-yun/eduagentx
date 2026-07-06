@@ -9,7 +9,7 @@
 | ORM | SQLAlchemy 2.x (async) |
 | 数据库 | PostgreSQL 16 |
 | 缓存 | Redis 7 |
-| 迁移 | Alembic |
+| 迁移 | Alembic (27 版本) |
 | 认证 | Argon2id + JWT (Cookie-based) |
 | 测试 | Pytest + httpx |
 | 代码质量 | Ruff + MyPy + Bandit |
@@ -60,10 +60,10 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 | Resume | 1 | 首页状态 |
 | Tasks | 4 | 后台任务 + SSE |
 | Paths | 4 | 学习路径 + 版本 |
-| Units | 4 | 单元内容 + 评估 |
+| Units | 6 | 单元内容、讲义、题库、思维导图、多模态资源 |
 | Knowledge | 6 | 知识库 + 搜索 |
 | Health | 2 | 健康检查 |
-| **总计** | **37** | |
+| **总计** | **41+** | |
 
 ## 数据模型
 
@@ -83,6 +83,9 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 | background_tasks | 后台任务 |
 | task_events | 任务事件 |
 | learning_unit_contents | 单元内容 |
+| learning_unit_content_versions | 单元内容版本 |
+| learning_lectures | 讲义 |
+| learning_resources | 多模态资源 (PPTX/ZIP/交互) |
 | assessments | 评估 |
 | assessment_questions | 题目 |
 | assessment_attempts | 尝试 |

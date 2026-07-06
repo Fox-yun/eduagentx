@@ -285,3 +285,65 @@ class TestCanFinalizeEnforcement:
         await db_session.refresh(session)
 
         assert ProfileConversationService.can_finalize(session) is True
+
+    async def test_can_finalize_fallback_at_max_turns(self, db_session):
+        """E0-A5 fallback: can_finalize returns True at MAX_TURNS even with
+        insufficient dimensions and low confidence (LLM fallback scenario)."""
+        user_id = await _create_user(db_session)
+        svc = ProfileConversationService(db_session)
+
+        session = await svc.create_session(
+            user_id=user_id,
+            learning_goal="学 Python",
+        )
+
+        # Simulate fallback extraction: only 3 dimensions, low confidence
+        session.extracted_dimensions = _make_extracted_dimensions(3, 0.4)
+        session.turn_count = 7  # MAX_TURNS
+        await db_session.commit()
+        await db_session.refresh(session)
+
+        assert ProfileConversationService.can_finalize(session) is True
+
+    async def test_can_finalize_fallback_at_max_turns_zero_dimensions(self, db_session):
+        """E0-A5 fallback: can_finalize returns True at MAX_TURNS even with
+        zero extracted dimensions (total LLM failure scenario)."""
+        user_id = await _create_user(db_session)
+        svc = ProfileConversationService(db_session)
+
+        session = await svc.create_session(
+            user_id=user_id,
+            learning_goal="学 Python",
+        )
+
+        session.extracted_dimensions = {}
+        session.turn_count = 7  # MAX_TURNS
+        await db_session.commit()
+        await db_session.refresh(session)
+
+        assert ProfileConversationService.can_finalize(session) is True
+
+    async def test_finalize_at_max_turns_with_fallback_data(self, db_session):
+        """E0-A5 fallback: finalize() succeeds at MAX_TURNS with low-confidence
+        fallback data, creating a provisional profile."""
+        user_id = await _create_user(db_session)
+        svc = ProfileConversationService(db_session)
+
+        session = await svc.create_session(
+            user_id=user_id,
+            learning_goal="学 Python",
+        )
+
+        session.extracted_dimensions = _make_extracted_dimensions(3, 0.4)
+        session.turn_count = 7  # MAX_TURNS
+        await db_session.commit()
+        await db_session.refresh(session)
+
+        # can_finalize must pass for finalize to proceed
+        assert ProfileConversationService.can_finalize(session) is True
+
+        profile = await svc.finalize(session)
+        assert profile is not None
+        assert profile.user_id == user_id
+        # With low confidence, profile should be provisional
+        assert profile.status in ("active", "provisional")

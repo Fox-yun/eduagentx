@@ -254,7 +254,7 @@ class CodeZIPGenerator:
             "",
             "def main():",
             '    """主函数入口。"""',
-            '    print("Starting ' + title + '...")',
+            f'    print("Starting {title}...")',
             "",
         ]
 
@@ -274,7 +274,7 @@ class CodeZIPGenerator:
             lines.extend([
                 "",
                 f"    # {sec_title}",
-                f"    print(\"{sec_title}: {code_snippet}\")",
+                f'    print("{sec_title}: {code_snippet}")',
             ])
 
         lines.extend([
@@ -298,9 +298,9 @@ class CodeZIPGenerator:
             " */",
             "",
             "function main() {",
-            '    console.log("Starting ' + title + "...");",
+            f'    console.log("Starting {title}...");',
             "",
-        ])
+        ]
 
         # Add section examples
         for i, sec in enumerate(sections[:3], 1):
@@ -334,7 +334,7 @@ class CodeZIPGenerator:
     def _generate_python_test(cls) -> str:
         """Generate Python test file."""
         return """# -*- coding: utf-8 -*-
-"""单元测试示例"""
+\"\"\"单元测试示例\"\"\"
 
 import unittest
 

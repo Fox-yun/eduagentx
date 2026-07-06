@@ -1,6 +1,6 @@
-# EduAgentX 前端应用 (Phase 1)
+# EduAgentX 前端应用 (Phase 2)
 
-EduAgentX 是基于 React 18、Vite、Tailwind CSS v4 以及 `@xyflow/react` 的个性化智能体引导式学习工作台。
+EduAgentX 是基于 React 18、Vite、Tailwind CSS v4 以及 `@xyflow/react` 的个性化智能体引导式学习工作台。当前已完成 Phase 2 全部功能，包括认证体系、学习画像、知识库、评估、多模态资源等完整业务闭环。
 
 ---
 
@@ -82,22 +82,43 @@ EduAgentX 是基于 React 18、Vite、Tailwind CSS v4 以及 `@xyflow/react` 的
 
 ---
 
-## 五、Phase 1 范围 与 Phase 2 预留
+## 五、Phase 2 已完成功能
 
-### Phase 1 已完成范围：
-* 完整的 Tailwind v4 设计 Token 系统及 CSS 编译；
-* MasteryRing 色阶计算与数值保护规则落地；
-* ELK.js 纵向 DAG 图谱自动布局与 Top/Bottom 连线端点定义；
-* 统一的节点卡片尺寸 (`180 × 96`)；
-* 稳定拓扑签名缓存与异步布局 Generation 周期保护；
-* 52%/48% 结构比例的 ResumePage 沉浸式首页；
-* 三栏响应式格栅自适应布局，支持移动端抽屉遮罩交互；
-* 推荐列表已读状态标记、URL `node` 参数双向同步及无效 URL 纠正回写；
-* 主动重新打开知识库和任务中心面板的入口支持；
-* 全面覆盖的单元测试与集成测试（覆盖率语句 ~86%、分支 ~79%）。
+Phase 1 验证了图布局与页面骨架，Phase 2 在此基础上完成了全部业务功能接入：
 
-### Phase 2 预留事项（暂未接入）：
-* 后端 API 接口与 SSE 实时任务流同步；
-* 真实知识库文件的上传与处理；
-* 真实用户账户管理与认证；
-* Tauri 桌面客户端容器封装。
+### 认证体系
+- 注册 / 登录 / 邮箱验证 / 忘记密码 / 重置密码
+- Cookie-based JWT + Refresh Token 轮换
+- CSRF Double-Submit 保护
+- 路由守卫分层：GuestOnly → Protected → AccountStatus → VerifiedUser → Onboarding
+
+### 学习画像
+- 对话式八维画像采集页 (`/profile/conversation`)
+- 画像摘要展示页 (`/profile`)
+- 手动维度修正
+- 画像参与全链路个性化
+
+### 学习路径与节点
+- DAG 学习路径图谱 (@xyflow + ELK.js 自动布局)
+- 路径版本管理与修订 Diff
+- 单元学习页 (内容/讲义/思维导图/题库 + 常驻答疑面板)
+- 通关评估页 (URL 参数恢复)
+
+### 多模态资源 (Phase 3.9)
+- 交互式学习卡片 (翻卡练习)
+- 案例推演 (逐步展开)
+- 概念模拟 (状态变化)
+- PPTX 课件下载
+- 代码 ZIP 下载
+
+### 知识库
+- 文档上传与管理
+- 全文搜索
+
+### 任务系统
+- 后台任务面板 + SSE 实时进度推送
+
+### Mock 与离线开发
+- MSW 完整 Mock API (离线开发)
+- Zod Schema 契约验证
+- 生产构建检查 (Mock 代码不泄露)

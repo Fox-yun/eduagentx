@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   FileText,
@@ -10,6 +10,7 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { useParams } from "react-router-dom";
@@ -23,7 +24,7 @@ import { Simulation } from "./Simulation";
 interface ResourceTabConfig {
   type: ResourceType;
   label: string;
-  icon: React.ReactNode;
+  Icon: LucideIcon;
   description: string;
 }
 
@@ -31,31 +32,31 @@ const RESOURCE_TABS: ResourceTabConfig[] = [
   {
     type: "interactive_cards",
     label: "学习卡片",
-    icon: <Layers className="h-4 w-4" />,
+    Icon: Layers,
     description: "翻卡练习，巩固核心知识点",
   },
   {
     type: "walkthrough",
     label: "案例推演",
-    icon: <GitBranch className="h-4 w-4" />,
+    Icon: GitBranch,
     description: "逐步推演核心概念和实践流程",
   },
   {
     type: "simulation",
     label: "概念模拟",
-    icon: <Cpu className="h-4 w-4" />,
+    Icon: Cpu,
     description: "模拟概念状态变化过程",
   },
   {
     type: "pptx",
     label: "PPT 课件",
-    icon: <FileText className="h-4 w-4" />,
+    Icon: FileText,
     description: "PowerPoint 演示文稿",
   },
   {
     type: "code_zip",
     label: "代码示例",
-    icon: <Code2 className="h-4 w-4" />,
+    Icon: Code2,
     description: "可下载的代码项目 ZIP",
   },
 ];
@@ -90,8 +91,9 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
     onSuccess: () => {
       refetch();
     },
-    onError: (err: any) => {
-      toast(err.message || "资源生成失败", "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "资源生成失败";
+      toast(message, "error");
     },
   });
 
@@ -115,7 +117,7 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
                 : "text-muted hover:text-ink hover:bg-page"
             )}
           >
-            {tab.icon}
+            <tab.Icon className="h-4 w-4" />
             {tab.label}
           </button>
         ))}
@@ -134,7 +136,9 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
 
         {!isLoading && !resource && (
           <div className="flex flex-col items-center justify-center py-12 gap-4">
-            <div className="text-muted/30">{currentConfig.icon}</div>
+            <div className="text-muted/30">
+              <currentConfig.Icon className="h-8 w-8" />
+            </div>
             <p className="text-xs text-muted">点击下方按钮生成{currentConfig.label}</p>
             <button
               onClick={() => handleGenerate()}
@@ -144,7 +148,7 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
               {isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <currentConfig.icon
+                <currentConfig.Icon className="h-4 w-4" />
               )}
               生成{currentTabLabel(activeTab)}
             </button>
@@ -164,6 +168,11 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
               <AlertCircle className="h-8 w-8" />
             </div>
             <p className="text-xs text-danger">生成失败</p>
+            {resource?.content && typeof (resource.content as Record<string, unknown>).error_message === "string" && (
+              <p className="text-[10px] text-muted max-w-md text-center">
+                {(resource.content as Record<string, unknown>).error_message as string}
+              </p>
+            )}
             <button
               onClick={() => handleGenerate()}
               disabled={isPending}
@@ -180,21 +189,22 @@ export function ResourcePanel({ nodeId }: ResourcePanelProps) {
             {/* Render based on resource type */}
             {activeTab === "interactive_cards" && (
               <InteractiveCards
-                content={resource.content as any}
+                content={resource.content as Record<string, unknown>}
                 onRegenerate={() => handleGenerate()}
                 isRegenerating={isPending}
               />
             )}
             {activeTab === "walkthrough" && (
-              <Walkthrough content={resource.content as any} />
+              <Walkthrough content={resource.content as Record<string, unknown>} />
             )}
             {activeTab === "simulation" && (
-              <Simulation content={resource.content as any} />
+              <Simulation content={resource.content as Record<string, unknown>} />
             )}
             {(activeTab === "pptx" || activeTab === "code_zip") && (
               <BinaryResourceView
-                content={resource.content as any}
-                storageKey={resource.storageKey}
+                content={resource.content as Record<string, unknown>}
+                pathId={pathId || ""}
+                nodeId={nodeId}
                 resourceType={activeTab}
               />
             )}
@@ -219,16 +229,19 @@ function currentTabLabel(type: ResourceType): string {
 /** View for binary resources (PPTX, ZIP) */
 function BinaryResourceView({
   content,
-  storageKey,
+  pathId,
+  nodeId,
   resourceType,
 }: {
   content: Record<string, unknown>;
-  storageKey: string | null;
+  pathId: string;
+  nodeId: string;
   resourceType: ResourceType;
 }) {
   const isPPTX = resourceType === "pptx";
   const fileLabel = isPPTX ? "PPTX 文件" : "ZIP 文件";
   const fileExt = isPPTX ? "pptx" : "zip";
+  const downloadUrl = `/api/units/${pathId}/nodes/${nodeId}/resources/${resourceType}/download`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -279,18 +292,16 @@ function BinaryResourceView({
       </div>
 
       {/* Download button */}
-      {storageKey && (
-        <div className="flex justify-center">
-          <a
-            href={`/api/units/storage/${storageKey}`}
-            download
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md transition-all cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            下载 {fileLabel} (.{fileExt})
-          </a>
-        </div>
-      )}
+      <div className="flex justify-center">
+        <a
+          href={downloadUrl}
+          download
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md transition-all cursor-pointer"
+        >
+          <Download className="h-4 w-4" />
+          下载 {fileLabel} (.{fileExt})
+        </a>
+      </div>
     </div>
   );
 }

@@ -260,5 +260,7 @@ class LearningResource(Base):
     storage_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)  # minio, local
 
     __table_args__ = (
-        UniqueConstraint("node_id", "resource_type", name="uq_resource_per_node_type"),
+        UniqueConstraint(
+            "user_id", "path_id", "node_id", "resource_type", name="uq_resource_user_path_node_type"
+        ),
     )

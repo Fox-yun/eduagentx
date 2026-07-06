@@ -73,6 +73,7 @@ PUBLIC_TASK_TYPES: frozenset[str] = frozenset(
         "knowledge_index",
         "knowledge_reindex",
         "learning_lecture_generation",
+        "interactive_resource_generation",
     }
 )
 

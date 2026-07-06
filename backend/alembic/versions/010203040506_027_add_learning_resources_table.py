@@ -6,11 +6,8 @@ Phase 3.9: Multimodal Resource Expansion
 - Interactive learning resources
 """
 
-from typing import Sequence, Union
-
+import sqlalchemy as sa
 from alembic import op
-from sqlalchemy import String, Text, Boolean, DateTime, JSON
-from sqlalchemy.sql import func, text
 
 # revision identifiers
 revision = "010203040506"
@@ -20,87 +17,51 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create learning_resources table
     op.create_table(
         "learning_resources",
-        op.Column("id", String(36), primary_key=True),
-        op.Column("user_id", String(36), nullable=False, index=True),
-        op.Column("path_id", String(36), nullable=False, index=True),
-        op.Column("node_id", String(36), nullable=False, index=True),
-        op.Column(
-            "resource_type",
-            String(30),
-            nullable=False,
-            index=True,
-            comment="pptx, code_zip, interactive_cards, walkthrough, simulation",
-        ),
-        op.Column(
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("path_id", sa.String(36), sa.ForeignKey("learning_paths.id"), nullable=False),
+        sa.Column("node_id", sa.String(36), nullable=False),
+        sa.Column("resource_type", sa.String(30), nullable=False),
+        sa.Column(
             "status",
-            String(20),
+            sa.String(20),
             nullable=False,
-            default="not_generated",
-            comment="not_generated, generating, ready, failed",
+            server_default="not_generated",
         ),
-        op.Column("active_task_id", String(36), nullable=True),
-        op.Column("content", JSON, nullable=True, comment="Resource-specific data (e.g., slide count)"),
-        op.Column("error_code", String(50), nullable=True),
-        op.Column("error_message", Text, nullable=True),
-        op.Column("storage_key", String(500), nullable=True, comment="MinIO storage key for binary files"),
-        op.Column(
-            "storage_provider",
-            String(20),
-            nullable=True,
-            comment="minio, local",
+        sa.Column("active_task_id", sa.String(36), nullable=True),
+        sa.Column("content", sa.JSON(), nullable=True),
+        sa.Column("error_code", sa.String(50), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("storage_key", sa.String(500), nullable=True),
+        sa.Column("storage_provider", sa.String(20), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
-        op.Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
-        op.Column(
+        sa.Column(
             "updated_at",
-            DateTime(timezone=True),
-            server_default=func.now(),
-            onupdate=func.now(),
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
             nullable=False,
+        ),
+        sa.UniqueConstraint(
+            "user_id",
+            "path_id",
+            "node_id",
+            "resource_type",
+            name="uq_resource_user_path_node_type",
         ),
     )
 
-    # Add foreign key constraints
-    op.create_foreign_key(
-        "fk_resource_user",
-        "learning_resources",
-        "users",
-        ["user_id"],
-        ["id"],
-    )
-    op.create_foreign_key(
-        "fk_resource_path",
-        "learning_resources",
-        "learning_paths",
-        ["path_id"],
-        ["id"],
-    )
-
-    # Add unique constraint: one resource of each type per node
-    op.create_unique_constraint(
-        "uq_resource_per_node_type",
-        "learning_resources",
-        ["node_id", "resource_type"],
-    )
-
-    # Add indexes
     op.create_index("idx_resources_user_type", "learning_resources", ["user_id", "resource_type"])
     op.create_index("idx_resources_node_type", "learning_resources", ["node_id", "resource_type"])
 
 
 def downgrade() -> None:
-    # Drop indexes
     op.drop_index("idx_resources_node_type", table_name="learning_resources")
     op.drop_index("idx_resources_user_type", table_name="learning_resources")
-
-    # Drop unique constraint
-    op.drop_constraint("uq_resource_per_node_type", "learning_resources", type_="unique")
-
-    # Drop foreign keys
-    op.drop_constraint("fk_resource_path", "learning_resources", type_="foreignkey")
-    op.drop_constraint("fk_resource_user", "learning_resources", type_="foreignkey")
-
-    # Drop table
     op.drop_table("learning_resources")

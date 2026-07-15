@@ -173,6 +173,51 @@ class TestUnitServiceGetUnitContent:
         assert result["active_task_id"] == "task-1"
 
 
+class TestUnitServiceMindMap:
+    @pytest.mark.asyncio
+    async def test_includes_section_key_points_in_tree_and_mermaid(self):
+        from app.services.unit import UnitService
+
+        db = AsyncMock()
+        svc = UnitService(db)
+        content = _make_content(
+            content={
+                "introduction": "# Python 基础\n\n开始学习。",
+                "objectives": ["运行 Python 脚本"],
+                "sections": [
+                    {
+                        "section_id": "install",
+                        "title": "安装与验证",
+                        "order": 1,
+                        "concepts": ["解释器与脚本"],
+                        "examples": [{"title": "检查解释器版本"}],
+                        "common_mistakes": [{"mistake": "命令未加入 PATH"}],
+                        "content": (
+                            "## 安装 Python\n\n"
+                            "执行 [Python](https://python.org) 的 `python --version`，看到版本号即安装成功。"
+                        ),
+                    }
+                ],
+                "practice_tasks": [{"title": "运行 hello.py", "description": "完成首次运行"}],
+            }
+        )
+        content.active_version_id = None
+        content.versions = []
+        db.execute = AsyncMock(return_value=_mock_scalar_result(content))
+
+        result = await svc.get_mind_map("path-1", "node-1", "user-1")
+
+        section = result["tree"][0]["children"][1]
+        assert section["label"] == "安装与验证"
+        assert section["section_id"] == "install"
+        assert section["children"][0]["label"] == "解释器与脚本"
+        assert section["children"][1]["kind"] == "example"
+        assert section["children"][2]["kind"] == "mistake"
+        assert result["tree"][0]["children"][2]["kind"] == "practice_group"
+        assert "解释器与脚本" in result["mermaid"]
+        assert "https://python.org" not in result["mermaid"]
+
+
 class TestUnitServiceCreateAssessment:
     @pytest.mark.asyncio
     async def test_create_new_assessment_returns_generating(self):
@@ -254,6 +299,28 @@ class TestUnitServiceCreateAssessment:
 
 class TestUnitServiceCreatePractice:
     @pytest.mark.asyncio
+    async def test_create_practice_falls_back_after_timeout(self):
+        import asyncio
+
+        from app.services.unit import UnitService
+
+        db = AsyncMock()
+        svc = UnitService(db)
+        db.execute = AsyncMock(return_value=_mock_scalar_result(_make_node()))
+
+        async def slow_generation(*args, **kwargs):
+            await asyncio.sleep(1)
+
+        with (
+            patch("app.services.unit.PRACTICE_LLM_TIMEOUT_SECONDS", 0.01),
+            patch.object(svc, "_llm_generate_questions", side_effect=slow_generation),
+        ):
+            result = await svc.create_practice("path-1", "node-1", "user-1")
+
+        assert result["node_id"] == "node-1"
+        assert len(result["questions"]) == 5
+
+    @pytest.mark.asyncio
     async def test_create_practice(self):
         from app.services.unit import UnitService
 
@@ -283,6 +350,78 @@ class TestUnitServiceCreatePractice:
             result = await svc.create_practice("path-1", "node-1", "user-1")
             assert result["node_id"] == "node-1"
             assert len(result["questions"]) == 1
+
+
+class TestUnitServiceGenerateLecture:
+    @pytest.mark.asyncio
+    async def test_reuses_active_lecture_task(self):
+        from app.services.unit import UnitService
+
+        db = AsyncMock()
+        svc = UnitService(db)
+        content = _make_content()
+        content.active_version_id = "version-2"
+        svc._ensure_unit_content = AsyncMock(return_value=content)
+
+        active_task = MagicMock(id="lecture-task-active")
+        db.execute = AsyncMock(return_value=_mock_scalar_result(active_task))
+
+        with patch("app.services.task.TaskService.enqueue_task", new_callable=AsyncMock) as enqueue:
+            result = await svc.generate_lecture("path-1", "node-1", "user-1")
+
+        assert result == {"next_step": "generating", "active_task_id": "lecture-task-active"}
+        enqueue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_creates_lecture_task_for_active_content_version(self):
+        from app.models.unit import LearningLecture
+        from app.services.unit import UnitService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        svc = UnitService(db)
+        content = _make_content()
+        content.active_version_id = "version-2"
+        svc._ensure_unit_content = AsyncMock(return_value=content)
+        db.execute = AsyncMock(
+            side_effect=[
+                _mock_scalar_result(None),  # no active lecture task
+                _mock_scalar_result(None),  # no lecture row yet
+            ]
+        )
+
+        task = MagicMock(id="lecture-task-new")
+        with patch(
+            "app.services.task.TaskService.enqueue_task",
+            new_callable=AsyncMock,
+            return_value=task,
+        ) as enqueue:
+            result = await svc.generate_lecture("path-1", "node-1", "user-1")
+
+        assert result == {"next_step": "generating", "active_task_id": "lecture-task-new"}
+        assert enqueue.await_args.kwargs["target_metadata"] == {
+            "path_id": "path-1",
+            "unit_content_version_id": "version-2",
+        }
+        added_lecture = db.add.call_args.args[0]
+        assert isinstance(added_lecture, LearningLecture)
+        assert added_lecture.status == "generating"
+        assert added_lecture.active_task_id == "lecture-task-new"
+        db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_requires_generated_unit_content(self):
+        from app.services.unit import UnitService
+
+        db = AsyncMock()
+        svc = UnitService(db)
+        svc._ensure_unit_content = AsyncMock(return_value=None)
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.generate_lecture("path-1", "node-1", "user-1")
+
+        assert exc_info.value.code == "NO_CONTENT"
 
     @pytest.mark.asyncio
     async def test_create_practice_no_node(self):

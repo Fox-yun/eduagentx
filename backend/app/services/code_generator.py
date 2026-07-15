@@ -6,10 +6,11 @@ from unit content WITHOUT using LLM. Enforces security restrictions.
 
 from __future__ import annotations
 
-import structlog
 import zipfile
 from io import BytesIO
 from typing import Any
+
+import structlog
 
 logger = structlog.get_logger()
 
@@ -155,10 +156,7 @@ class CodeZIPGenerator:
                 "\n## 练习任务\n",
             ])
             for i, task in enumerate(practice_tasks[:3], 1):
-                if isinstance(task, dict):
-                    desc = task.get("description", task.get("task", str(task)))
-                else:
-                    desc = str(task)
+                desc = str(task.get("description") or task.get("task") or task) if isinstance(task, dict) else str(task)
                 readme_lines.append(f"{i}. {desc[:100]}")
 
         readme_lines.extend([
@@ -246,7 +244,7 @@ class CodeZIPGenerator:
         """Generate Python example code."""
         lines = [
             "# -*- coding: utf-8 -*-",
-            f'"""',
+            '"""',
             f"{title} - 示例代码",
             "",
             "本示例展示了核心概念和用法。",

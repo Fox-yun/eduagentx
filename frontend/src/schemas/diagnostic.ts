@@ -16,7 +16,7 @@ const SingleChoiceQuestionSchema = z.object({
   required: z.boolean().optional().default(true),
   options: z.array(DiagnosticOptionSchema).min(2),
   dimension: z.string().optional(),
-  max_score: z.number().positive().optional(),
+  max_score: z.number().min(0).optional(),
   answer: z.string().nullable(),
 });
 
@@ -27,8 +27,18 @@ const MultipleChoiceQuestionSchema = z.object({
   required: z.boolean().optional().default(true),
   options: z.array(DiagnosticOptionSchema).min(2),
   dimension: z.string().optional(),
-  max_score: z.number().positive().optional(),
+  max_score: z.number().min(0).optional(),
   answer: z.array(z.string()).nullable(),
+});
+
+const TrueFalseQuestionSchema = z.object({
+  question_id: z.string(),
+  question_type: z.literal("true_false"),
+  prompt: z.string(),
+  required: z.boolean().optional().default(true),
+  dimension: z.string().optional(),
+  max_score: z.number().min(0).optional(),
+  answer: z.boolean().nullable(),
 });
 
 const ShortAnswerQuestionSchema = z.object({
@@ -37,7 +47,7 @@ const ShortAnswerQuestionSchema = z.object({
   prompt: z.string(),
   required: z.boolean().optional().default(true),
   dimension: z.string().optional(),
-  max_score: z.number().positive().optional(),
+  max_score: z.number().min(0).optional(),
   answer: z.string().nullable(),
 });
 
@@ -53,13 +63,14 @@ const CodeTextQuestionSchema = z.object({
   language: z.string().optional().default("plaintext"),
   code_snippet: z.string(),
   dimension: z.string().optional(),
-  max_score: z.number().positive().optional(),
+  max_score: z.number().min(0).optional(),
   answer: z.string().nullable(),
 });
 
 export const DiagnosticQuestionSchema = z.discriminatedUnion("question_type", [
   SingleChoiceQuestionSchema,
   MultipleChoiceQuestionSchema,
+  TrueFalseQuestionSchema,
   ShortAnswerQuestionSchema,
   CodeTextQuestionSchema,
 ]);
@@ -73,6 +84,7 @@ export type DiagnosticQuestion = z.infer<typeof DiagnosticQuestionSchema>;
 export const DiagnosticSavedAnswerSchema = z.union([
   z.string(),
   z.array(z.string()),
+  z.boolean(),
   z.null(),
 ]);
 
@@ -115,7 +127,7 @@ export type DiagnosticQuizDto = z.infer<typeof DiagnosticQuizDtoSchema>;
 
 export interface DiagnosticQuestionModel {
   questionId: string;
-  type: "single_choice" | "multiple_choice" | "short_answer" | "code_text";
+  type: "single_choice" | "multiple_choice" | "true_false" | "short_answer" | "code_text";
   prompt: string;
   required: boolean;
   options?: Array<{ value: string; label: string }>;
@@ -123,7 +135,7 @@ export interface DiagnosticQuestionModel {
   codeSnippet?: string;
   dimension?: string;
   maxScore?: number;
-  answer: string | string[] | null;
+  answer: string | string[] | boolean | null;
 }
 
 export interface DiagnosticResultModel {
@@ -140,7 +152,7 @@ export interface DiagnosticQuizModel {
   attemptId: string;
   status: "draft" | "submitted" | "grading" | "completed" | "failed";
   questions: DiagnosticQuestionModel[];
-  savedAnswers: Record<string, string | string[] | null>;
+  savedAnswers: Record<string, string | string[] | boolean | null>;
   result: DiagnosticResultModel | null;
   nextStep: "diagnostic" | "generating" | "review" | "active" | null;
 }

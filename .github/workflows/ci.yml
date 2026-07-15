@@ -1,0 +1,237 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "phase/**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Frontend Quality ──
+  frontend-quality:
+    name: Frontend Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run check:contract
+      - run: npm test -- --run
+      - run: npm run build
+      - run: npm run check:bundle
+
+  # ── Backend Quality ──
+  backend-quality:
+    name: Backend Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Verify lockfile
+        run: uv lock --check
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+      - name: Ruff check
+        run: uv run ruff check app/
+      - name: MyPy
+        run: uv run mypy app
+      - name: Bandit (block Medium/High)
+        run: uv run bandit -r app --severity-level medium
+      - name: Pytest
+        run: uv run pytest tests/unit tests/contract -x --tb=short
+
+  # ── API Contract ──
+  api-contract:
+    name: API Contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run check:contract
+
+  # ── Docker Build ──
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        working-directory: backend
+        run: docker build -t eduagentx-backend-test .
+      - name: Build frontend image
+        working-directory: frontend
+        run: docker build -t eduagentx-frontend-test .
+
+  # ── Docker Compose Smoke Test ──
+  compose-smoke-test:
+    name: Docker Compose Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate demo secrets
+        working-directory: backend/docker
+        run: |
+          cp .env.docker.example .env.docker
+          # Generate minimal secrets for CI
+          sed -i \
+            -e "s/CHANGE_ME_TO_64_PLUS_RANDOM_CHARACTERS/$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')/g" \
+            -e "s/CHANGE_ME_TO_STRONG_PASSWORD/$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32)))')/g" \
+            -e "s/CHANGE_ME_TO_REDIS_PASSWORD/$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32)))')/g" \
+            -e "s/CHANGE_ME_TO_STRONG_ACCESS_KEY/$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(20)))')/g" \
+            -e "s/CHANGE_ME_TO_STRONG_SECRET_KEY/$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')/g" \
+            -e "s/CHANGE_ME_TO_32_PLUS_RANDOM_CHARACTERS/$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')/g" \
+            .env.docker
+          # URL-encode passwords in connection strings
+          python3 -c "
+          import re
+          with open('.env.docker') as f: content = f.read()
+          from urllib.parse import quote
+          content = re.sub(r'postgresql\+asyncpg://eduagentx:([^@]+)@', lambda m: f'postgresql+asyncpg://eduagentx:{quote(m.group(1), safe=\"\")}@', content)
+          content = re.sub(r'redis://:([^@]+)@', lambda m: f'redis://:{quote(m.group(1), safe=\"\")}@', content)
+          with open('.env.docker', 'w') as f: f.write(content)
+          "
+
+      - name: Validate compose config
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            config > /dev/null
+
+      - name: Start infrastructure
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            up -d postgres redis minio mailpit
+
+      - name: Build and run migrations
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            build migrate backend celery-worker celery-beat outbox-publisher frontend
+
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            up migrate
+
+      - name: Start runtime services
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            up -d backend celery-worker celery-beat outbox-publisher frontend
+
+      - name: Wait for backend readiness
+        working-directory: backend/docker
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -sf --max-time 3 http://127.0.0.1:8000/health/ready | grep -q '"ready"'; then
+              echo "Backend is ready!"
+              exit 0
+            fi
+            echo "Attempt $attempt: backend not ready yet..."
+            sleep 3
+          done
+          echo "ERROR: Backend did not become ready"
+          docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml logs --tail=200
+          exit 1
+
+      - name: Run smoke test
+        working-directory: backend
+        run: |
+          pip install httpx
+          python scripts/smoke_full_learning_flow.py --base-url http://127.0.0.1:8000 || true
+
+      - name: Upload logs on failure
+        if: failure()
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            logs --tail=500
+
+      - name: Tear down
+        if: always()
+        working-directory: backend/docker
+        run: |
+          docker compose \
+            --env-file .env.docker \
+            --profile demo \
+            -f docker-compose.yml \
+            -f docker-compose.demo.yml \
+            down -v
+
+  # ── Security Scan ──
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Bandit
+        run: pip install bandit
+      - name: Run Bandit (block Medium/High)
+        working-directory: backend
+        run: bandit -r app --severity-level medium -f json -o bandit-report.json
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: backend/bandit-report.json
+      - name: Frontend audit (production deps)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Frontend audit (all deps)
+        working-directory: frontend
+        run: npm audit --audit-level=critical

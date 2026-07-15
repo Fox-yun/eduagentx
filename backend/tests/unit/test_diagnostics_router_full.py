@@ -43,6 +43,7 @@ class MockDbSession:
 
     def __init__(self):
         self.added = []
+        self.commit_count = 0
         self.execute_results: dict = {}
         self._default_result = _mock_scalar_result(None)
 
@@ -53,7 +54,7 @@ class MockDbSession:
         pass
 
     async def commit(self):
-        pass
+        self.commit_count += 1
 
     async def refresh(self, obj):
         pass
@@ -223,12 +224,31 @@ class TestSubmitDiagnostic:
         with (
             patch("app.routers.diagnostics.GoalService") as MockGoalSvc,
             patch("app.routers.diagnostics.TaskService") as MockTaskSvc,
+            patch(
+                "app.routers.diagnostics._load_stored_questions",
+                new_callable=AsyncMock,
+                return_value=[
+                    {
+                        "question_id": "diag-goal-1-3",
+                        "type": "multiple_choice",
+                        "prompt": "Select valid answers",
+                        "options": [
+                            {"value": "a", "label": "A"},
+                            {"value": "c", "label": "C"},
+                            {"value": "d", "label": "D"},
+                        ],
+                        "correct_answer": ["a", "c", "d"],
+                        "max_score": 10,
+                        "required": True,
+                    }
+                ],
+            ),
         ):
             goal_svc = MockGoalSvc.return_value
             goal_svc.get_goal = AsyncMock(return_value=goal)
 
             task_svc = MockTaskSvc.return_value
-            task_svc.create_task = AsyncMock(return_value=task)
+            task_svc.enqueue_task = AsyncMock(return_value=task)
 
             client = TestClient(app)
             resp = client.post(
@@ -244,6 +264,8 @@ class TestSubmitDiagnostic:
             data = resp.json()
             assert "task_id" in data
             assert data["status"] == "grading"
+            assert mock_db.commit_count == 1
+            task_svc.enqueue_task.assert_awaited_once()
 
     def test_submit_diagnostic_invalid_attempt(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
@@ -254,7 +276,7 @@ class TestSubmitDiagnostic:
         client = TestClient(app)
         resp = client.post(
             "/goals/goal-1/diagnostic/submit",
-            json={"attempt_id": "invalid-id", "answers": []},
+            json={"attempt_id": "invalid-id", "answers": [], "skip": True},
         )
         assert resp.status_code == 404
 
@@ -291,3 +313,91 @@ class TestDetectTopic:
         goal.raw_description = "Cook Italian food"
         goal.normalized_goal = None
         assert _detect_topic(goal) == "general"
+
+
+class TestDiagnosticValidation:
+    def test_non_skip_requires_answers(self):
+        from pydantic import ValidationError
+
+        from app.routers.diagnostics import DiagnosticSubmitRequest
+
+        with pytest.raises(ValidationError):
+            DiagnosticSubmitRequest(attempt_id="attempt-1", answers=[])
+
+    def test_skip_rejects_answers(self):
+        from pydantic import ValidationError
+
+        from app.routers.diagnostics import AnswerSubmitItem, DiagnosticSubmitRequest
+
+        with pytest.raises(ValidationError):
+            DiagnosticSubmitRequest(
+                attempt_id="attempt-1",
+                answers=[AnswerSubmitItem(question_id="question-1", answer=True)],
+                skip=True,
+            )
+
+    def test_answer_options_reject_duplicates(self):
+        from app.core.errors import ApiError
+        from app.routers.diagnostics import AnswerSubmitItem, _validate_submitted_answers
+
+        questions = {
+            "question-1": {
+                "type": "multiple_choice",
+                "options": [{"value": "a"}, {"value": "b"}],
+                "required": True,
+            }
+        }
+        with pytest.raises(ApiError) as exc_info:
+            _validate_submitted_answers(
+                [AnswerSubmitItem(question_id="question-1", answer=["a", "a"])],
+                questions,
+            )
+        assert exc_info.value.code == "INVALID_ANSWER_OPTION"
+
+    def test_generated_question_rejects_unknown_correct_option(self):
+        from pydantic import ValidationError
+
+        from app.routers.diagnostics import GeneratedQuestion
+
+        with pytest.raises(ValidationError):
+            GeneratedQuestion(
+                type="single_choice",
+                prompt="Choose one",
+                options=[
+                    {"value": "a", "label": "A"},
+                    {"value": "b", "label": "B"},
+                ],
+                correct_answer="c",
+            )
+
+
+class TestQuestionCachingTransaction:
+    @pytest.mark.asyncio
+    async def test_cache_generation_can_defer_commit(self):
+        from app.routers.diagnostics import _get_or_create_questions
+
+        goal = _make_goal(id="goal-deferred-commit")
+        db = AsyncMock()
+        generated = [{"question_id": "question-1"}]
+
+        with (
+            patch(
+                "app.routers.diagnostics._load_stored_questions",
+                new_callable=AsyncMock,
+                side_effect=[[], []],
+            ),
+            patch(
+                "app.routers.diagnostics._generate_diagnostic_questions_llm",
+                new_callable=AsyncMock,
+                return_value=generated,
+            ),
+            patch(
+                "app.routers.diagnostics._store_questions",
+                new_callable=AsyncMock,
+                return_value=generated,
+            ),
+        ):
+            result = await _get_or_create_questions(db, goal, commit=False)
+
+        assert result == generated
+        db.commit.assert_not_awaited()

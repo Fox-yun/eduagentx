@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { RotateCw, Check, X, ChevronDown, ChevronUp, RefreshCw, Loader2 } from "lucide-react";
+import { RotateCw, Check, X, RefreshCw, Loader2 } from "lucide-react";
 import clsx from "clsx";
 
 interface CardItem {
@@ -32,8 +32,8 @@ export function InteractiveCards({ content, onRegenerate, isRegenerating }: Inte
   const [filterKP, setFilterKP] = useState<string | null>(null);
   const [showOnlyUnmastered, setShowOnlyUnmastered] = useState(false);
 
-  const cards = content.items || [];
-  const knowledgePoints = content.knowledge_points || [];
+  const cards = content.items;
+  const knowledgePoints = content.knowledge_points ?? [];
 
   const filteredCards = useMemo(() => {
     let result = cards;
@@ -81,6 +81,17 @@ export function InteractiveCards({ content, onRegenerate, isRegenerating }: Inte
     easy: "bg-success/10 text-success",
     medium: "bg-warning/10 text-warning",
     hard: "bg-danger/10 text-danger",
+  };
+  const cardTypeLabels: Record<string, string> = {
+    concept: "概念",
+    key_term: "术语",
+    practice: "练习",
+    summary: "总结",
+    application: "应用",
+    misconception: "纠错",
+    comparison: "对比",
+    prediction: "预测",
+    debugging: "调试",
   };
 
   return (
@@ -192,7 +203,7 @@ export function InteractiveCards({ content, onRegenerate, isRegenerating }: Inte
                   )}
                   {card.card_type && (
                     <span className="text-[9px] px-1.5 py-0.5 rounded bg-panel-soft text-muted">
-                      {card.card_type === "concept" ? "概念" : card.card_type === "key_term" ? "术语" : card.card_type === "practice" ? "练习" : "总结"}
+                      {cardTypeLabels[card.card_type] || "综合"}
                     </span>
                   )}
                 </div>

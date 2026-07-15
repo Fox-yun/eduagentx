@@ -79,7 +79,18 @@ class PathService:
         edges_result = await self.db.execute(select(LearningEdge).where(LearningEdge.version_id == version.id))
         edges = list(edges_result.scalars().all())
 
-        return await self._format_path(path, version, stages, nodes, edges)
+        progress_by_node: dict[str, LearningProgress] = {}
+        if nodes:
+            progress_result = await self.db.execute(
+                select(LearningProgress).where(
+                    LearningProgress.user_id == user_id,
+                    LearningProgress.path_id == path_id,
+                    LearningProgress.node_id.in_([node.id for node in nodes]),
+                )
+            )
+            progress_by_node = {progress.node_id: progress for progress in progress_result.scalars().all()}
+
+        return await self._format_path(path, version, stages, nodes, edges, progress_by_node)
 
     async def create_path_version(
         self,
@@ -266,6 +277,39 @@ class PathService:
         await self.db.refresh(path)
         return path
 
+    async def activate_latest_version(
+        self,
+        path_id: str,
+        user_id: str,
+    ) -> tuple[LearningPath, str]:
+        """Activate the newest draft/review version of a path.
+
+        This preserves the original path-level activation contract used by the
+        initial path review flow. Revision flows can continue to activate an
+        explicitly selected version through :meth:`activate_version`.
+        """
+        version_result = await self.db.execute(
+            select(LearningPathVersion)
+            .join(LearningPath, LearningPath.id == LearningPathVersion.path_id)
+            .where(
+                LearningPathVersion.path_id == path_id,
+                LearningPath.user_id == user_id,
+                LearningPathVersion.status.in_(["draft", "in_review"]),
+            )
+            .order_by(LearningPathVersion.version_number.desc())
+            .limit(1)
+        )
+        version = version_result.scalar_one_or_none()
+        if version is None:
+            raise ApiError(
+                code="NO_ACTIVATABLE_VERSION",
+                message="No draft or review version is available for activation",
+                status_code=409,
+            )
+
+        path = await self.activate_version(path_id, user_id, version.id)
+        return path, version.id
+
     async def _migrate_progress(
         self,
         path_id: str,
@@ -389,9 +433,29 @@ class PathService:
         if path.status == "archived":
             raise ApiError(code="PATH_ARCHIVED", message="Cannot revise an archived path", status_code=403)
 
-        # Confirm there is a current active version to base the revision on
-        if not path.active_version_id:
-            raise ApiError(code="NO_ACTIVE_VERSION", message="Path has no active version to revise", status_code=400)
+        # A learner may request changes while reviewing the very first draft,
+        # before the path has ever been activated. Prefer the active version,
+        # otherwise revise the newest draft/review version shown by the UI.
+        source_version_id = path.active_version_id
+        if not source_version_id:
+            source_result = await self.db.execute(
+                select(LearningPathVersion)
+                .where(
+                    LearningPathVersion.path_id == path_id,
+                    LearningPathVersion.status.in_({"draft", "in_review"}),
+                )
+                .order_by(LearningPathVersion.version_number.desc())
+                .limit(1)
+            )
+            source_version = source_result.scalar_one_or_none()
+            source_version_id = source_version.id if source_version else None
+
+        if not source_version_id:
+            raise ApiError(
+                code="NO_REVISION_SOURCE",
+                message="Path has no draft or active version to revise",
+                status_code=400,
+            )
 
         # Check for existing pending or running revision requests on this path
         existing_result = await self.db.execute(
@@ -411,14 +475,14 @@ class PathService:
                 task = task_result.scalar_one_or_none()
             return existing, task
 
-        idempotency_key = f"path-revision:{path_id}:{path.active_version_id}:{revision_request[:64]}"
+        idempotency_key = f"path-revision:{path_id}:{source_version_id}:{revision_request[:64]}"
 
         request = LearningPathRevisionRequest(
             id=str(uuid.uuid4()),
             path_id=path_id,
             user_id=user_id,
             revision_request=revision_request,
-            source_version_id=path.active_version_id,
+            source_version_id=source_version_id,
         )
         self.db.add(request)
         await self.db.flush()
@@ -431,7 +495,7 @@ class PathService:
             target_id=request.id,
             target_metadata={
                 "path_id": path_id,
-                "source_version_id": path.active_version_id,
+                "source_version_id": source_version_id,
             },
             idempotency_key=idempotency_key,
         )
@@ -643,8 +707,19 @@ class PathService:
         stages: list,
         nodes: list,
         edges: list,
+        progress_by_node: dict[str, LearningProgress] | None = None,
     ) -> dict:
         """Format path data for API response."""
+        progress_by_node = progress_by_node or {}
+
+        def node_status(node: LearningNode) -> str:
+            progress = progress_by_node.get(node.id)
+            return progress.status if progress else node.status
+
+        def node_mastery(node: LearningNode) -> float:
+            progress = progress_by_node.get(node.id)
+            return progress.mastery if progress else node.mastery
+
         # Use goal title as the path title (the user's original requirement)
         goal_title = ""
         if path.goal_id:
@@ -659,7 +734,10 @@ class PathService:
             "version": version.version_number if version else 1,
             "active_version": version.version_number if version else 1,
             "status": path.status,
-            "current_node_id": None,
+            "current_node_id": next(
+                (node.id for node in nodes if node_status(node) in {"available", "in_progress"}),
+                None,
+            ),
             "total_estimated_minutes": version.estimated_total_minutes if version else 0,
             "generation_summary": version.summary if version else None,
             "stages": [
@@ -684,8 +762,8 @@ class PathService:
                     "level": n.level,
                     "difficulty": n.difficulty,
                     "estimated_minutes": n.estimated_minutes,
-                    "status": n.status,
-                    "mastery": n.mastery,
+                    "status": node_status(n),
+                    "mastery": node_mastery(n),
                     "content_status": n.content_status,
                     "learning_outcomes": json.loads(n.learning_outcomes) if n.learning_outcomes else [],
                     "assessment_strategy": n.assessment_strategy,

@@ -92,7 +92,7 @@ async def bootstrap_learning_session(
 
     uid = str(uuid.uuid4())[:8]
     email = f"e2e-bootstrap-{uid}@example.com"
-    password = "E2E-Bootstrap-Pass-123!"
+    password = "E2E-Bootstrap-Pass-123!"  # nosec B105
     now = utc_now()
 
     # Create user
@@ -760,7 +760,7 @@ async def bootstrap_profile_user(
 
     uid = str(uuid.uuid4())[:8]
     email = f"e2e-profile-{uid}@example.com"
-    password = "E2E-Profile-Pass-123!"
+    password = "E2E-Profile-Pass-123!"  # nosec B105
     now = utc_now()
 
     user = User(

@@ -8,16 +8,24 @@ import {
   getUnitContent,
   generateUnitContent,
   regenerateUnitContent,
+  generateLecture,
   createPractice,
+  getMindMap,
+  type MindMapResult,
 } from "../../api/units";
 import type { PracticeQuestionModel } from "../../schemas/units";
-import { sendTutorQuestion, type ChatMessage } from "../../api/chat";
+import { sendTutorQuestion, type ChatMessage, type TutorResponseMode } from "../../api/chat";
+import { trackLearningEvent, type LearningEventType } from "../../api/learning";
 import { queryKeys } from "../../api/queryKeys";
 import { appRoutes } from "../../app/routes";
 import { useTaskStream } from "../../api/taskStream";
+import { isTerminalTaskStatus } from "../../features/tasks/taskEventPolicy";
 import { useToast } from "../../components/feedback/Toast";
 import { AppShell } from "../../components/layout/AppShell";
 import { ProgressBar } from "../../components/common/ProgressBar";
+import { MindMapGraph } from "../../features/node-details/MindMapGraph";
+import { ResourcePanel } from "../../features/node-details/ResourcePanel";
+import { TutorRichResponse } from "../../features/node-details/TutorRichResponse";
 import {
   ArrowRight,
   Settings2,
@@ -32,11 +40,61 @@ import {
   RefreshCw,
   MessageCircle,
   Send,
-  BookOpen,
+  Code2,
+  Download,
 } from "lucide-react";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function LearningMarkdown({ children }: { children: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ node: _node, ...props }) => (
+          <h1 className="text-lg font-serif-cn font-bold border-b border-border/60 pb-1.5 mt-5 text-ink" {...props} />
+        ),
+        h2: ({ node: _node, ...props }) => (
+          <h2 className="text-sm font-bold mt-4 text-ink" {...props} />
+        ),
+        h3: ({ node: _node, ...props }) => (
+          <h3 className="text-xs font-bold mt-3 text-ink" {...props} />
+        ),
+        p: ({ node: _node, ...props }) => (
+          <p className="text-xs text-muted leading-6 mt-1" {...props} />
+        ),
+        ul: ({ node: _node, ...props }) => (
+          <ul className="list-disc pl-5 flex flex-col gap-1.5 mt-1" {...props} />
+        ),
+        ol: ({ node: _node, ...props }) => (
+          <ol className="list-decimal pl-5 flex flex-col gap-1.5 mt-1" {...props} />
+        ),
+        li: ({ node: _node, ...props }) => <li className="text-xs text-muted leading-5" {...props} />,
+        pre: ({ node: _node, ...props }) => (
+          <pre className="bg-page/70 border border-border p-4 rounded-xl font-mono text-[11px] text-ink overflow-x-auto whitespace-pre my-3 select-text" {...props} />
+        ),
+        code: ({ node: _node, className, children: code, ...props }) => (
+          <code
+            className={className
+              ? `${className} font-mono text-[11px] text-ink`
+              : "bg-page border border-border px-1 py-0.5 rounded font-mono text-[10px] text-primary"}
+            {...props}
+          >
+            {code}
+          </code>
+        ),
+        table: ({ node: _node, ...props }) => (
+          <table className="w-full text-xs text-left border-collapse border border-border rounded-xl my-3" {...props} />
+        ),
+        th: ({ node: _node, ...props }) => <th className="bg-page p-2 font-bold border border-border text-ink" {...props} />,
+        td: ({ node: _node, ...props }) => <td className="p-2 border border-border text-muted" {...props} />,
+      }}
+    >
+      {children}
+    </ReactMarkdown>
+  );
 }
 
 export function UnitLearningPage() {
@@ -46,8 +104,33 @@ export function UnitLearningPage() {
   const queryClient = useQueryClient();
 
   const [localActiveTaskId, setLocalActiveTaskId] = useState<string | null>(null);
+  const [localLectureTaskId, setLocalLectureTaskId] = useState<string | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferenceText, setPreferenceText] = useState("");
+  const requestedLectureKeyRef = React.useRef<string | null>(null);
+  const trackedEventsRef = React.useRef(new Set<string>());
+
+  const trackOnce = React.useCallback((
+    key: string,
+    eventType: LearningEventType,
+    resourceType?: string,
+    metadata?: Record<string, unknown>
+  ) => {
+    if (!pathId || !nodeId || trackedEventsRef.current.has(key)) return;
+    trackedEventsRef.current.add(key);
+    void trackLearningEvent({
+      pathId,
+      nodeId,
+      eventType,
+      resourceType,
+      clientEventId: `${key}:${crypto.randomUUID()}`,
+      metadata,
+    })
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.effectiveness(pathId) }))
+      .catch(() => {
+        trackedEventsRef.current.delete(key);
+      });
+  }, [pathId, nodeId, queryClient]);
 
   // Practice state
   const [practiceQuestions, setPracticeQuestions] = useState<PracticeQuestionModel[]>([]);
@@ -59,11 +142,17 @@ export function UnitLearningPage() {
   const [tutorOpen] = useState(true);
   const [tutorInput, setTutorInput] = useState("");
   const [tutorMessages, setTutorMessages] = useState<ChatMessage[]>([]);
+  const [tutorResponseModes, setTutorResponseModes] = useState<TutorResponseMode[]>([
+    "diagram",
+    "code",
+    "storyboard",
+  ]);
   const tutorEndRef = React.useRef<HTMLDivElement>(null);
 
   // Resource tabs state
-  const [activeTab, setActiveTab] = useState<"content" | "lecture" | "mindmap">("content");
-  const [mindMapData, setMindMapData] = useState<{ tree: any; mermaid: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"lecture" | "mindmap" | "resources">("lecture");
+  const [mindMapData, setMindMapData] = useState<MindMapResult | null>(null);
+  const [mindMapSourceOpen, setMindMapSourceOpen] = useState(false);
 
   // Queries
   const { data: pathData } = useQuery({
@@ -85,6 +174,46 @@ export function UnitLearningPage() {
 
   const nodeObj = pathData?.nodes?.find((n) => n.id === nodeId);
 
+  useEffect(() => {
+    trackOnce("node-opened", "node_opened");
+  }, [trackOnce]);
+
+  useEffect(() => {
+    if (activeTab === "lecture" && unitData?.lecture?.content) {
+      trackOnce("lecture-opened", "resource_opened", "lecture");
+    }
+    if (activeTab === "mindmap" && mindMapData) {
+      trackOnce("mindmap-opened", "resource_opened", "mindmap");
+    }
+    if (activeTab === "resources") {
+      trackOnce("resource-center-opened", "resource_opened", "resource_center");
+    }
+  }, [activeTab, unitData?.lecture?.content, mindMapData, trackOnce]);
+
+  useEffect(() => {
+    const resourceType =
+      activeTab === "lecture" ? "lecture" : activeTab === "mindmap" ? "mindmap" : "resource_center";
+    const resourceReady =
+      activeTab === "lecture" ? !!unitData?.lecture?.content : activeTab === "mindmap" ? !!mindMapData : true;
+    if (!pathId || !nodeId || !resourceReady) return;
+
+    const startedAt = Date.now();
+    return () => {
+      const durationSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      if (durationSeconds < 1) return;
+      void trackLearningEvent({
+        pathId,
+        nodeId,
+        eventType: "resource_completed",
+        resourceType,
+        durationSeconds,
+        clientEventId: `${resourceType}-session:${crypto.randomUUID()}`,
+      })
+        .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.effectiveness(pathId) }))
+        .catch(() => undefined);
+    };
+  }, [activeTab, unitData?.lecture?.content, mindMapData, pathId, nodeId, queryClient]);
+
   // Task Stream Hook
   const activeTaskId = localActiveTaskId || unitData?.activeTaskId;
   const {
@@ -93,6 +222,15 @@ export function UnitLearningPage() {
     stage: taskStage,
     status: taskStatus,
   } = useTaskStream(activeTaskId);
+
+  const activeLectureTaskId = localLectureTaskId || unitData?.activeLectureTaskId;
+  const {
+    progress: lectureProgress,
+    message: lectureTaskMessage,
+    stage: lectureTaskStage,
+    status: lectureTaskStatus,
+    error: lectureTaskError,
+  } = useTaskStream(activeLectureTaskId);
 
   // Auto-refresh unit when content generation completes
   useEffect(() => {
@@ -131,10 +269,56 @@ export function UnitLearningPage() {
     },
   });
 
+  const {
+    mutate: performGenerateLecture,
+    isPending: isRequestingLecture,
+    error: lectureRequestError,
+  } = useMutation({
+    mutationFn: () => generateLecture(pathId || "", nodeId || ""),
+    onSuccess: (res) => {
+      setLocalLectureTaskId(res.activeTaskId);
+    },
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "课程讲义生成失败，请重试"), "error");
+    },
+  });
+
+  // The lecture is the learner-facing course body. Generate it as soon as the
+  // structured unit source is ready, while guarding against duplicate posts.
+  useEffect(() => {
+    if (
+      unitData?.status !== "ready" ||
+      !unitData.content ||
+      unitData.lecture?.content ||
+      activeLectureTaskId ||
+      isRequestingLecture
+    ) {
+      return;
+    }
+
+    const sourceKey = `${unitData.unitId}:${unitData.contentVersion}`;
+    if (requestedLectureKeyRef.current === sourceKey) return;
+    requestedLectureKeyRef.current = sourceKey;
+    performGenerateLecture();
+  }, [
+    unitData,
+    activeLectureTaskId,
+    isRequestingLecture,
+    performGenerateLecture,
+  ]);
+
+  useEffect(() => {
+    if (lectureTaskStatus !== "completed" || !activeLectureTaskId) return;
+    toast("课程讲义生成成功", "success");
+    setLocalLectureTaskId(null);
+    refetchUnit();
+  }, [lectureTaskStatus, activeLectureTaskId, refetchUnit, toast]);
+
   // Practice mutation
   const { mutate: performLoadPractice, isPending: isLoadingPractice } = useMutation({
     mutationFn: () => createPractice(pathId || "", nodeId || ""),
     onSuccess: (questions) => {
+      trackOnce("practice-started", "practice_started", undefined, { question_count: questions.length });
       setPracticeQuestions(questions);
       setPracticeAnswers({});
       setPracticeRevealed({});
@@ -145,9 +329,22 @@ export function UnitLearningPage() {
     },
   });
 
+  const {
+    mutate: performLoadMindMap,
+    isPending: isLoadingMindMap,
+    error: mindMapError,
+  } = useMutation({
+    mutationFn: () => getMindMap(pathId || "", nodeId || ""),
+    onSuccess: setMindMapData,
+    onError: (err: unknown) => {
+      toast(getErrorMessage(err, "思维导图加载失败，请重试"), "error");
+    },
+  });
+
   // Tutor Q&A mutation
   const { mutate: performAskTutor, isPending: isTutorLoading } = useMutation({
-    mutationFn: (question: string) => sendTutorQuestion(pathId || "", nodeId || "", question),
+    mutationFn: ({ question, modes }: { question: string; modes: TutorResponseMode[] }) =>
+      sendTutorQuestion(pathId || "", nodeId || "", question, modes),
     onSuccess: (reply) => {
       setTutorMessages((prev) => [...prev, reply]);
       setTutorInput("");
@@ -169,8 +366,35 @@ export function UnitLearningPage() {
     e.preventDefault();
     const q = tutorInput.trim();
     if (!q) return;
+    trackOnce(`tutor-question-${Date.now()}`, "tutor_question", undefined, { response_modes: tutorResponseModes });
     setTutorMessages((prev) => [...prev, { role: "user", content: q }]);
-    performAskTutor(q);
+    performAskTutor({ question: q, modes: tutorResponseModes });
+  };
+
+  const handleTutorFeedback = (message: ChatMessage, helpful: boolean) => {
+    if (!pathId || !nodeId || !message.responseId) return;
+    void trackLearningEvent({
+      pathId,
+      nodeId,
+      eventType: "tutor_feedback",
+      clientEventId: `tutor-feedback:${message.responseId}`,
+      metadata: {
+        response_id: message.responseId,
+        helpful,
+        response_modes: (message.modalities || []).filter((mode) => mode !== "text"),
+      },
+    })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.effectiveness(pathId) });
+      })
+      .catch(() => undefined);
+  };
+
+  const toggleTutorMode = (mode: TutorResponseMode) => {
+    setTutorResponseModes((current) =>
+      current.includes(mode) ? current.filter((item) => item !== mode) : [...current, mode]
+    );
   };
 
   const handlePracticeAnswer = (questionId: string, value: string) => {
@@ -191,6 +415,15 @@ export function UnitLearningPage() {
   const handlePreferencesSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     performRegenerate(preferenceText);
+  };
+
+  const navigateToLectureSection = (sectionId: string) => {
+    setActiveTab("lecture");
+    window.setTimeout(() => {
+      document
+        .getElementById(`lecture-section-${sectionId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   };
 
   if (unitStatus === "pending") {
@@ -229,6 +462,8 @@ export function UnitLearningPage() {
   }
 
   const isRegeneratedOrGenerating = !!activeTaskId || isGenerating || isRegenerating;
+  const isLectureTaskRunning =
+    !!activeLectureTaskId && !isTerminalTaskStatus(lectureTaskStatus);
 
   return (
     <AppShell title={nodeObj?.title} courseName={pathData?.title}>
@@ -345,15 +580,13 @@ export function UnitLearningPage() {
             <div className="flex flex-col gap-8">
               {/* Resource Tabs */}
               <div className="flex gap-1 bg-panel border border-border rounded-2xl shadow-card p-1.5 overflow-x-auto">
-                {(["content", "lecture", "mindmap"] as const).map((tab) => (
+                {(["lecture", "mindmap", "resources"] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => {
                       setActiveTab(tab);
-                      if (tab === "mindmap" && !mindMapData) {
-                        import("../../api/units").then((m) =>
-                          m.getMindMap(pathId || "", nodeId || "").then(setMindMapData)
-                        );
+                      if (tab === "mindmap" && !mindMapData && !isLoadingMindMap) {
+                        performLoadMindMap();
                       }
                     }}
                     className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap ${
@@ -362,66 +595,169 @@ export function UnitLearningPage() {
                         : "text-muted hover:text-ink hover:bg-page/50"
                     }`}
                   >
-                    {tab === "content" && "📖 课程内容"}
-                    {tab === "lecture" && "📝 讲义"}
+                    {tab === "lecture" && "📖 课程讲义"}
                     {tab === "mindmap" && "🧠 思维导图"}
+                    {tab === "resources" && "✨ 多模态资源"}
                   </button>
                 ))}
               </div>
 
-              {/* Content Tab */}
-              {activeTab === "content" && (
+              {/* Lecture is the single learner-facing course body. */}
+              {activeTab === "lecture" && (
               <div className="flex flex-col gap-8">
-              {/* Main Markdown explanation */}
-              <article className="bg-panel border border-border rounded-2xl shadow-card p-6 sm:p-8 select-text">
-                <div className="text-xs text-ink leading-relaxed flex flex-col gap-4 font-sans select-text">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      h1: ({ node: _node, ...props }) => (
-                        <h1 className="text-lg font-serif-cn font-bold border-b border-border/60 pb-1.5 mt-5 text-ink" {...props} />
-                      ),
-                      h2: ({ node: _node, ...props }) => (
-                        <h2 className="text-sm font-bold mt-4 text-ink flex items-center gap-1.5" {...props} />
-                      ),
-                      p: ({ node: _node, ...props }) => (
-                        <p className="text-xs text-muted leading-relaxed mt-1" {...props} />
-                      ),
-                      ul: ({ node: _node, ...props }) => (
-                        <ul className="list-disc pl-5 flex flex-col gap-1.5 mt-1" {...props} />
-                      ),
-                      ol: ({ node: _node, ...props }) => (
-                        <ol className="list-decimal pl-5 flex flex-col gap-1.5 mt-1" {...props} />
-                      ),
-                      li: ({ node: _node, ...props }) => (
-                        <li className="text-xs text-muted" {...props} />
-                      ),
-                      code: ({ node: _node, inline, className: _className, children, ...props }: any) => {
-                        return inline ? (
-                          <code className="bg-page border border-border px-1 py-0.5 rounded font-mono text-[10px] text-primary" {...props}>
-                            {children}
-                          </code>
-                        ) : (
-                          <pre className="bg-page/70 border border-border p-3.5 rounded-xl font-mono text-[10px] text-ink overflow-x-auto whitespace-pre my-2 select-text">
-                            <code {...props}>{children}</code>
-                          </pre>
-                        );
-                      },
-                      table: ({ node: _node, ...props }) => (
-                        <table className="w-full text-xs text-left border-collapse border border-border rounded-xl my-3" {...props} />
-                      ),
-                      th: ({ node: _node, ...props }) => (
-                        <th className="bg-page p-2 font-bold border border-border text-ink" {...props} />
-                      ),
-                      td: ({ node: _node, ...props }) => (
-                        <td className="p-2 border border-border text-muted" {...props} />
-                      ),
-                    }}
-                  >
-                    {unitData.content || ""}
-                  </ReactMarkdown>
+              {/* Main lecture */}
+              {unitData.lecture?.content ? (
+              <article className="bg-panel border border-border rounded-2xl shadow-card p-5 sm:p-8 select-text">
+                <div className="mb-7 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-border bg-page/45 p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted">预计学习</p>
+                    <p className="mt-1 text-sm font-bold text-ink">{unitData.estimatedMinutes || Math.max(15, unitData.lecture.sections.length * 10)} 分钟</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-page/45 p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted">内容深度</p>
+                    <p className="mt-1 text-sm font-bold text-ink">{unitData.lecture.sections.length} 个章节 · 示例与易错点</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-page/45 p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted">完成标准</p>
+                    <p className="mt-1 text-sm font-bold text-ink">讲义 + 练习 + 通关评估</p>
+                  </div>
+                </div>
+
+                {(unitData.prerequisites.length > 0 || unitData.completionCriteria.length > 0) && (
+                  <div className="mb-7 grid gap-4 md:grid-cols-2">
+                    {unitData.prerequisites.length > 0 && (
+                      <div className="rounded-xl border border-border p-4">
+                        <h3 className="text-xs font-bold text-ink">学习前准备</h3>
+                        <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] leading-5 text-muted">
+                          {unitData.prerequisites.map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {unitData.completionCriteria.length > 0 && (
+                      <div className="rounded-xl border border-primary/20 bg-primary-soft/15 p-4">
+                        <h3 className="text-xs font-bold text-ink">学完后你应该能</h3>
+                        <ul className="mt-2 space-y-1 text-[11px] leading-5 text-muted">
+                          {unitData.completionCriteria.map((item) => <li key={item}>✓ {item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid gap-8 lg:grid-cols-[190px_minmax(0,1fr)]">
+                  <aside className="h-fit rounded-xl border border-border bg-page/35 p-3 lg:sticky lg:top-4">
+                    <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-muted">讲义目录</p>
+                    <nav className="flex flex-col gap-1" aria-label="讲义目录">
+                      {[...unitData.lecture.sections].sort((a, b) => a.order - b.order).map((section, index) => (
+                        <button
+                          key={section.sectionId}
+                          onClick={() => navigateToLectureSection(section.sourceSectionId || section.sectionId)}
+                          className="rounded-lg px-2.5 py-2 text-left text-[11px] leading-4 text-muted transition-colors hover:bg-panel hover:text-primary cursor-pointer"
+                        >
+                          <span className="mr-1.5 font-mono text-[9px] text-primary">{String(index + 1).padStart(2, "0")}</span>
+                          {section.title}
+                        </button>
+                      ))}
+                    </nav>
+                  </aside>
+
+                  <div className="min-w-0 text-xs text-ink font-sans select-text">
+                    {unitData.lecture.introduction && (
+                      <div className="mb-8 rounded-xl border-l-4 border-primary bg-primary-soft/10 px-5 py-3">
+                        <LearningMarkdown>{unitData.lecture.introduction}</LearningMarkdown>
+                      </div>
+                    )}
+                    {[...unitData.lecture.sections].sort((a, b) => a.order - b.order).map((section, index) => (
+                      <section
+                        key={section.sectionId}
+                        id={`lecture-section-${section.sourceSectionId || section.sectionId}`}
+                        className="scroll-mt-6 border-b border-border/60 py-7 first:pt-0"
+                      >
+                        <div className="mb-3 flex items-center gap-3">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-[10px] font-bold text-white">{index + 1}</span>
+                          <h2 className="text-base font-bold font-serif-cn text-ink">{section.title}</h2>
+                        </div>
+                        <LearningMarkdown>{section.content}</LearningMarkdown>
+                      </section>
+                    ))}
+
+                    {unitData.lecture.keyTakeaways.length > 0 && (
+                      <section className="mt-7 rounded-xl border border-primary/25 bg-primary-soft/15 p-5">
+                        <h2 className="text-sm font-bold text-ink">核心要点</h2>
+                        <ul className="mt-3 space-y-2 text-xs leading-5 text-muted">
+                          {unitData.lecture.keyTakeaways.map((item) => <li key={item}>✓ {item}</li>)}
+                        </ul>
+                      </section>
+                    )}
+                    {unitData.lecture.commonMistakes.length > 0 && (
+                      <section className="mt-5 rounded-xl border border-danger/20 bg-danger/5 p-5">
+                        <h2 className="text-sm font-bold text-ink">常见误区与纠正</h2>
+                        <div className="mt-3 space-y-3">
+                          {unitData.lecture.commonMistakes.map((item) => (
+                            <div key={item.mistake}>
+                              <p className="text-xs font-bold text-danger">× {item.mistake}</p>
+                              <p className="mt-1 text-xs leading-5 text-muted">{item.explanation}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                    {unitData.lecture.summary && (
+                      <section className="mt-7">
+                        <h2 className="text-sm font-bold text-ink">本单元小结</h2>
+                        <LearningMarkdown>{unitData.lecture.summary}</LearningMarkdown>
+                      </section>
+                    )}
+                  </div>
                 </div>
               </article>
+              ) : (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-8 flex flex-col gap-5">
+                  {isLectureTaskRunning ? (
+                    <>
+                      <div className="flex flex-col gap-1">
+                        <h3 className="text-base font-serif-cn font-bold text-ink flex items-center gap-2">
+                          <Loader2 className="h-4.5 w-4.5 text-primary animate-spin" />
+                          {lectureTaskStage ? `正在生成课程讲义：${lectureTaskStage}` : "正在准备课程讲义..."}
+                        </h3>
+                        <p className="text-xs text-muted">
+                          系统正在把课程结构整理为一份连续、可直接学习的讲义。
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-muted font-semibold">
+                        <span>讲义进度</span>
+                        <span className="font-mono text-ink text-sm font-bold">{lectureProgress}%</span>
+                      </div>
+                      <ProgressBar progress={lectureProgress} height="h-2.5" />
+                      <p className="text-xs text-ink leading-relaxed font-mono whitespace-pre-wrap">
+                        {lectureTaskMessage || "正在连接讲义生成任务..."}
+                      </p>
+                    </>
+                  ) : isRequestingLecture ? (
+                    <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted">
+                      <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                      正在创建讲义生成任务...
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 py-6 text-center">
+                      <AlertCircle className="h-8 w-8 text-danger" />
+                      <div>
+                        <h3 className="text-sm font-bold text-ink">课程讲义暂未生成</h3>
+                        <p className="mt-1 text-xs text-muted">
+                          {lectureTaskError || getErrorMessage(lectureRequestError, "可以重新发起生成任务。")}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => performGenerateLecture()}
+                        className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow cursor-pointer"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        重新生成课程讲义
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Practice Section */}
               {practiceOpen && (practiceQuestions.length > 0 || isLoadingPractice) && (
@@ -562,7 +898,8 @@ export function UnitLearningPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setPreferencesOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border hover:bg-panel-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
+                    disabled={isLectureTaskRunning || isRegeneratedOrGenerating}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border hover:bg-panel-soft text-xs font-semibold text-ink transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <RotateCcw className="h-3.5 w-3.5 text-muted" />
                     提交偏好重新生成
@@ -594,61 +931,91 @@ export function UnitLearningPage() {
               </div>
               )}
 
-              {/* Lecture Tab */}
-              {activeTab === "lecture" && unitData?.lecture?.content && (
-                <article className="bg-panel border border-border rounded-2xl shadow-card p-6 sm:p-8 select-text">
-                  <div className="text-xs text-ink leading-relaxed flex flex-col gap-4 font-sans select-text">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {unitData.lecture.content}
-                    </ReactMarkdown>
-                  </div>
-                </article>
-              )}
-              {activeTab === "lecture" && !unitData?.lecture?.content && (
-                <div className="bg-panel border border-border rounded-2xl shadow-card p-12 text-center">
-                  <p className="text-xs text-muted">尚未生成讲义。请在课程内容页面生成。</p>
-                </div>
-              )}
-
               {/* Mind Map Tab */}
               {activeTab === "mindmap" && (
                 <div className="bg-panel border border-border rounded-2xl shadow-card p-6">
                   {mindMapData ? (
                     <div className="flex flex-col gap-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-bold text-ink font-serif-cn">思维导图</h3>
-                        <button
-                          onClick={() => {
-                            const blob = new Blob([mindMapData.mermaid], { type: "text/plain" });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url; a.download = "mindmap.mermaid";
-                            a.click(); URL.revokeObjectURL(url);
-                          }}
-                          className="px-3 py-1.5 border border-border hover:bg-page text-[10px] font-semibold text-muted rounded-lg cursor-pointer"
-                        >
-                          下载 Mermaid
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-ink font-serif-cn">思维导图</h3>
+                          <p className="mt-1 text-[10px] text-muted">支持拖动画布、缩放视图；点击章节或知识点可跳转到对应讲义</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setMindMapSourceOpen((open) => !open)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border hover:bg-page text-[10px] font-semibold text-muted rounded-lg cursor-pointer"
+                          >
+                            <Code2 className="h-3 w-3" />
+                            {mindMapSourceOpen ? "隐藏源码" : "查看源码"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              const blob = new Blob([mindMapData.mermaid], { type: "text/plain" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = "mindmap.mermaid";
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border hover:bg-page text-[10px] font-semibold text-muted rounded-lg cursor-pointer"
+                          >
+                            <Download className="h-3 w-3" />
+                            下载源码
+                          </button>
+                        </div>
                       </div>
-                      <pre className="bg-page/50 border border-border rounded-xl p-4 text-xs font-mono text-ink whitespace-pre-wrap overflow-x-auto max-h-96">
-                        {mindMapData.mermaid}
-                      </pre>
+                      <div className="flex flex-wrap gap-2 text-[9px] text-muted" aria-label="思维导图图例">
+                        <span className="rounded-full border border-[#8ea7cd] bg-[#f0f5fd] px-2 py-1">目标节点</span>
+                        <span className="rounded-full border border-border bg-page px-2 py-1">核心概念</span>
+                        <span className="rounded-full border border-[#76a48b] bg-[#edf8f0] px-2 py-1">示例</span>
+                        <span className="rounded-full border border-[#d7988f] bg-[#fff1ef] px-2 py-1">易错点</span>
+                        <span className="rounded-full border border-[#ad91c5] bg-[#f8f1fc] px-2 py-1">实践任务</span>
+                      </div>
+                      <MindMapGraph tree={mindMapData.tree} onNavigateToSection={navigateToLectureSection} />
+                      {mindMapSourceOpen && (
+                        <div className="flex flex-col gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Mermaid 源码</span>
+                          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-page/50 p-4 font-mono text-[11px] text-ink">
+                            {mindMapData.mermaid}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  ) : isLoadingMindMap ? (
+                    <div className="flex flex-col items-center justify-center gap-3 py-16">
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                      <p className="text-xs font-semibold text-ink">正在构建思维导图...</p>
+                      <p className="text-[10px] text-muted">正在从当前课程讲义提取学习目标和章节关系</p>
                     </div>
                   ) : (
-                    <div className="text-center py-8">
-                      <p className="text-xs text-muted mb-3">点击加载思维导图</p>
+                    <div className="text-center py-12">
+                      <AlertCircle className="mx-auto mb-3 h-7 w-7 text-danger" />
+                      <p className="text-xs text-muted mb-3">
+                        {getErrorMessage(mindMapError, "思维导图尚未加载")}
+                      </p>
                       <button
-                        onClick={() =>
-                          import("../../api/units").then((m) =>
-                            m.getMindMap(pathId || "", nodeId || "").then(setMindMapData)
-                          )
-                        }
+                        onClick={() => performLoadMindMap()}
                         className="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl cursor-pointer"
                       >
-                        生成思维导图
+                        重新加载思维导图
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Personalized multimodal resources */}
+              {activeTab === "resources" && nodeId && (
+                <div className="bg-panel border border-border rounded-2xl shadow-card p-6">
+                  <div className="mb-5">
+                    <h3 className="text-sm font-bold text-ink font-serif-cn">个性化多模态资源中心</h3>
+                    <p className="mt-1 text-[10px] leading-4 text-muted">
+                      五类高价值资源由不同生成智能体协作完成，并在交付前经过统一质量评分。
+                    </p>
+                  </div>
+                  <ResourcePanel nodeId={nodeId} />
                 </div>
               )}
 
@@ -662,7 +1029,10 @@ export function UnitLearningPage() {
             <div className="w-[360px] shrink-0 bg-panel border border-border rounded-2xl shadow-card flex flex-col sticky top-6 max-h-[calc(100vh-120px)]">
               <div className="flex items-center gap-2 px-5 py-4 border-b border-border/60 shrink-0">
                 <MessageCircle className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-bold text-ink font-serif-cn">答疑辅导</h3>
+                <div>
+                  <h3 className="text-sm font-bold text-ink font-serif-cn">多模态答疑辅导</h3>
+                  <p className="mt-0.5 text-[9px] text-subtle">讲解 · 图解 · 代码 · 动画微课</p>
+                </div>
               </div>
 
               {/* Messages */}
@@ -677,26 +1047,13 @@ export function UnitLearningPage() {
 
                 {tutorMessages.map((msg, idx) => (
                   <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[90%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed ${msg.role === "user" ? "bg-primary text-white rounded-br-md" : "bg-page border border-border text-ink rounded-bl-md"}`}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p> }}>
+                    {msg.role === "user" ? (
+                      <div className="max-w-[90%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-xs leading-relaxed text-white">
                         {msg.content}
-                      </ReactMarkdown>
-                      {msg.citations && msg.citations.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-border/40 flex flex-wrap gap-1.5">
-                          {msg.citations.map((cit) => (
-                            <span
-                              key={cit.chunk_id}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/8 text-[10px] text-primary font-medium"
-                              title={cit.section_title || undefined}
-                            >
-                              <BookOpen className="h-2.5 w-2.5 shrink-0" />
-                              <span className="truncate max-w-[120px]">{cit.file_name}</span>
-                              {cit.page_number != null && <span className="opacity-70">p.{cit.page_number}</span>}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <TutorRichResponse message={msg} onFeedback={handleTutorFeedback} />
+                    )}
                   </div>
                 ))}
 
@@ -712,22 +1069,42 @@ export function UnitLearningPage() {
               </div>
 
               {/* Input */}
-              <form onSubmit={handleTutorSubmit} className="flex gap-2 p-4 border-t border-border/60 shrink-0">
-                <input
-                  type="text"
-                  value={tutorInput}
-                  onChange={(e) => setTutorInput(e.target.value)}
-                  placeholder="输入你的问题..."
-                  disabled={isTutorLoading}
-                  className="flex-1 px-3 py-2.5 bg-page border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={!tutorInput.trim() || isTutorLoading}
-                  className="inline-flex items-center gap-1 px-3.5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold shadow transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
+              <form onSubmit={handleTutorSubmit} className="flex shrink-0 flex-col gap-2 border-t border-border/60 p-4">
+                <div className="flex items-center gap-1.5" aria-label="选择回答形式">
+                  {([
+                    ["diagram", "🧩 图解"],
+                    ["code", "💻 代码"],
+                    ["storyboard", "🎬 动画"],
+                  ] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => toggleTutorMode(mode)}
+                      className={`rounded-full border px-2 py-1 text-[9px] font-semibold transition-colors ${tutorResponseModes.includes(mode) ? "border-primary/30 bg-primary/8 text-primary" : "border-border text-subtle"}`}
+                      aria-pressed={tutorResponseModes.includes(mode)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[8px] text-subtle">可多选</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={tutorInput}
+                    onChange={(e) => setTutorInput(e.target.value)}
+                    placeholder="输入你的问题..."
+                    disabled={isTutorLoading}
+                    className="flex-1 px-3 py-2.5 bg-page border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!tutorInput.trim() || isTutorLoading}
+                    className="inline-flex items-center gap-1 px-3.5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold shadow transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </form>
             </div>
           )}

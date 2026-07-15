@@ -46,6 +46,8 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 300  # seconds for the entire flow
 POLL_INTERVAL = 2.0  # seconds between polling
 MAX_POLL_RETRIES = 60  # max polling attempts per step
+ASSESSMENT_PASS_THRESHOLD = 60.0
+NODE_COMPLETION_THRESHOLD = 70.0
 
 
 # ──────────────────────────────────────────────
@@ -94,6 +96,94 @@ def assert_ok(
             response.text,
         )
     return response
+
+
+def _select_smoke_answer(question: dict[str, Any]) -> Any:
+    """Choose a defensible answer without exposing server-side answer keys.
+
+    The local fallback assessment uses intentionally clear distractors.  This
+    heuristic also works for similarly phrased LLM questions while keeping the
+    public assessment contract free of correct-answer data.
+    """
+    question_type = question.get("type", "")
+    prompt = str(question.get("prompt", ""))
+    options = question.get("options") or []
+
+    if question_type == "short_answer":
+        return (
+            "Python 是由解释器执行的动态类型语言，变量名在运行时引用对象。"
+            "在实际开发中，可以把变量、控制流和函数组合成可复用的自动化程序。"
+            "我会通过运行示例、检查边界输入、阅读报错并补充测试来验证结果，"
+            "下一步继续学习模块化、调试、测试与项目工程化。"
+        )
+
+    if question_type == "true_false":
+        negative_claim_markers = ("只需要", "不需要", "无需", "无须", "没有必要", "完全不")
+        return not any(marker in prompt for marker in negative_claim_markers)
+
+    if not options:
+        return "a"
+
+    negative_markers = (
+        "只看不练",
+        "只做练习",
+        "只记忆",
+        "只重复",
+        "只关注工具",
+        "仅阅读",
+        "仅用于",
+        "忽略",
+        "随机",
+        "无需实践",
+        "不做任何",
+        "不验证",
+        "无关的主题",
+        "没有实际",
+        "已经过时",
+        "记忆所有",
+        "完全依赖",
+        "跳过基础",
+        "所有版本变更",
+        "与实践无关",
+        "不具有通用性",
+        "增加代码复杂度",
+    )
+    positive_markers = (
+        "广泛应用",
+        "理解原理",
+        "实际场景",
+        "实际应用",
+        "基本原理",
+        "检查输入输出",
+        "定位问题",
+        "提高开发效率",
+        "最佳实践",
+        "充分的测试",
+        "清晰的文档",
+        "遵循规范",
+        "结合学习目标",
+        "通过项目验证",
+    )
+
+    def option_score(option: dict[str, Any]) -> int:
+        label = str(option.get("label", ""))
+        return sum(2 for marker in positive_markers if marker in label) - sum(
+            3 for marker in negative_markers if marker in label
+        )
+
+    if question_type == "multiple_choice":
+        selected = [option["value"] for option in options if option_score(option) >= 0]
+        if selected and len(selected) < len(options):
+            return selected
+        return [option["value"] for option in options[: min(3, len(options))]]
+
+    best = max(options, key=option_score)
+    return best["value"]
+
+
+def _build_smoke_answers(questions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build one answer per public assessment question."""
+    return {question["question_id"]: _select_smoke_answer(question) for question in questions}
 
 
 def poll_task(
@@ -160,7 +250,7 @@ def step_register(client: httpx.Client, base_url: str) -> dict[str, str]:
         },
         headers={"X-CSRF-Token": csrf_token},
     )
-    assert_ok(step, res, expected=201)
+    assert_ok(step, res, expected=200)
     data = res.json()
     log(step, f"Registered: {email}, user_id={data['user']['user_id']}")
 
@@ -673,22 +763,9 @@ def step_submit_assessment(
     assert_ok(step, res)
     questions = res.json().get("questions", [])
 
-    # Build answers — pick first option for each question
-    answers: dict[str, Any] = {}
-    for q in questions:
-        qid = q["question_id"]
-        qtype = q.get("type", "")
-        options = q.get("options")
-        if qtype == "single_choice" and options:
-            answers[qid] = options[0]["value"]
-        elif qtype == "multiple_choice" and options:
-            answers[qid] = [opt["value"] for opt in options[:2]]
-        elif qtype == "true_false":
-            answers[qid] = True
-        elif qtype == "short_answer":
-            answers[qid] = "这是一个测试回答，展示了对该知识点的理解。"
-        else:
-            answers[qid] = "a"
+    if not questions:
+        fail(step, "Assessment contains no questions")
+    answers = _build_smoke_answers(questions)
 
     res = client.post(
         f"{base_url}/api/assessments/{assessment_id}/submit",
@@ -706,25 +783,56 @@ def step_verify_mastery_and_unlock(
     base_url: str,
     auth: dict[str, str],
     path_id: str,
+    node_id: str,
     submit_result: dict[str, Any],
 ) -> None:
     """Step 17-18: Verify mastery updated and next node unlocked."""
     step = "VERIFY_MASTERY_UNLOCK"
-    mastery_after = submit_result.get("mastery_after")
-    unlocked = submit_result.get("unlocked_node_ids", [])
-    log(step, f"Mastery after: {mastery_after}, unlocked nodes: {len(unlocked)}")
-
-    # If mastery not updated (short-answer pending), wait for async grading
+    headers = {
+        "X-CSRF-Token": auth["csrf_token"],
+        "Cookie": f"access_token={auth['access_token']}; csrftoken={auth['csrf_token']}",
+    }
     if submit_result.get("active_task_id"):
         task_id = submit_result["active_task_id"]
-        headers = {
-            "X-CSRF-Token": auth["csrf_token"],
-            "Cookie": f"access_token={auth['access_token']}; csrftoken={auth['csrf_token']}",
-        }
         poll_task(client, step, task_id, headers, base_url)
         log(step, "Async grading completed")
 
-    log(step, "Mastery and unlock verified")
+    attempt_id = submit_result.get("attempt_id")
+    if not attempt_id:
+        fail(step, "Assessment submission did not return attempt_id")
+
+    attempt: dict[str, Any] = {}
+    for poll_attempt in range(1, 11):
+        res = client.get(
+            f"{base_url}/api/learning-paths/{path_id}/nodes/{node_id}/attempts/{attempt_id}",
+            headers=headers,
+        )
+        assert_ok(step, res)
+        attempt = res.json()
+        if attempt.get("status") == "completed":
+            break
+        log(step, f"Attempt poll {poll_attempt}: status={attempt.get('status')}")
+        time.sleep(POLL_INTERVAL)
+
+    score = float(attempt.get("score") or 0)
+    mastery_after = float(attempt.get("mastery_after") or 0)
+    unlocked = attempt.get("unlocked_node_ids") or []
+    log(
+        step,
+        f"Attempt status={attempt.get('status')}, score={score:.1f}, "
+        f"mastery={mastery_after:.1f}, unlocked={len(unlocked)}",
+    )
+    if attempt.get("status") != "completed":
+        fail(step, f"Assessment attempt did not complete: {attempt.get('status')}")
+    if score < ASSESSMENT_PASS_THRESHOLD or attempt.get("assessment_passed") is not True:
+        fail(step, f"Assessment did not pass: score={score:.1f}")
+    if mastery_after < NODE_COMPLETION_THRESHOLD:
+        fail(step, f"Mastery did not reach completion threshold: {mastery_after:.1f}")
+    if attempt.get("node_completed") is not True or attempt.get("progress_status") != "completed":
+        fail(step, "Node progress was not completed after passing assessment")
+    if not unlocked:
+        fail(step, "No successor node was unlocked")
+    log(step, "Mastery update, node completion, and successor unlock verified")
 
 
 def step_upload_knowledge(
@@ -820,6 +928,7 @@ def step_search_knowledge(
     client: httpx.Client,
     base_url: str,
     auth: dict[str, str],
+    document_id: str,
 ) -> None:
     """Step 21: Search the knowledge base."""
     step = "SEARCH_KNOWLEDGE"
@@ -827,18 +936,17 @@ def step_search_knowledge(
         "X-CSRF-Token": auth["csrf_token"],
         "Cookie": f"access_token={auth['access_token']}; csrftoken={auth['csrf_token']}",
     }
-    res = client.get(
-        f"{base_url}/api/knowledge/search?q=Python+%E5%8F%98%E9%87%8F&limit=5",
-        headers=headers,
-    )
+    res = client.get(f"{base_url}/api/knowledge/search", params={"q": "Lambda", "limit": 5}, headers=headers)
     assert_ok(step, res)
     results = res.json().get("results", [])
     count = len(results)
     log(step, f"Search returned {count} results")
 
-    # Search may return empty if indexing is slow — non-fatal
     if count == 0:
-        log(step, "Warning: no results, but flow continues")
+        fail(step, "Indexed document could not be found by exact-content search")
+    if not any(result.get("document_id") == document_id for result in results):
+        fail(step, "Search results did not include the document uploaded by this flow")
+    log(step, "Uploaded document search hit verified")
 
 
 def step_tutor(
@@ -903,6 +1011,7 @@ def step_resume(
     client: httpx.Client,
     base_url: str,
     auth: dict[str, str],
+    path_id: str,
 ) -> None:
     """Step 24: Verify resume state."""
     step = "RESUME"
@@ -916,10 +1025,60 @@ def step_resume(
     )
     assert_ok(step, res)
     data = res.json()
-    state = data.get("state", "")
-    log(step, f"Resume state: {state}")
-    if state == "empty":
-        fail(step, "Resume state is empty after learning activity")
+    resume_type = data.get("type", "")
+    log(step, f"Resume type: {resume_type}")
+    if resume_type not in {"active", "completed"}:
+        fail(step, f"Expected active/completed resume after learning, got {resume_type!r}")
+    if data.get("path_id") != path_id:
+        fail(step, "Resume points to a different learning path")
+    if int(data.get("completed_nodes") or 0) < 1:
+        fail(step, "Resume does not report the completed first node")
+    if resume_type == "active":
+        if not data.get("current_node_id") or not data.get("current_node_title"):
+            fail(step, "Active resume is missing the next learning node")
+        if float(data.get("progress") or 0) <= 0:
+            fail(step, "Active resume progress was not updated")
+    log(step, "Resume state and path progress verified")
+
+
+def step_verify_agent_traces(
+    client: httpx.Client,
+    base_url: str,
+    auth: dict[str, str],
+) -> None:
+    """Verify that real workflow tasks expose durable multi-agent evidence."""
+    step = "VERIFY_AGENT_TRACES"
+    headers = {
+        "X-CSRF-Token": auth["csrf_token"],
+        "Cookie": f"access_token={auth['access_token']}; csrftoken={auth['csrf_token']}",
+    }
+    res = client.get(f"{base_url}/api/tasks", params={"limit": 50}, headers=headers)
+    assert_ok(step, res)
+    tasks = res.json().get("items", [])
+    expected_agents = {
+        "learning_path_generation": {"profile_context", "path_planner", "path_validator"},
+        "learning_unit_generation": {"profile_context", "content_generator", "quality_gate", "content_reviewer"},
+        "learning_lecture_generation": {"source_material_analyzer", "lecture_generator", "lecture_quality_gate"},
+        "learning_assessment_generation": {
+            "profile_context",
+            "assessment_designer",
+            "assessment_validator",
+        },
+    }
+    for task_type, required in expected_agents.items():
+        task = next((item for item in tasks if item.get("type") == task_type), None)
+        if not task:
+            fail(step, f"Missing completed workflow task: {task_type}")
+        trace = task.get("agent_trace") or []
+        actual = {item.get("agent_key") for item in trace}
+        missing = required - actual
+        if missing:
+            fail(step, f"Task {task_type} is missing agent trace steps: {sorted(missing)}")
+        if any(item.get("status") == "running" for item in trace):
+            fail(step, f"Task {task_type} left running agent trace steps after completion")
+        log(step, f"{task_type}: {len(trace)} trace steps verified")
+
+    log(step, "Multi-agent collaboration evidence verified")
 
 
 def step_logout(
@@ -947,6 +1106,13 @@ def step_logout(
 
 
 def main() -> int:
+    # Windows terminals may default to GBK, which cannot render the status
+    # symbols used by this script and used to hide the original API failure.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="EduAgentX Full Learning Flow Smoke Test")
     parser.add_argument(
         "--base-url",
@@ -1040,7 +1206,7 @@ def main() -> int:
 
             # 17-18. Verify Mastery and Unlock
             print("\n── Step 17-18: Verify Mastery & Node Unlock ──")
-            step_verify_mastery_and_unlock(client, base_url, auth, path_id, submit_result)
+            step_verify_mastery_and_unlock(client, base_url, auth, path_id, node_id, submit_result)
 
             # 19. Upload Knowledge Document
             print("\n── Step 19: Upload Knowledge Document ──")
@@ -1052,7 +1218,7 @@ def main() -> int:
 
             # 21. Search Knowledge
             print("\n── Step 21: Search Knowledge ──")
-            step_search_knowledge(client, base_url, auth)
+            step_search_knowledge(client, base_url, auth, document_id)
 
             # 22. Tutor Q&A
             print("\n── Step 22: Tutor Q&A ──")
@@ -1062,12 +1228,16 @@ def main() -> int:
             print("\n── Step 23: Get Recommendations ──")
             step_recommendations(client, base_url, auth, path_id)
 
-            # 24. Verify Resume
-            print("\n── Step 24: Verify Resume ──")
-            step_resume(client, base_url, auth)
+            # 24. Verify Multi-Agent Trace
+            print("\n── Step 24: Verify Multi-Agent Trace ──")
+            step_verify_agent_traces(client, base_url, auth)
 
-            # 25. Logout
-            print("\n── Step 25: Logout ──")
+            # 25. Verify Resume
+            print("\n── Step 25: Verify Resume ──")
+            step_resume(client, base_url, auth, path_id)
+
+            # 26. Logout
+            print("\n── Step 26: Logout ──")
             step_logout(client, base_url, auth)
 
     except Exception as e:

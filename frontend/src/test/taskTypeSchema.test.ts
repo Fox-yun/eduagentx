@@ -11,6 +11,7 @@ describe("TaskTypeSchema contract", () => {
     const expected = [
       "learning_goal_analysis",
       "learning_diagnostic_generation",
+      "diagnostic_grading",
       "learning_path_generation",
       "learning_path_revision",
       "learning_unit_generation",
@@ -33,9 +34,8 @@ describe("TaskTypeSchema contract", () => {
     expect(result.success).toBe(false);
   });
 
-  it("does not expose internal-only types (e2e_progress_test, diagnostic_grading)", () => {
+  it("does not expose the internal-only e2e task type", () => {
     expect(TaskTypeSchema.safeParse("e2e_progress_test").success).toBe(false);
-    expect(TaskTypeSchema.safeParse("diagnostic_grading").success).toBe(false);
   });
 });
 

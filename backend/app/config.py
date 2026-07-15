@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import unquote, urlparse
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -90,6 +91,16 @@ class Settings(BaseSettings):
         default="deepseek-ai/DeepSeek-V4-Pro",
         description="Model name for LLM calls",
     )
+    tts_model: str = Field(
+        default="FunAudioLLM/CosyVoice2-0.5B",
+        description="SiliconFlow text-to-speech model",
+    )
+    tts_voice: str = Field(
+        default="FunAudioLLM/CosyVoice2-0.5B:anna",
+        description="SiliconFlow text-to-speech voice",
+    )
+    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    tts_timeout_seconds: float = Field(default=180.0, gt=0)
 
     # Object Storage (MinIO)
     minio_endpoint: str | None = Field(
@@ -100,6 +111,10 @@ class Settings(BaseSettings):
     minio_secret_key: str = Field(default="minioadmin", description="MinIO secret key")
     minio_bucket: str = Field(default="eduagentx", description="MinIO bucket name")
     minio_secure: bool = Field(default=False, description="Use HTTPS for MinIO connection")
+    local_storage_path: str = Field(
+        default=".local-storage",
+        description="Persistent filesystem object storage used outside tests when MinIO is not configured",
+    )
 
     # Email & SMTP Settings
     smtp_host: str | None = Field(default=None, description="SMTP server host")
@@ -120,19 +135,122 @@ class Settings(BaseSettings):
         description="AEAD key for outbox payload encryption",
     )
 
+    # Known insecure placeholder values that must not be used in production
+    _INSECURE_PLACEHOLDERS: set[str] = {
+        "dev-secret-key-change-in-production",
+        "dev-secret-key-replace-with-at-least-64-random-characters-in-production",
+        "replace-with-at-least-64-random-characters",
+        "CHANGE_ME_TO_64_PLUS_RANDOM_CHARACTERS",
+        "dev-email-outbox-encryption-key-32b=",
+        "replace-with-a-separate-random-key-32b=",
+        "CHANGE_ME_TO_32_PLUS_RANDOM_CHARACTERS",
+    }
+    _INSECURE_PASSWORDS: set[str] = {
+        "eduagentx",
+        "minioadmin",
+        "password",
+        "CHANGE_ME_TO_STRONG_PASSWORD",
+        "CHANGE_ME_TO_STRONG_ACCESS_KEY",
+        "CHANGE_ME_TO_STRONG_SECRET_KEY",
+        "CHANGE_ME_TO_REDIS_PASSWORD",
+    }
+
     @model_validator(mode="after")
     def validate_production(self) -> Settings:
         """Validate production-specific settings."""
         if self.app_env == "production":
-            if self.app_secret_key == "dev-secret-key-change-in-production":
-                raise ValueError("Production secret key is invalid")
+            # Reject placeholder / short secret keys
+            if self.app_secret_key in self._INSECURE_PLACEHOLDERS:
+                raise ValueError(
+                    "APP_SECRET_KEY must be replaced with a real random value in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                )
+            if len(self.app_secret_key) < 64:
+                raise ValueError(
+                    "APP_SECRET_KEY must be at least 64 characters in production "
+                    f"(current: {len(self.app_secret_key)} characters)"
+                )
+
+            # Cookies must be secure
             if not self.cookie_secure:
-                raise ValueError("Production cookies must be Secure")
+                raise ValueError("COOKIE_SECURE must be true in production")
+
+            # Reject default / placeholder database passwords
+            db_password = self._extract_password_from_url(self.database_url)
+            if db_password in self._INSECURE_PASSWORDS:
+                raise ValueError(
+                    "DATABASE_URL contains a default or placeholder password. "
+                    "Set a strong POSTGRES_PASSWORD in production."
+                )
+
+            # Reject default MinIO credentials
+            if self.minio_access_key in self._INSECURE_PASSWORDS:
+                raise ValueError(
+                    "MINIO_ACCESS_KEY must not use default value in production."
+                )
+            if self.minio_secret_key in self._INSECURE_PASSWORDS:
+                raise ValueError(
+                    "MINIO_SECRET_KEY must not use default value in production."
+                )
+
+            # Reject default / placeholder Redis passwords
+            redis_password = self._extract_password_from_url(self.redis_url)
+            if redis_password is None:
+                raise ValueError(
+                    "REDIS_URL must include a password in production. "
+                    "Set a strong REDIS_PASSWORD."
+                )
+            if redis_password in self._INSECURE_PASSWORDS:
+                raise ValueError(
+                    "REDIS_URL contains a default or placeholder password. "
+                    "Set a strong REDIS_PASSWORD in production."
+                )
+
+            # Reject placeholder outbox encryption key
+            if self.email_outbox_encryption_key in self._INSECURE_PLACEHOLDERS:
+                raise ValueError(
+                    "EMAIL_OUTBOX_ENCRYPTION_KEY must be replaced with a real random value in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+            if len(self.email_outbox_encryption_key) < 32:
+                raise ValueError(
+                    "EMAIL_OUTBOX_ENCRYPTION_KEY must be at least 32 characters in production."
+                )
+
+            # Reject HTTP public URLs
+            if self.public_frontend_url.startswith("http://") and not self._is_localhost_url(
+                self.public_frontend_url
+            ):
+                raise ValueError(
+                    "PUBLIC_FRONTEND_URL must use HTTPS in production "
+                    f"(current: {self.public_frontend_url})"
+                )
+
+            # CORS must not be wildcard
+            if "*" in self.cors_allowed_origins:
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS must not contain '*' in production. "
+                    "Specify explicit origins."
+                )
 
         if self.cookie_samesite == "none" and not self.cookie_secure:
             raise ValueError("SameSite=None requires Secure cookies")
 
         return self
+
+    @staticmethod
+    def _extract_password_from_url(url: str) -> str | None:
+        """Extract password from a database/redis URL."""
+        parsed = urlparse(url)
+        if parsed.password:
+            return unquote(parsed.password)
+        return None
+
+    @staticmethod
+    def _is_localhost_url(url: str) -> bool:
+        """Check if a URL points to localhost."""
+        parsed = urlparse(url)
+        return parsed.hostname in ("localhost", "127.0.0.1", "::1")
 
     @property
     def is_production(self) -> bool:

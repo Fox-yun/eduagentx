@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import io
 from typing import Any
 
-import io
-
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +15,7 @@ from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
 from app.core.errors import ApiError
 from app.models.progress import LearningProgress
-from app.models.unit import Assessment, AssessmentAttempt, AssessmentQuestion, LearningResource
+from app.models.unit import Assessment, AssessmentAttempt, AssessmentQuestion
 from app.models.user import User
 from app.services.learning_access import require_node_access
 from app.services.resources import ResourceService
@@ -93,18 +92,8 @@ async def generate_lecture(
 ) -> dict[str, Any]:
     """Generate a detailed lecture for an existing unit content."""
     await require_node_access(db, user.id, path_id, node_id)
-
-    from app.services.task import TaskService
-
-    task_service = TaskService(db)
-    task = await task_service.create_task(
-        user_id=user.id,
-        task_type="learning_lecture_generation",
-        target_type="node",
-        target_id=node_id,
-        target_metadata={"path_id": path_id},
-    )
-    return {"next_step": "generating", "active_task_id": task.id}
+    service = UnitService(db)
+    return await service.generate_lecture(path_id, node_id, user.id)
 
 
 @router.post("/{path_id}/nodes/{node_id}/assessments")
@@ -196,15 +185,10 @@ async def create_practice(
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Create a practice question set (repeatable, not scored).
-
-    Delegates to the async assessment generation pipeline with
-    purpose=practice, ensuring consistent architecture with formal
-    assessments and quiz banks.
-    """
+    """Create a repeatable, unscored practice set with answer feedback."""
     await require_node_access(db, user.id, path_id, node_id)
     service = UnitService(db)
-    return await service.create_assessment(path_id, node_id, user.id, purpose="practice")
+    return await service.create_practice(path_id, node_id, user.id)
 
 
 @router.get("/{path_id}/nodes/{node_id}/mind-map")
@@ -387,6 +371,7 @@ async def generate_resource(
     path_id: str,
     node_id: str,
     resource_type: str,
+    force: bool = False,
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -397,14 +382,14 @@ async def generate_resource(
     - code_zip: Code project ZIP archive
     - interactive_cards: Flip card learning resources
     - walkthrough: Step-by-step case study
-    - simulation: Concept simulation with state transitions
+    - narrated_video: Narrated MP4 lesson with synchronized captions
 
     Returns generating status with active_task_id for SSE progress tracking.
     Idempotent: returns existing resource if ready, or existing task_id if generating.
     """
     await require_node_access(db, user.id, path_id, node_id)
     service = ResourceService(db)
-    return await service.get_or_create_resource(path_id, node_id, user.id, resource_type)
+    return await service.get_or_create_resource(path_id, node_id, user.id, resource_type, force=force)
 
 
 @router.get("/{path_id}/nodes/{node_id}/resources/{resource_type}")
@@ -418,7 +403,7 @@ async def get_resource(
     """Get a multimodal learning resource.
 
     For binary resources (PPTX, ZIP), returns metadata including storage key.
-    For JSON resources (interactive cards, walkthrough, simulation), returns full content.
+    For JSON resources (interactive cards and walkthrough), returns full content.
     """
     await require_node_access(db, user.id, path_id, node_id)
     service = ResourceService(db)
@@ -430,28 +415,79 @@ async def download_resource(
     path_id: str,
     node_id: str,
     resource_type: str,
+    request: Request,
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
-) -> StreamingResponse:
-    """Download a binary learning resource (PPTX or ZIP).
+) -> Response:
+    """Download a binary learning resource, including seekable MP4 ranges.
 
     Validates user access and resource readiness before streaming the
     binary artifact from object storage.  The storage key is never exposed
     to the client — only a safe filename is returned in the
     Content-Disposition header.
 
-    Supported resource types: ``pptx``, ``code_zip``.
+    Supported resource types: ``pptx``, ``code_zip``, ``narrated_video``.
     """
     await require_node_access(db, user.id, path_id, node_id)
     service = ResourceService(db)
     file_bytes, filename, content_type = await service.download_resource_binary(
         path_id, node_id, user.id, resource_type
     )
+    total_size = len(file_bytes)
+    disposition = "inline" if resource_type == "narrated_video" else "attachment"
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{filename}"',
+        "Content-Length": str(total_size),
+    }
+
+    if resource_type == "narrated_video":
+        headers["Accept-Ranges"] = "bytes"
+        range_header = request.headers.get("range")
+        if range_header:
+            try:
+                start, end = _parse_byte_range(range_header, total_size)
+            except ValueError:
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{total_size}", "Accept-Ranges": "bytes"},
+                )
+            partial = file_bytes[start : end + 1]
+            headers.update(
+                {
+                    "Content-Range": f"bytes {start}-{end}/{total_size}",
+                    "Content-Length": str(len(partial)),
+                }
+            )
+            return Response(content=partial, status_code=206, media_type=content_type, headers=headers)
+
     return StreamingResponse(
         io.BytesIO(file_bytes),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(file_bytes)),
-        },
+        headers=headers,
     )
+
+
+def _parse_byte_range(value: str, total_size: int) -> tuple[int, int]:
+    """Parse one RFC 7233 byte range and clamp its end to the file size."""
+    if total_size <= 0 or not value.startswith("bytes=") or "," in value:
+        raise ValueError("Unsupported byte range")
+    spec = value.removeprefix("bytes=").strip()
+    if "-" not in spec:
+        raise ValueError("Malformed byte range")
+    start_text, end_text = (part.strip() for part in spec.split("-", 1))
+    try:
+        if not start_text:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                raise ValueError("Invalid suffix range")
+            start = max(total_size - suffix_length, 0)
+            end = total_size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else total_size - 1
+            if start < 0 or start >= total_size or end < start:
+                raise ValueError("Unsatisfiable byte range")
+            end = min(end, total_size - 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Malformed byte range") from exc
+    return start, end

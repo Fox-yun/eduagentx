@@ -95,6 +95,22 @@ function useReadyContentMock() {
       summary: null,
       references: [],
       error: null,
+      lecture: {
+        introduction: "# 主动学习与样本筛选讲解\n\n这是一份连续的课程讲义。",
+        sections: [
+          {
+            section_id: "lecture-sec-1",
+            source_section_id: "sec-1",
+            title: "章节正文",
+            content: "主动学习可以极大地节省标注成本。",
+            order: 1,
+          },
+        ],
+        key_takeaways: ["优先选择信息量高的样本"],
+        common_mistakes: [],
+        summary: "完成本节后应能解释样本筛选策略。",
+      },
+      active_lecture_task_id: null,
     });
   });
 }
@@ -143,6 +159,168 @@ describe("Coverage Boost: UnitLearningPage error paths", () => {
     await waitFor(() => {
       expect(window.location.pathname || mockNavigate).toBeTruthy();
     });
+  });
+
+  it("should automatically generate and display the lecture as the course body", async () => {
+    let lectureRequests = 0;
+    let lectureReady = false;
+    server.use(usePathMock());
+    server.use(
+      http.get("/api/learning-paths/path-123/nodes/node-555/content", () =>
+        HttpResponse.json({
+          unit_id: "unit-555",
+          path_id: "path-123",
+          path_version: 1,
+          node_id: "node-555",
+          content_version: 2,
+          status: "ready",
+          active_task_id: null,
+          introduction: "# 内部课程结构",
+          objectives: ["掌握主动学习"],
+          sections: [
+            {
+              section_id: "source-1",
+              title: "内部章节",
+              content: "这段结构化源内容不应直接展示。",
+              order: 1,
+            },
+          ],
+          practice_tasks: [],
+          summary: null,
+          references: [],
+          error: null,
+          lecture: lectureReady
+            ? {
+                introduction: "# 自动生成的课程讲义",
+                sections: [
+                  {
+                    section_id: "lecture-1",
+                    title: "连续讲解",
+                    content: "这是学习者最终看到的讲义正文。",
+                    order: 1,
+                  },
+                ],
+                key_takeaways: [],
+                common_mistakes: [],
+                summary: null,
+              }
+            : null,
+          active_lecture_task_id: null,
+        })
+      ),
+      http.post("/api/learning-paths/path-123/nodes/node-555/content/lecture", () => {
+        lectureRequests += 1;
+        lectureReady = true;
+        return HttpResponse.json({
+          next_step: "generating",
+          active_task_id: "task-lecture-1",
+        });
+      })
+    );
+
+    FakeTaskStreamTransport.setMockEvents("task-lecture-1", [
+      {
+        event_id: "lecture-running",
+        task_id: "task-lecture-1",
+        type: "progress",
+        status: "running",
+        progress: 60,
+        message: "正在整理讲义正文",
+        stage: "章节编写",
+        result: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        event_id: "lecture-completed",
+        task_id: "task-lecture-1",
+        type: "completed",
+        status: "completed",
+        progress: 100,
+        message: "讲义生成完成",
+        stage: "completed",
+        result: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/learning-paths/:pathId/nodes/:nodeId" element={<UnitLearningPage />} />
+      </Routes>,
+      { route: "/learning-paths/path-123/nodes/node-555" }
+    );
+
+    expect(await screen.findByText("自动生成的课程讲义")).toBeInTheDocument();
+    expect(screen.getByText("这是学习者最终看到的讲义正文。")).toBeInTheDocument();
+    expect(screen.queryByText("内部课程结构")).not.toBeInTheDocument();
+    expect(lectureRequests).toBe(1);
+  });
+
+  it("should render the mind map as an interactive graph and keep source optional", async () => {
+    server.use(usePathMock());
+    server.use(useReadyContentMock());
+    server.use(
+      http.get("/api/learning-paths/path-123/nodes/node-555/mind-map", () =>
+        HttpResponse.json({
+          node_id: "node-555",
+          tree: [
+            {
+              id: "root",
+              label: "主动学习与样本筛选",
+              kind: "root",
+              section_id: null,
+              children: [
+                {
+                  id: "objectives",
+                  label: "学习目标",
+                  kind: "objective_group",
+                  section_id: null,
+                  children: [
+                    { id: "obj-1", label: "掌握不确定性采样", kind: "objective", section_id: null, children: [] },
+                  ],
+                },
+                {
+                  id: "sec-1",
+                  label: "样本筛选策略",
+                  kind: "section",
+                  section_id: "sec-1",
+                  children: [
+                    { id: "sec-1-key", label: "优先选择信息量高的样本", kind: "concept", section_id: "sec-1", children: [] },
+                  ],
+                },
+              ],
+            },
+          ],
+          mermaid: "mindmap\n  root((主动学习与样本筛选))\n    学习目标",
+        })
+      )
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/learning-paths/:pathId/nodes/:nodeId" element={<UnitLearningPage />} />
+      </Routes>,
+      { route: "/learning-paths/path-123/nodes/node-555" }
+    );
+
+    expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "🧠 思维导图" }));
+
+    expect(await screen.findByTestId("mind-map-canvas")).toHaveAttribute("aria-label", "课程思维导图");
+    expect(screen.getByText("主动学习与样本筛选")).toBeInTheDocument();
+    expect(screen.getByText("学习目标")).toBeInTheDocument();
+    expect(screen.getByText("优先选择信息量高的样本")).toBeInTheDocument();
+    expect(screen.queryByText(/root\(\(主动学习与样本筛选\)\)/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("优先选择信息量高的样本"));
+    expect(screen.getByRole("button", { name: "📖 课程讲义" })).toHaveClass("bg-primary");
+    expect(screen.getByRole("navigation", { name: "讲义目录" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "🧠 思维导图" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(screen.getByRole("button", { name: "隐藏源码" })).toBeInTheDocument();
+    expect(screen.getByText(/root\(\(主动学习与样本筛选\)\)/)).toBeInTheDocument();
   });
 
   it("should show loading state while unit data is pending", async () => {

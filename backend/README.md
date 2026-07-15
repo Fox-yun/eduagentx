@@ -9,7 +9,7 @@
 | ORM | SQLAlchemy 2.x (async) |
 | 数据库 | PostgreSQL 16 |
 | 缓存 | Redis 7 |
-| 迁移 | Alembic (27 版本) |
+| 迁移 | Alembic (31 版本) |
 | 认证 | Argon2id + JWT (Cookie-based) |
 | 测试 | Pytest + httpx |
 | 代码质量 | Ruff + MyPy + Bandit |
@@ -21,8 +21,16 @@
 
 ```bash
 cd backend/docker
-docker-compose up -d
+# Demo 模式（本地开发，HTTP 直连）
+./init-production.ps1
+./start-stack.ps1 -Mode demo
+
+# 生产模式（HTTPS + Nginx）
+./init-production.ps1 -GenerateCert
+./start-stack.ps1 -Mode production
 ```
+
+> 所有 `docker compose` 命令必须使用 `--env-file .env.docker`。
 
 ### 2. 安装依赖
 
@@ -164,4 +172,6 @@ alembic downgrade -1
 | CSRF_HEADER_NAME | X-CSRF-Token | CSRF Header 名 |
 | ACCESS_TOKEN_TTL_SECONDS | 900 | Access Token TTL |
 | REFRESH_TOKEN_TTL_SECONDS | 604800 | Refresh Token TTL |
-| LOG_LEVEL | INFO | 日志级别 |
+| LLM_API_KEY | - | LLM API 密钥 |
+| LLM_MODEL | deepseek-ai/DeepSeek-V4-Pro | LLM 模型名称 |
+| LLM_API_BASE | https://api.siliconflow.cn/v1 | LLM API 地址 |

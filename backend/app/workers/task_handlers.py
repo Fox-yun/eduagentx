@@ -64,6 +64,7 @@ PUBLIC_TASK_TYPES: frozenset[str] = frozenset(
     {
         "learning_goal_analysis",
         "learning_diagnostic_generation",
+        "diagnostic_grading",
         "learning_path_generation",
         "learning_path_revision",
         "learning_unit_generation",

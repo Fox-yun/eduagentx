@@ -3,7 +3,7 @@
 Verifies:
   - PPTXGenerator produces valid PPTX bytes with correct slide count
   - CodeZIPGenerator produces valid ZIP with security checks
-  - InteractiveGenerator produces valid cards, walkthrough, and simulation
+  - InteractiveGenerator produces valid active-recall cards and walkthroughs
   - All generators handle empty/minimal input gracefully
 
 Run with:
@@ -20,7 +20,6 @@ import pytest
 from app.services.code_generator import CodeZIPGenerator
 from app.services.interactive_generator import InteractiveGenerator
 from app.services.pptx_generator import PPTXGenerator
-
 
 # ──────────────────────────────────────────────
 # Test data
@@ -137,6 +136,28 @@ class TestPPTXGenerator:
                 title_text = shape.text_frame.text
                 break
         assert "Python" in title_text or "基础语法" in title_text
+
+    def test_generate_pptx_title_excludes_introduction_body(self):
+        """Title slide should keep only the concise Markdown heading."""
+        content = {
+            **SAMPLE_UNIT_CONTENT,
+            "introduction": (
+                "# Python 编程基础和算法的核心概念与术语\n\n"
+                "学习 Python 编程基础和算法时，应先建立清晰的术语体系。"
+            ),
+        }
+        pptx_bytes = PPTXGenerator.generate_pptx_bytes(content)
+
+        if pptx_bytes is None:
+            pytest.skip("python-pptx not installed")
+
+        from pptx import Presentation
+
+        prs = Presentation(BytesIO(pptx_bytes))
+        title_text = prs.slides[0].shapes.title.text
+        assert title_text == "Python 编程基础和算法的核心概念与术语"
+        assert "学习" not in title_text
+        assert len(title_text) <= 22
 
 
 # ──────────────────────────────────────────────
@@ -298,60 +319,3 @@ class TestWalkthroughGenerator:
         result = InteractiveGenerator.generate_walkthrough(MINIMAL_UNIT_CONTENT)
 
         assert result["interactive_type"] == "walkthrough"
-
-
-class TestSimulationGenerator:
-    """Verify simulation generation."""
-
-    def test_generate_simulation_returns_valid_structure(self):
-        """Generated simulation should have correct structure."""
-        result = InteractiveGenerator.generate_simulation(SAMPLE_UNIT_CONTENT)
-
-        assert result["interactive_type"] == "simulation"
-        assert "title" in result
-        assert "description" in result
-        assert "items" in result
-        assert isinstance(result["items"], list)
-        assert len(result["items"]) > 0
-
-    def test_simulation_items_have_label_and_state(self):
-        """Each simulation item should have label, state, and description."""
-        result = InteractiveGenerator.generate_simulation(SAMPLE_UNIT_CONTENT)
-
-        for item in result["items"]:
-            assert "label" in item
-            assert "state" in item
-            assert isinstance(item["state"], dict)
-
-    def test_simulation_starts_with_initial_state(self):
-        """First simulation item should be the initial state."""
-        result = InteractiveGenerator.generate_simulation(SAMPLE_UNIT_CONTENT)
-
-        first = result["items"][0]
-        assert "初始" in first["label"] or "开始" in first["label"]
-
-    def test_simulation_ends_with_final_state(self):
-        """Last simulation item should be the final state."""
-        result = InteractiveGenerator.generate_simulation(SAMPLE_UNIT_CONTENT)
-
-        last = result["items"][-1]
-        assert "完成" in last["label"] or "最终" in last["label"]
-
-    def test_simulation_mastery_progresses(self):
-        """Mastery should increase from 0 to 100."""
-        result = InteractiveGenerator.generate_simulation(SAMPLE_UNIT_CONTENT)
-
-        masteries = [
-            item["state"].get("mastery", 0)
-            for item in result["items"]
-            if "mastery" in item["state"]
-        ]
-        if len(masteries) >= 2:
-            assert masteries[0] <= masteries[-1]
-            assert masteries[-1] == 100.0
-
-    def test_simulation_with_minimal_content(self):
-        """Simulation generation should work with minimal content."""
-        result = InteractiveGenerator.generate_simulation(MINIMAL_UNIT_CONTENT)
-
-        assert result["interactive_type"] == "simulation"

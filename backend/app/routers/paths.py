@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
 from app.core.database import get_db
+from app.models.path import LearningPath
 from app.models.progress import RecommendationFeedback
 from app.models.user import User
 from app.services.path import PathService
@@ -79,6 +80,7 @@ async def list_versions(
     return {
         "items": [
             {
+                "version_id": v.id,
                 "path_id": v.path_id,
                 "version": v.version_number,
                 "parent_version": None,
@@ -137,6 +139,18 @@ async def activate_version(
     service = PathService(db)
     path = await service.activate_version(path_id, user.id, version_id)
     return {"message": "Version activated", "path_id": path.id, "version_id": version_id}
+
+
+@router.post("/{path_id}/activate")
+async def activate_path(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Activate the newest draft/review version of a learning path."""
+    service = PathService(db)
+    path, version_id = await service.activate_latest_version(path_id, user.id)
+    return {"message": "Path activated", "path_id": path.id, "version_id": version_id}
 
 
 @router.post("/{path_id}/revision-requests")
@@ -198,6 +212,45 @@ class RecommendationFeedbackRequest(BaseModel):
     action: Literal["accept", "ignore", "later"]
 
 
+class AdaptationDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accept", "dismiss"]
+
+
+@router.get("/{path_id}/adaptation-proposals")
+async def get_adaptation_proposals(
+    path_id: str,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    from app.services.adaptation import list_adaptation_proposals, serialize_adaptation_proposal
+
+    items = await list_adaptation_proposals(db, user_id=user.id, path_id=path_id)
+    return {"items": [serialize_adaptation_proposal(item) for item in items]}
+
+
+@router.post("/{path_id}/adaptation-proposals/{proposal_id}/decision")
+async def decide_adaptation(
+    path_id: str,
+    proposal_id: str,
+    body: AdaptationDecisionRequest,
+    user: User = Depends(require_learning_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    from app.services.adaptation import decide_adaptation_proposal, serialize_adaptation_proposal
+
+    proposal, task_id = await decide_adaptation_proposal(
+        db,
+        user_id=user.id,
+        path_id=path_id,
+        proposal_id=proposal_id,
+        action=body.action,
+    )
+    await db.commit()
+    return {"proposal": serialize_adaptation_proposal(proposal), "active_task_id": task_id}
+
+
 @router.post("/{path_id}/recommendations/feedback")
 async def submit_recommendation_feedback(
     path_id: str,
@@ -211,6 +264,14 @@ async def submit_recommendation_feedback(
     future recommendation ordering. The recommendation_key uniquely
     identifies a recommendation type+node combination for deduplication.
     """
+    owned_path = await db.execute(
+        select(LearningPath.id).where(LearningPath.id == path_id, LearningPath.user_id == user.id)
+    )
+    if owned_path.scalar_one_or_none() is None:
+        from app.core.errors import ApiError
+
+        raise ApiError(code="PATH_NOT_FOUND", message="Learning path not found", status_code=404)
+
     # Check if feedback already exists (idempotent update)
     existing = await db.execute(
         select(RecommendationFeedback).where(

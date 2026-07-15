@@ -151,6 +151,8 @@ class GoalService:
         user_id: str,
         target_status: str,
         task_id: str | None = None,
+        *,
+        commit: bool = True,
     ) -> LearningGoal:
         """Transition a goal to a new status."""
         goal = await self.get_goal(goal_id, user_id)
@@ -170,7 +172,8 @@ class GoalService:
             goal.active_task_id = None
 
         await self.db.flush()
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return goal
 
     async def delete_goal(self, goal_id: str, user_id: str) -> None:

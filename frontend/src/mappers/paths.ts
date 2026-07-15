@@ -75,6 +75,7 @@ export function mapLearningPath(dto: LearningPathDto): LearningPathModel {
 
 export function mapPathVersion(dto: PathVersionDto): PathVersionModel {
   return {
+    versionId: dto.version_id,
     pathId: dto.path_id,
     version: dto.version,
     parentVersion: dto.parent_version,

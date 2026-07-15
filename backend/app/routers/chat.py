@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     )
     node_id: str
     path_id: str
+    response_modes: list[str] | None = Field(default_factory=list, max_length=3)
 
 
 @router.post("")
@@ -40,4 +41,5 @@ async def chat(
         node_id=body.node_id,
         user_id=user.id,
         question=body.question,
+        response_modes=body.response_modes,
     )

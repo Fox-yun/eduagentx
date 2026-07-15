@@ -69,6 +69,9 @@ describe("Knowledge & Tasks Panels", () => {
     // Verify progress bar representation
     expect(screen.getByText("45%")).toBeInTheDocument();
     expect(screen.getByText("正在根据大纲生成节点与连线...")).toBeInTheDocument();
+    expect(screen.getByText("智能体协作轨迹")).toBeInTheDocument();
+    expect(screen.getByText("路径规划智能体")).toBeInTheDocument();
+    expect(screen.getByText("正在生成节点与依赖关系。")).toBeInTheDocument();
 
     // Cancel task
     const cancelBtn = screen.getByRole("button", { name: "取消任务" });

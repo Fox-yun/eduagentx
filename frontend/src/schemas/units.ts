@@ -31,11 +31,16 @@ export const UnitContentDtoSchema = z.object({
   active_version_id: z.string().nullable().optional(),
   pending_version_id: z.string().nullable().optional(),
   introduction: z.string().nullable(),
+  prerequisites: z.array(z.string()).optional(),
   objectives: z.array(z.string()),
+  estimated_minutes: z.number().int().positive().nullable().optional(),
+  completion_criteria: z.array(z.string()).optional(),
   sections: z.array(UnitSectionDtoSchema),
   practice_tasks: z.array(PracticeTaskDtoSchema),
+  project: z.unknown().nullable().optional(),
   summary: z.string().nullable(),
   references: z.array(UnitReferenceDtoSchema),
+  generation_metadata: z.record(z.string(), z.unknown()).nullable().optional(),
   error: z.string().nullable(),
   lecture: z.any().nullable().optional(),
   active_lecture_task_id: z.string().nullable().optional(),
@@ -74,11 +79,16 @@ export interface UnitContentModel {
   activeVersionId: string | null;
   pendingVersionId: string | null;
   introduction: string | null;
+  prerequisites: string[];
   objectives: string[];
+  estimatedMinutes: number | null;
+  completionCriteria: string[];
   sections: UnitSectionModel[];
   practiceTasks: PracticeTaskModel[];
+  project: unknown | null;
   summary: string | null;
   references: UnitReferenceModel[];
+  generationMetadata: Record<string, unknown> | null;
   content: string | null; // Mapped combined markdown
   error: string | null;
   lecture: LectureModel | null;
@@ -87,6 +97,7 @@ export interface UnitContentModel {
 
 export interface LectureSectionModel {
   sectionId: string;
+  sourceSectionId: string | null;
   title: string;
   content: string;
   order: number;

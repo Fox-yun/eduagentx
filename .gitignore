@@ -12,6 +12,7 @@ cookies*.txt
 *.sqlite3
 data/
 !data/.gitkeep
+.local-storage/
 
 # Archives and office docs
 *.xlsx
@@ -74,3 +75,11 @@ frontend/.env.*
 logs/
 *.log
 *.tsbuildinfo
+
+# Windows installer artifacts
+EduAgentX_*_x64-setup.exe
+EduAgentX_*_x64-setup.exe.sha256
+_packaging/
+
+# Claude/CatPaw
+.claude/

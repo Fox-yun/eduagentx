@@ -3,12 +3,42 @@ import {
   mapStage,
   mapLearningNode,
   mapLearningEdge,
+  mapPathVersion,
 } from "../mappers/paths";
 import { mapResumeDto } from "../mappers/resume";
 import { mapTaskDto } from "../mappers/tasks";
 import { mapUnitContent, mapAssessment } from "../mappers/units";
+import { mapDiagnosticDto } from "../mappers/diagnostic";
+import { DiagnosticQuizDtoSchema } from "../schemas/diagnostic";
 
 describe("DTO Schema Mappers", () => {
+  it("should parse and map true/false diagnostic questions", () => {
+    const dto = DiagnosticQuizDtoSchema.parse({
+      diagnostic_id: "diagnostic-1",
+      goal_id: "goal-1",
+      attempt_id: "attempt-1",
+      status: "draft",
+      questions: [
+        {
+          question_id: "question-1",
+          question_type: "true_false",
+          prompt: "Python is interpreted.",
+          required: true,
+          max_score: 10,
+          answer: null,
+        },
+      ],
+      saved_answers: { "question-1": true },
+      result: null,
+      next_step: "diagnostic",
+    });
+
+    const model = mapDiagnosticDto(dto);
+
+    expect(model.questions[0].type).toBe("true_false");
+    expect(model.savedAnswers["question-1"]).toBe(true);
+  });
+
   it("should map Stage DTO correctly", () => {
     const dto = {
       stage_id: "stage-1",
@@ -63,6 +93,24 @@ describe("DTO Schema Mappers", () => {
     expect(model.target).toBe(dto.target_node_id);
   });
 
+  it("should preserve the stable path version id", () => {
+    const model = mapPathVersion({
+      version_id: "version-uuid-2",
+      path_id: "path-1",
+      version: 2,
+      parent_version: 1,
+      status: "draft",
+      revision_reason: "增加实践",
+      generation_summary: "第二版",
+      total_estimated_minutes: 180,
+      critic_score: null,
+      created_at: "2026-07-13T00:00:00Z",
+      activated_at: null,
+    });
+
+    expect(model.versionId).toBe("version-uuid-2");
+  });
+
   it("should map Resume DTO for generating status correctly", () => {
     const dto = {
       type: "generating" as const,
@@ -111,6 +159,18 @@ describe("DTO Schema Mappers", () => {
       progress: 100,
       current_stage: "Done",
       message: "Task completed",
+      agent_trace: [
+        {
+          agent_key: "reviewer",
+          label: "内容审核智能体",
+          iteration: 1,
+          status: "completed",
+          summary: "审核通过",
+          artifact_type: "审核报告",
+          started_at: "2026-06-23T12:00:00Z",
+          completed_at: "2026-06-23T12:00:01Z",
+        },
+      ],
       result: { path_id: "path-1" },
       error: null,
       request_id: "req-1",
@@ -120,6 +180,7 @@ describe("DTO Schema Mappers", () => {
     const model = mapTaskDto(dto as any);
     expect(model.taskId).toBe(dto.task_id);
     expect(model.currentStage).toBe(dto.current_stage);
+    expect(model.agentTrace[0].label).toBe("内容审核智能体");
   });
 
   it("should map UnitContent DTO and format combined markdown correctly", () => {

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+video.narrated-course::cue {
+  color: #fff;
+  background: rgba(12, 18, 31, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 @theme {
   --color-page: #f6f2e9;
   --color-panel: #fffdf8;

@@ -79,6 +79,7 @@ export const LearningPathDtoSchema = z.object({
 });
 
 export const PathVersionDtoSchema = z.object({
+  version_id: z.string(),
   path_id: z.string(),
   version: z.number().int().positive(),
   parent_version: z.number().int().positive().nullable(),
@@ -130,6 +131,7 @@ export interface StageModel {
 }
 
 export interface PathVersionModel {
+  versionId: string;
   pathId: string;
   version: number;
   parentVersion: number | null;

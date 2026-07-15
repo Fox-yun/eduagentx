@@ -10,11 +10,16 @@ import {
 } from "../../api/taskStreamTransport";
 import { z } from "zod";
 import { isTerminalTaskStatus, mapTaskEventType } from "./taskEventPolicy";
+import { isTauriDesktop, showDesktopNotification } from "../../desktop/runtime";
 
 // DTO result validators
 const PathGenerationResultSchema = z.object({
   path_id: z.string(),
   version: z.number().int().positive().optional(),
+});
+
+const DiagnosticGradingResultSchema = z.object({
+  path_task_id: z.string(),
 });
 
 const UnitGenerationResultSchema = z.object({
@@ -292,6 +297,13 @@ function handleTerminalStateTransition(shared: SharedTaskConnection, event: Task
   shared.terminalAt = Date.now();
   shared.lastError = null;
   notifyConnectionState(shared);
+  if (isTauriDesktop) {
+    const succeeded = event.status === "completed" || event.status === "partial_completed";
+    showDesktopNotification(
+      succeeded ? "学习任务已完成" : "学习任务未完成",
+      event.message || (succeeded ? "EduAgentX 已完成后台生成任务" : "请打开任务中心查看详情"),
+    ).catch(() => undefined);
+  }
 
   shared.terminalCleanupTimerId = setTimeout(() => {
     if (shared.subscribers.size === 0) {
@@ -375,6 +387,7 @@ export function useTaskStream(taskId: string | null | undefined) {
   const [status, setStatus] = useState<TaskStatus>("pending");
   const [error, setError] = useState<string | null>(null);
   const [pathId, setPathId] = useState<string | null>(null);
+  const [nextTaskId, setNextTaskId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<TaskConnectionSnapshot["state"]>("connecting");
 
   useEffect(() => {
@@ -386,6 +399,7 @@ export function useTaskStream(taskId: string | null | undefined) {
     setStatus("pending");
     setError(null);
     setPathId(null);
+    setNextTaskId(null);
 
     const handleMessage = (event: TaskEventDto) => {
       setProgress(event.progress);
@@ -405,6 +419,10 @@ export function useTaskStream(taskId: string | null | undefined) {
           if (pathParse.success) {
             setPathId(pathParse.data.path_id);
             queryClient.invalidateQueries({ queryKey: queryKeys.path(pathParse.data.path_id) });
+          }
+          const diagnosticParse = DiagnosticGradingResultSchema.safeParse(event.result);
+          if (diagnosticParse.success) {
+            setNextTaskId(diagnosticParse.data.path_task_id);
           }
           const unitParse = UnitGenerationResultSchema.safeParse(event.result);
           if (unitParse.success) {
@@ -442,7 +460,7 @@ export function useTaskStream(taskId: string | null | undefined) {
     status,
     error,
     pathId,
+    nextTaskId,
     isPolling: connectionState === "polling",
   };
 }
-

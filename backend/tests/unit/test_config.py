@@ -36,10 +36,17 @@ class TestSettings:
         assert s.is_testing is False
 
     def test_production_requires_secure_cookies(self):
-        with pytest.raises(ValueError, match="Production cookies must be Secure"):
+        with pytest.raises(ValueError, match="COOKIE_SECURE must be true in production"):
             Settings(
                 app_env="production",
-                app_secret_key="a-very-long-secret-key-for-production-use-64chars!!",
+                app_secret_key="a-very-long-secret-key-for-production-use-64chars-minimum!!extra-extra-extra",
+                database_url="postgresql+asyncpg://eduagentx:Str0ngPr0dP@ssw0rd@localhost:5432/eduagentx",
+                redis_url="redis://:Str0ngR3disP@ss@localhost:6379/0",
+                minio_access_key="prod-access-key-not-default",
+                minio_secret_key="prod-secret-key-not-default-min-length-32chars!!",
+                email_outbox_encryption_key="prod-outbox-encryption-key-32chars-min!!",
+                public_frontend_url="https://example.com",
+                cors_allowed_origins=["https://example.com"],
                 cookie_secure=False,
                 _env_file=None,
             )

@@ -3,8 +3,9 @@
 Provides a Protocol-based interface so business code never depends
 directly on MinIO or any specific storage SDK.
 
-Two implementations:
+Three implementations:
   - InMemoryObjectStorage: for unit tests and local dev without MinIO
+  - FileSystemObjectStorage: persistent local development storage
   - MinioObjectStorage: production-grade S3-compatible storage
 
 The factory `get_object_storage()` reads settings to decide which to use.
@@ -14,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
@@ -73,6 +76,55 @@ class InMemoryObjectStorage:
             return key in self._store
 
 
+class FileSystemObjectStorage:
+    """Persistent local object storage with traversal-safe keys."""
+
+    def __init__(self, root: str | Path) -> None:
+        self._root = Path(root).expanduser().resolve()
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def _path_for(self, key: str) -> Path:
+        normalized = key.replace("\\", "/").lstrip("/")
+        if not normalized:
+            raise ValueError("Object key cannot be empty")
+        path = (self._root / normalized).resolve()
+        if path != self._root and self._root not in path.parents:
+            raise ValueError(f"Object key escapes storage root: {key}")
+        return path
+
+    async def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        path = self._path_for(key)
+
+        def _write() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            temporary.write_bytes(data)
+            temporary.replace(path)
+
+        await asyncio.to_thread(_write)
+
+    async def get(self, key: str) -> bytes:
+        path = self._path_for(key)
+        try:
+            return await asyncio.to_thread(path.read_bytes)
+        except FileNotFoundError as exc:
+            raise KeyError(f"Object not found: {key}") from exc
+
+    async def delete(self, key: str) -> None:
+        path = self._path_for(key)
+
+        def _delete() -> None:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return
+
+        await asyncio.to_thread(_delete)
+
+    async def exists(self, key: str) -> bool:
+        return await asyncio.to_thread(self._path_for(key).is_file)
+
+
 class MinioObjectStorage:
     """MinIO / S3-compatible object storage.
 
@@ -100,7 +152,7 @@ class MinioObjectStorage:
         if self._client is not None:
             return self._client
 
-        from minio import Minio  # type: ignore[import-not-found]
+        from minio import Minio
 
         self._client = Minio(
             self._endpoint,
@@ -156,24 +208,30 @@ class MinioObjectStorage:
 
 # Singleton instances keyed by settings
 _inmemory_instance: InMemoryObjectStorage | None = None
+_filesystem_instance: FileSystemObjectStorage | None = None
 _minio_instance: MinioObjectStorage | None = None
 
 
 def get_object_storage() -> ObjectStorage:
     """Factory: return the configured object storage instance.
 
-    Uses InMemoryObjectStorage by default (no external dependencies).
-    Set MINIO_ENDPOINT to use MinioObjectStorage.
+    Tests use isolated in-memory storage. Other environments use persistent
+    filesystem storage by default and MinIO when configured.
     """
-    global _inmemory_instance, _minio_instance
+    global _inmemory_instance, _filesystem_instance, _minio_instance
 
     settings = get_settings()
 
-    # If no MinIO endpoint configured, use in-memory
+    # Keep tests isolated, but persist local development artifacts across API
+    # restarts so database metadata never points at vanished in-memory bytes.
     if not settings.minio_endpoint:
-        if _inmemory_instance is None:
-            _inmemory_instance = InMemoryObjectStorage()
-        return _inmemory_instance
+        if settings.is_testing:
+            if _inmemory_instance is None:
+                _inmemory_instance = InMemoryObjectStorage()
+            return _inmemory_instance
+        if _filesystem_instance is None:
+            _filesystem_instance = FileSystemObjectStorage(settings.local_storage_path)
+        return _filesystem_instance
 
     # Use MinIO
     if _minio_instance is None:
@@ -189,6 +247,7 @@ def get_object_storage() -> ObjectStorage:
 
 def reset_storage_for_tests() -> None:
     """Reset storage singletons — call in test fixtures."""
-    global _inmemory_instance, _minio_instance
+    global _inmemory_instance, _filesystem_instance, _minio_instance
     _inmemory_instance = None
+    _filesystem_instance = None
     _minio_instance = None

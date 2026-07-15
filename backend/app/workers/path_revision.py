@@ -141,39 +141,65 @@ async def execute_path_revision(db: Any, task: Any) -> dict[str, Any]:
 
     path_result = await db.execute(select(LearningPath).where(LearningPath.id == path_id).with_for_update())
     path: LearningPath | None = path_result.scalar_one_or_none()
-    if not path or not path.active_version_id:
+    if not path:
         revision_req.status = "failed"
-        revision_req.error = "Path has no active version"
+        revision_req.error = "Path not found"
         revision_req.completed_at = utc_now()
         await db.flush()
         await db.commit()
-        raise ValueError(f"Path {path_id} has no active version")
+        raise ValueError(f"Path {path_id} not found")
 
-    active_version_id = path.active_version_id
+    source_version_id = (
+        metadata.get("source_version_id")
+        or revision_req.source_version_id
+        or path.active_version_id
+    )
+    if not source_version_id:
+        revision_req.status = "failed"
+        revision_req.error = "Path has no revision source version"
+        revision_req.completed_at = utc_now()
+        await db.flush()
+        await db.commit()
+        raise ValueError(f"Path {path_id} has no revision source version")
 
     await update_task_status(db, task.id, "running", progress=15, stage="loading", message="正在分析当前学习路径...")
 
-    version_result = await db.execute(select(LearningPathVersion).where(LearningPathVersion.id == active_version_id))
+    version_result = await db.execute(
+        select(LearningPathVersion).where(
+            LearningPathVersion.id == source_version_id,
+            LearningPathVersion.path_id == path_id,
+        )
+    )
     current_version: LearningPathVersion | None = version_result.scalar_one_or_none()
     if not current_version:
         revision_req.status = "failed"
-        revision_req.error = "Active version not found"
+        revision_req.error = "Revision source version not found"
         revision_req.completed_at = utc_now()
         await db.flush()
         await db.commit()
-        raise ValueError(f"Active version {active_version_id} not found")
+        raise ValueError(f"Revision source version {source_version_id} not found")
+
+    if current_version.status not in {"active", "draft", "in_review"}:
+        revision_req.status = "failed"
+        revision_req.error = f"Revision source version has invalid status: {current_version.status}"
+        revision_req.completed_at = utc_now()
+        await db.flush()
+        await db.commit()
+        raise ValueError(
+            f"Revision source version {source_version_id} has invalid status: {current_version.status}"
+        )
 
     stages_result = await db.execute(
-        select(LearningStage).where(LearningStage.version_id == active_version_id).order_by(LearningStage.stage_order)
+        select(LearningStage).where(LearningStage.version_id == source_version_id).order_by(LearningStage.stage_order)
     )
     current_stages = list(stages_result.scalars().all())
 
     nodes_result = await db.execute(
-        select(LearningNode).where(LearningNode.version_id == active_version_id).order_by(LearningNode.node_order)
+        select(LearningNode).where(LearningNode.version_id == source_version_id).order_by(LearningNode.node_order)
     )
     current_nodes = list(nodes_result.scalars().all())
 
-    edges_result = await db.execute(select(LearningEdge).where(LearningEdge.version_id == active_version_id))
+    edges_result = await db.execute(select(LearningEdge).where(LearningEdge.version_id == source_version_id))
     current_edges = list(edges_result.scalars().all())
 
     # Commit Transaction A — revision is now "running", data loaded in memory
@@ -210,7 +236,8 @@ async def execute_path_revision(db: Any, task: Any) -> dict[str, Any]:
         await update_task_status(
             db, task.id, "running", progress=35, stage="generating", message="LLM 不可用，使用模板修订..."
         )
-        assert current_version is not None
+        if current_version is None:
+            raise RuntimeError("current_version is None during fallback path revision") from e
         plan = _build_fallback_plan(current_stages, current_nodes, current_edges, current_version)
 
     # Build raw dicts for DAG validation
@@ -245,7 +272,7 @@ async def execute_path_revision(db: Any, task: Any) -> dict[str, Any]:
         summary=plan.summary,
     )
     new_version.status = "in_review"
-    new_version.parent_version_id = active_version_id
+    new_version.parent_version_id = source_version_id
     new_version.generation_metadata = {
         "source": "revision",
         "revision_explanation": plan.revision_explanation,

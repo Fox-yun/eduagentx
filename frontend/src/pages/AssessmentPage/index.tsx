@@ -234,6 +234,16 @@ export function AssessmentPage() {
     if (!qbData) return;
     // Don't override recovery from URL params
     if (gradingAttemptId || searchParams.get("assessment_id")) return;
+    // Quiz-bank refreshes are background cache updates. They must not replace
+    // an in-progress formal assessment, grading view, or completed result.
+    if (
+      phase === "formal_assessment_creating" ||
+      phase === "answering" ||
+      phase === "grading" ||
+      phase === "result"
+    ) {
+      return;
+    }
     if (qbData.status === "not_generated" || !qbData.assessmentId) {
       setPhase("quiz_bank_missing");
     } else if (qbData.status === "generating" || qbData.status === "pending") {
@@ -246,7 +256,7 @@ export function AssessmentPage() {
       setPhase("quiz_bank_missing");
       toast("题库生成失败，请重试", "error");
     }
-  }, [qbData, gradingAttemptId, searchParams, toast]);
+  }, [qbData, gradingAttemptId, searchParams, toast, phase]);
 
   // ----- Generate quiz bank -----
   const { mutate: doGenerateQuizBank, isPending: isGenQb } = useMutation({
@@ -294,6 +304,10 @@ export function AssessmentPage() {
       if (res.status === "grading") {
         setPollAttemptId(res.attemptId);
         setPhase("grading");
+        navigate(
+          `${appRoutes.assessment(pathId!, nodeId!)}?attempt_id=${res.attemptId}`,
+          { replace: true }
+        );
         toast("客观题已完成评分，简答题正在评阅中...", "info");
       } else {
         setAssessmentResult(res);

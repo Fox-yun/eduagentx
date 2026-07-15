@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getLearningGoal } from "../../api/goals";
@@ -16,6 +16,7 @@ export function PathGeneratingPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [handoffTaskId, setHandoffTaskId] = useState<string | null>(null);
 
   const queryParamTaskId = searchParams.get("task");
 
@@ -26,7 +27,7 @@ export function PathGeneratingPage() {
     staleTime: 5000,
   });
 
-  const taskId = goalData ? goalData.activeTaskId : queryParamTaskId;
+  const taskId = handoffTaskId || goalData?.activeTaskId || queryParamTaskId;
 
   const {
     progress,
@@ -35,8 +36,20 @@ export function PathGeneratingPage() {
     status: taskStatus,
     error: taskError,
     pathId,
+    nextTaskId,
     isPolling,
   } = useTaskStream(taskId);
+
+  // Diagnostic grading creates the path-generation task asynchronously. Follow
+  // that task instead of remaining subscribed to the completed grading task.
+  useEffect(() => {
+    if (!nextTaskId || nextTaskId === taskId) return;
+
+    setHandoffTaskId(nextTaskId);
+    if (goalId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.goal(goalId) });
+    }
+  }, [nextTaskId, taskId, goalId, queryClient]);
 
   // Navigate when task succeeds
   useEffect(() => {

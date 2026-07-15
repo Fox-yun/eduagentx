@@ -345,6 +345,7 @@ describe("Onboarding & Goals Workflows", () => {
     };
 
     let submittedAns: any = null;
+    let submittedSkip: boolean | null = null;
     server.use(
       http.get("/api/learning-goals/goal-111/diagnostic", () => {
         return HttpResponse.json(mockDiagnostic);
@@ -352,6 +353,7 @@ describe("Onboarding & Goals Workflows", () => {
       http.post("/api/learning-goals/goal-111/diagnostic/submit", async ({ request }) => {
         const body = (await request.json()) as any;
         submittedAns = body.answers;
+        submittedSkip = body.skip;
         return HttpResponse.json({
           attempt_id: "attempt-1",
           status: "grading",
@@ -411,6 +413,7 @@ describe("Onboarding & Goals Workflows", () => {
     expect(submittedAns[2].answer).toBe("闭包是一个函数");
     expect(submittedAns[3].question_id).toBe("d-q4");
     expect(submittedAns[3].answer).toBe("return a + b;");
+    expect(submittedSkip).toBe(false);
   });
 
   it("should support skipping the diagnostic quiz", async () => {
@@ -437,6 +440,7 @@ describe("Onboarding & Goals Workflows", () => {
     };
 
     let submittedAns: any = null;
+    let submittedSkip: boolean | null = null;
     server.use(
       http.get("/api/learning-goals/goal-111/diagnostic", () => {
         return HttpResponse.json(mockDiagnostic);
@@ -444,6 +448,7 @@ describe("Onboarding & Goals Workflows", () => {
       http.post("/api/learning-goals/goal-111/diagnostic/submit", async ({ request }) => {
         const body = (await request.json()) as any;
         submittedAns = body.answers;
+        submittedSkip = body.skip;
         return HttpResponse.json({
           attempt_id: "attempt-1",
           status: "grading",
@@ -466,6 +471,7 @@ describe("Onboarding & Goals Workflows", () => {
       expect(submittedAns).not.toBeNull();
     });
     expect(submittedAns).toEqual([]);
+    expect(submittedSkip).toBe(true);
   });
 
   it("should show error screen and allow refetching", async () => {

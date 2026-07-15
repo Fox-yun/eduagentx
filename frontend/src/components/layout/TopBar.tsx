@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { GraduationCap, ChevronRight, Home, LogOut, User, Shield, AlertTriangle, ChevronDown } from "lucide-react";
+import { GraduationCap, ChevronRight, Home, LogOut, User, Shield, AlertTriangle, ChevronDown, Monitor } from "lucide-react";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { useCurrentUser } from "../../auth/authHooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { logoutUser } from "../../api/auth";
 import { appRoutes } from "../../app/routes";
 import { useToast } from "../feedback/Toast";
+import { isTauriDesktop } from "../../desktop/runtime";
 
 interface TopBarProps {
   title?: string;
@@ -172,6 +173,16 @@ export function TopBar({ title, courseName }: TopBarProps) {
                   <Shield className="h-3.5 w-3.5 text-muted" />
                   安全设置
                 </Link>
+                {isTauriDesktop && (
+                  <Link
+                    to="/settings/desktop"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs text-ink transition-colors hover:bg-page"
+                  >
+                    <Monitor className="h-3.5 w-3.5 text-muted" />
+                    桌面客户端
+                  </Link>
+                )}
 
                 <div className="border-t border-border/60 my-1" />
 

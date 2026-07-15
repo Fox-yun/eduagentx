@@ -9,11 +9,65 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import TERMINAL_TASK_STATUSES, TaskEventType, TaskStatus
 from app.models.task import BackgroundTask, TaskEvent
+
+
+def record_agent_step(
+    task: BackgroundTask,
+    *,
+    agent_key: str,
+    label: str,
+    status: str,
+    summary: str,
+    iteration: int = 1,
+    artifact_type: str | None = None,
+) -> None:
+    """Append or update one durable, user-visible agent collaboration step.
+
+    The task is already attached to the worker session. Copy-then-assign keeps
+    SQLAlchemy JSON change tracking reliable; the next task status update
+    commits the trace together with its SSE progress event.
+    """
+    now = datetime.now(UTC).isoformat()
+    existing_trace = task.agent_trace if isinstance(task.agent_trace, list) else []
+    trace = [dict(item) for item in existing_trace if isinstance(item, dict)]
+    step = next(
+        (
+            item
+            for item in trace
+            if item.get("agent_key") == agent_key and item.get("iteration", 1) == iteration
+        ),
+        None,
+    )
+    if step is None:
+        step = {
+            "agent_key": agent_key,
+            "label": label,
+            "iteration": iteration,
+            "status": status,
+            "summary": summary,
+            "artifact_type": artifact_type,
+            "started_at": now,
+            "completed_at": None,
+        }
+        trace.append(step)
+    else:
+        step.update(
+            {
+                "label": label,
+                "status": status,
+                "summary": summary,
+                "artifact_type": artifact_type or step.get("artifact_type"),
+            }
+        )
+
+    if status in {"completed", "failed", "needs_revision"}:
+        step["completed_at"] = now
+    task.agent_trace = trace
 
 
 async def update_task_status(
@@ -105,7 +159,11 @@ def _status_to_event_type(status: str) -> str:
     return mapping.get(status, TaskEventType.PROGRESS.value)
 
 
-async def recover_stale_tasks(db: AsyncSession) -> list[str]:
+async def recover_stale_tasks(
+    db: AsyncSession,
+    *,
+    finalize_cancel_requests: bool = False,
+) -> list[str]:
     """Find and recover stale tasks.
 
     Tasks that are in 'running' state but haven't updated their heartbeat
@@ -115,16 +173,47 @@ async def recover_stale_tasks(db: AsyncSession) -> list[str]:
 
     stale_threshold = datetime.now(UTC) - timedelta(minutes=5)
 
+    cancel_condition = BackgroundTask.status == TaskStatus.CANCEL_REQUESTED.value
+    if not finalize_cancel_requests:
+        cancel_condition = and_(cancel_condition, BackgroundTask.heartbeat_at < stale_threshold)
+
     result = await db.execute(
         select(BackgroundTask).where(
-            BackgroundTask.status == TaskStatus.RUNNING.value,
-            BackgroundTask.heartbeat_at < stale_threshold,
+            or_(
+                and_(
+                    BackgroundTask.status == TaskStatus.RUNNING.value,
+                    BackgroundTask.heartbeat_at < stale_threshold,
+                ),
+                cancel_condition,
+            )
         )
     )
     stale_tasks = list(result.scalars().all())
 
     recovered_ids = []
     for task in stale_tasks:
+        if task.status == TaskStatus.CANCEL_REQUESTED.value:
+            task.status = TaskStatus.CANCELLED.value
+            task.message = "Task cancelled after worker interruption"
+            task.completed_at = datetime.now(UTC)
+            task.next_event_sequence += 1
+            db.add(
+                TaskEvent(
+                    id=str(uuid.uuid4()),
+                    task_id=task.id,
+                    sequence_number=task.next_event_sequence - 1,
+                    event_type=TaskEventType.CANCELLED.value,
+                    status=TaskStatus.CANCELLED.value,
+                    progress=task.progress,
+                    stage=task.current_stage,
+                    message=task.message,
+                    result=task.result,
+                )
+            )
+            await _cleanup_cancelled_task_target(db, task)
+            recovered_ids.append(task.id)
+            continue
+
         if task.retry_count < task.max_retries:
             # Can retry
             task.status = TaskStatus.INTERRUPTED.value
@@ -140,3 +229,34 @@ async def recover_stale_tasks(db: AsyncSession) -> list[str]:
     await db.flush()
     await db.commit()
     return recovered_ids
+
+
+async def _cleanup_cancelled_task_target(db: AsyncSession, task: BackgroundTask) -> None:
+    """Release domain rows owned by a cancelled task whose worker disappeared."""
+    if task.task_type != "learning_unit_generation":
+        return
+
+    from app.models.unit import LearningUnitContent, LearningUnitContentVersion
+
+    metadata = task.target_metadata or {}
+    version_id = metadata.get("unit_content_version_id")
+    if version_id:
+        version_result = await db.execute(
+            select(LearningUnitContentVersion).where(LearningUnitContentVersion.id == version_id)
+        )
+        version = version_result.scalar_one_or_none()
+        if version and version.status == "generating":
+            version.status = "failed"
+            version.error_code = "TASK_CANCELLED"
+            version.error_message = "Generation worker was interrupted and the task was cancelled"
+            version.completed_at = datetime.now(UTC)
+
+    content_result = await db.execute(
+        select(LearningUnitContent).where(LearningUnitContent.active_task_id == task.id)
+    )
+    content = content_result.scalar_one_or_none()
+    if content:
+        content.active_task_id = None
+        content.status = "ready" if content.active_version_id else "failed"
+        content.last_error_code = "TASK_CANCELLED"
+        content.last_error_message = "Generation was cancelled after the worker was interrupted"

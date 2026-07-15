@@ -8,10 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip \
-    && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple ".[worker]"
+# Install uv (pinned version for reproducible builds)
+RUN pip install --no-cache-dir uv==0.5.11
+
+# Copy lockfile and project metadata for frozen installation
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies from frozen lockfile for reproducible builds.
+# --no-install-project skips installing the app itself (we copy app/ in stage 2).
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN uv sync --frozen --no-dev --extra worker --no-install-project
 
 # Stage 2: Production image
 FROM python:3.12-slim
@@ -21,11 +27,13 @@ WORKDIR /app
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
 
 # Copy application code
 COPY app/ app/

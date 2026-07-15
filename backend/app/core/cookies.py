@@ -7,15 +7,15 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 
-# Cookie names
-ACCESS_TOKEN_COOKIE = "access_token"
-REFRESH_TOKEN_COOKIE = "refresh_token"
-CSRF_TOKEN_COOKIE = "csrftoken"
+# Cookie names — not passwords, false positive from Bandit B105
+ACCESS_TOKEN_COOKIE = "access_token"  # nosec B105
+REFRESH_TOKEN_COOKIE = "refresh_token"  # nosec B105
+CSRF_TOKEN_COOKIE = "csrftoken"  # nosec B105
 
-# Cookie paths
-ACCESS_TOKEN_PATH = "/"
-REFRESH_TOKEN_PATH = "/api/auth"
-CSRF_TOKEN_PATH = "/"
+# Cookie paths — not passwords, false positive from Bandit B105
+ACCESS_TOKEN_PATH = "/"  # nosec B105
+REFRESH_TOKEN_PATH = "/api/auth"  # nosec B105
+CSRF_TOKEN_PATH = "/"  # nosec B105
 
 
 def set_auth_cookies(

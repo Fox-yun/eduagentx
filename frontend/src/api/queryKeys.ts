@@ -31,6 +31,10 @@ export const queryKeys = {
 
   recommendations: (pathId: string) => ["recommendations", pathId] as const,
 
+  adaptations: (pathId: string) => ["adaptations", pathId] as const,
+
+  effectiveness: (pathId: string) => ["effectiveness", pathId] as const,
+
   tasks: () => ["tasks"] as const,
 
   knowledgeDocuments: (filters: KnowledgeFilters) =>

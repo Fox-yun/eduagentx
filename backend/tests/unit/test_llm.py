@@ -1,11 +1,12 @@
 """Unit tests for LLM service with mocked httpx."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.llm import LLMError, _parse_json, llm_chat, llm_json
+from app.services.llm import LLMError, LLMResponseFormatError, _parse_json, llm_chat, llm_json
 
 
 class TestParseJson:
@@ -32,6 +33,30 @@ class TestParseJson:
 
 
 class TestLlmChat:
+    @pytest.mark.asyncio
+    async def test_enforces_total_request_timeout(self):
+        async def slow_post(*args, **kwargs):
+            await asyncio.sleep(1)
+
+        with (
+            patch("app.services.llm._LLM_TIMEOUT", 0.01),
+            patch("app.services.llm.get_settings") as mock_settings,
+            patch("app.services.llm.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_settings.return_value = MagicMock(
+                llm_api_key="test-key",
+                llm_api_base="https://api.test.com/v1",
+                llm_model="test-model",
+            )
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = slow_post
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(LLMError, match="total timeout"):
+                await llm_chat("system", "user")
+
     @pytest.mark.asyncio
     async def test_missing_api_key_raises(self):
         with patch("app.services.llm.get_settings") as mock_settings:
@@ -98,6 +123,23 @@ class TestLlmChat:
 
 
 class TestLlmJson:
+    @pytest.mark.asyncio
+    async def test_does_not_retry_transport_errors(self):
+        with patch("app.services.llm.llm_chat", new_callable=AsyncMock, side_effect=LLMError("network timeout")) as call:
+            with pytest.raises(LLMError, match="network timeout"):
+                await llm_json("system", "user")
+
+        call.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retries_response_format_rejection(self):
+        responses = [LLMResponseFormatError("unsupported"), '{"result": true}']
+        with patch("app.services.llm.llm_chat", new_callable=AsyncMock, side_effect=responses) as call:
+            result = await llm_json("system", "user")
+
+        assert result == {"result": True}
+        assert call.await_count == 2
+
     @pytest.mark.asyncio
     async def test_json_mode_returns_parsed(self):
         mock_response = MagicMock()

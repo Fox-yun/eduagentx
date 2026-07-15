@@ -27,7 +27,7 @@ async def test_health_live(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["version"] == "3.0.0"
+    assert body["version"] == "4.1.0"
 
 
 async def test_health_live_has_request_id(client):

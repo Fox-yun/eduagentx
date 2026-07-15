@@ -470,6 +470,24 @@ class TestFallbackAssessment:
         result = _build_fallback_assessment(ctx)
         assert len(result.questions) == 10
 
+    def test_fallback_formal_contains_only_programmatically_scoreable_questions(self):
+        """Formal fallback must complete offline without provisional semantic grading."""
+        ctx = AssessmentGenerationInput(
+            assessment_id="test",
+            purpose="formal",
+            node_title="Test",
+            learning_objectives=("Obj 1", "Obj 2"),
+            unit_summary="",
+            key_terms=(),
+            common_mistakes=(),
+            diagnostic_weaknesses=(),
+            target_difficulty="intermediate",
+            question_count=10,
+        )
+
+        result = _build_fallback_assessment(ctx)
+        assert all(q.question_type != "short_answer" for q in result.questions)
+
     def test_fallback_without_objectives(self):
         """Fallback works even without learning objectives."""
         ctx = AssessmentGenerationInput(

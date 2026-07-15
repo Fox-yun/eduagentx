@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import uuid
 from typing import Any
 
@@ -26,6 +28,7 @@ logger = structlog.get_logger()
 
 # Pass threshold
 PASS_THRESHOLD = 60.0
+PRACTICE_LLM_TIMEOUT_SECONDS = 30.0
 
 
 def _parse_correct_answer_list(correct_answer: str | None) -> list[str]:
@@ -52,6 +55,26 @@ def _parse_correct_answer_scalar(correct_answer: str | None) -> str:
         return str(parsed)
     except (json.JSONDecodeError, TypeError):
         return str(correct_answer)
+
+
+def _mind_map_key_point(markdown: str, limit: int) -> str:
+    """Extract the first useful paragraph as plain text for a graph node."""
+    for line in markdown.split("\n"):
+        if line.lstrip().startswith("#"):
+            continue
+        clean = line.strip().strip("#*- ").strip()
+        clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)
+        clean = re.sub(r"[`*_>]", "", clean).strip()
+        if len(clean) >= 8:
+            return clean[:limit]
+    return ""
+
+
+def _string_list(value: object) -> list[str]:
+    """Normalize an optional JSON array to non-empty display strings."""
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 class UnitService:
@@ -203,7 +226,7 @@ class UnitService:
             if lec_row and lec_row.content:
                 lecture_data = lec_row.content
         except Exception:
-            pass  # Fallback to legacy content_data.get("lecture")
+            logger.debug("lecture_content_fetch_failed", exc_info=True)  # Fallback to legacy content_data.get("lecture")
 
         return {
             "unit_id": content.id,
@@ -216,11 +239,16 @@ class UnitService:
             "active_version_id": content.active_version_id,
             "pending_version_id": pending_version_id,
             "introduction": content_data.get("introduction"),
+            "prerequisites": content_data.get("prerequisites", []),
             "objectives": content_data.get("objectives", []),
+            "estimated_minutes": content_data.get("estimated_minutes"),
+            "completion_criteria": content_data.get("completion_criteria", []),
             "sections": content_data.get("sections", []),
             "practice_tasks": content_data.get("practice_tasks", []),
+            "project": content_data.get("project"),
             "summary": content_data.get("summary"),
             "references": content_data.get("references", []),
+            "generation_metadata": content_data.get("generation_metadata"),
             "error": content_data.get("error"),
             "lecture": lecture_data,
             "active_lecture_task_id": active_lecture_task.id if active_lecture_task else None,
@@ -421,6 +449,79 @@ class UnitService:
 
         return {"next_step": "generating", "active_task_id": task.id, "version_id": version_id}
 
+    async def generate_lecture(
+        self,
+        path_id: str,
+        node_id: str,
+        user_id: str,
+    ) -> dict[str, object]:
+        """Start lecture generation, reusing an in-flight task for this user and node."""
+        from app.common.enums import TaskStatus
+        from app.models.task import BackgroundTask
+        from app.models.unit import LearningLecture
+        from app.services.task import TaskService
+
+        unit_content = await self._ensure_unit_content(path_id, node_id, user_id)
+        if not unit_content or not unit_content.active_version_id:
+            raise ApiError(
+                code="NO_CONTENT",
+                message="Generate unit content before generating the lecture",
+                status_code=400,
+            )
+
+        active_result = await self.db.execute(
+            select(BackgroundTask)
+            .where(
+                BackgroundTask.user_id == user_id,
+                BackgroundTask.target_type == "node",
+                BackgroundTask.target_id == node_id,
+                BackgroundTask.task_type == "learning_lecture_generation",
+                BackgroundTask.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value]),
+            )
+            .order_by(BackgroundTask.created_at.desc())
+            .limit(1)
+        )
+        active_task = active_result.scalar_one_or_none()
+        if active_task:
+            return {"next_step": "generating", "active_task_id": active_task.id}
+
+        task_service = TaskService(self.db)
+        task = await task_service.enqueue_task(
+            user_id=user_id,
+            task_type="learning_lecture_generation",
+            target_type="node",
+            target_id=node_id,
+            target_metadata={
+                "path_id": path_id,
+                "unit_content_version_id": unit_content.active_version_id,
+            },
+        )
+
+        lecture_result = await self.db.execute(
+            select(LearningLecture).where(
+                LearningLecture.user_id == user_id,
+                LearningLecture.path_id == path_id,
+                LearningLecture.node_id == node_id,
+            )
+        )
+        lecture = lecture_result.scalar_one_or_none()
+        if lecture:
+            lecture.status = "generating"
+            lecture.active_task_id = task.id
+        else:
+            self.db.add(
+                LearningLecture(
+                    user_id=user_id,
+                    path_id=path_id,
+                    node_id=node_id,
+                    status="generating",
+                    active_task_id=task.id,
+                )
+            )
+
+        await self.db.commit()
+        return {"next_step": "generating", "active_task_id": task.id}
+
     @staticmethod
     def _next_version_number(content: LearningUnitContent | None) -> int:
         """Determine the next version number."""
@@ -472,39 +573,140 @@ class UnitService:
         sections = content_data.get("sections", [])
 
         # Build hierarchical tree
-        tree: list[dict[str, Any]] = [{"id": "root", "label": title, "children": []}]
+        tree: list[dict[str, Any]] = [
+            {"id": "root", "label": title, "kind": "root", "section_id": None, "children": []}
+        ]
 
         # Objectives branch
-        obj_branch: dict[str, Any] = {"id": "objectives", "label": "学习目标", "children": []}
+        obj_branch: dict[str, Any] = {
+            "id": "objectives",
+            "label": "学习目标",
+            "kind": "objective_group",
+            "section_id": None,
+            "children": [],
+        }
         for i, obj in enumerate(objectives):
-            obj_branch["children"].append({"id": f"obj-{i}", "label": obj, "children": []})
+            obj_branch["children"].append(
+                {
+                    "id": f"obj-{i}",
+                    "label": obj,
+                    "kind": "objective",
+                    "section_id": None,
+                    "children": [],
+                }
+            )
         if objectives:
             tree[0]["children"].append(obj_branch)
 
         # Sections branch
         for sec in sections:
             sec_title = sec.get("title", "未命名章节")
+            sec_content = sec.get("content", "")
+            section_id = str(sec.get("section_id") or f"sec-{sec.get('order', 0)}")
             sec_branch: dict[str, Any] = {
-                "id": f"sec-{sec.get('order', 0)}",
+                "id": section_id,
                 "label": sec_title,
+                "kind": "section",
+                "section_id": section_id,
                 "children": [],
             }
+
+            concept_labels = _string_list(sec.get("mind_map_nodes")) or _string_list(sec.get("concepts"))
+            for i, concept in enumerate(concept_labels[:4]):
+                sec_branch["children"].append(
+                    {
+                        "id": f"{section_id}-concept-{i}",
+                        "label": concept,
+                        "kind": "concept",
+                        "section_id": section_id,
+                        "children": [],
+                    }
+                )
+
+            examples = sec.get("examples") if isinstance(sec.get("examples"), list) else []
+            for i, example in enumerate(examples[:1]):
+                if isinstance(example, dict):
+                    example_label = str(example.get("title") or example.get("description") or "实践示例")
+                else:
+                    example_label = str(example)
+                if example_label:
+                    sec_branch["children"].append(
+                        {
+                            "id": f"{section_id}-example-{i}",
+                            "label": f"示例：{example_label}",
+                            "kind": "example",
+                            "section_id": section_id,
+                            "children": [],
+                        }
+                    )
+
+            mistakes = sec.get("common_mistakes") if isinstance(sec.get("common_mistakes"), list) else []
+            for i, mistake in enumerate(mistakes[:1]):
+                mistake_label = (
+                    str(mistake.get("mistake") or mistake.get("correction") or "常见错误")
+                    if isinstance(mistake, dict)
+                    else str(mistake)
+                )
+                sec_branch["children"].append(
+                    {
+                        "id": f"{section_id}-mistake-{i}",
+                        "label": f"易错：{mistake_label}",
+                        "kind": "mistake",
+                        "section_id": section_id,
+                        "children": [],
+                    }
+                )
+
+            if not sec_branch["children"]:
+                key_point = _mind_map_key_point(sec_content, 80)
+                if key_point:
+                    sec_branch["children"].append(
+                        {
+                            "id": f"{section_id}-key",
+                            "label": key_point,
+                            "kind": "concept",
+                            "section_id": section_id,
+                            "children": [],
+                        }
+                    )
             tree[0]["children"].append(sec_branch)
 
-        # Generate Mermaid mindmap
-        mermaid_lines = ["mindmap", f"  root(({title}))"]
-        if objectives:
-            mermaid_lines.append("    学习目标")
-            for obj in objectives:
-                mermaid_lines.append(f"      {obj[:60]}")
-        for sec in sections:
-            sec_title = sec.get("title", "章节")
-            mermaid_lines.append(f"     {sec_title}")
-            # Extract key points from section content (first line)
-            sec_content = sec.get("content", "")
-            first_line = sec_content.split("\n")[0].strip("# *")[:60] if sec_content else ""
-            if first_line:
-                mermaid_lines.append(f"      {first_line}")
+        practice_tasks = content_data.get("practice_tasks", [])
+        if practice_tasks:
+            practice_branch: dict[str, Any] = {
+                "id": "practice",
+                "label": "实践任务",
+                "kind": "practice_group",
+                "section_id": None,
+                "children": [],
+            }
+            for i, task in enumerate(practice_tasks[:4]):
+                if isinstance(task, dict):
+                    label = str(task.get("title") or task.get("description") or f"练习 {i + 1}")
+                else:
+                    label = str(task)
+                practice_branch["children"].append(
+                    {
+                        "id": f"practice-{i}",
+                        "label": label,
+                        "kind": "practice",
+                        "section_id": None,
+                        "children": [],
+                    }
+                )
+            tree[0]["children"].append(practice_branch)
+
+        # Generate Mermaid from the same canonical tree used by the graph UI.
+        mermaid_lines = ["mindmap"]
+
+        def append_mermaid(node: dict[str, Any], depth: int) -> None:
+            label = str(node.get("label", ""))[:60]
+            marker = f"(({label}))" if depth == 1 else label
+            mermaid_lines.append(f"{'  ' * depth}{marker}")
+            for child in node.get("children", []):
+                append_mermaid(child, depth + 1)
+
+        append_mermaid(tree[0], 1)
 
         return {
             "tree": tree,
@@ -630,7 +832,7 @@ class UnitService:
         # 4. Practice task cards
         for i, task in enumerate(practice_tasks):
             if isinstance(task, dict):
-                task_desc = task.get("description", task.get("task", str(task)))
+                task_desc = str(task.get("description") or task.get("task") or task)
             elif isinstance(task, str):
                 task_desc = task
             else:
@@ -906,7 +1108,14 @@ class UnitService:
         outcomes_raw = node.learning_outcomes if node else "[]"
         outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else (outcomes_raw or [])
 
-        questions_data = await self._llm_generate_questions(title, outcomes, is_assessment=False)
+        try:
+            questions_data = await asyncio.wait_for(
+                self._llm_generate_questions(title, outcomes, is_assessment=False),
+                timeout=PRACTICE_LLM_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning("practice_generation_timeout", node_id=node_id)
+            questions_data = self._generate_practice_questions(title, outcomes)
         return {
             "node_id": node_id,
             "questions": [

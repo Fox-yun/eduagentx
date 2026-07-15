@@ -22,10 +22,9 @@ interface SimulationProps {
 }
 
 export function Simulation({ content }: SimulationProps) {
-  const items = content.items || [];
+  const items = content.items;
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showHint, setShowHint] = useState(false);
 
   React.useEffect(() => {
     if (!isPlaying) return;

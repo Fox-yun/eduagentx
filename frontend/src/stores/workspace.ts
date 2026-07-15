@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type LeftTabType = "recommendations" | "resources" | "history" | "adaptations";
+export type LeftTabType = "recommendations" | "resources" | "history" | "adaptations" | "evaluation";
 export type RightPanelType = "details" | "knowledge" | "tasks" | "versions";
 
 export interface WorkspaceState {

@@ -3,6 +3,7 @@ import { apiRequest } from "./client";
 import { UserDtoSchema, UserModel, RegisterResponseSchema, RegisterResultModel } from "../schemas/users";
 import { mapUserDto, mapRegisterResponse } from "../mappers/users";
 import { ApiError, AuthExpiredError } from "./errors";
+import { clearDesktopSession, isTauriDesktop } from "../desktop/runtime";
 
 
 export const loginFormSchema = z.object({
@@ -85,10 +86,14 @@ export async function registerUser(
 }
 
 export async function logoutUser(): Promise<void> {
-  await apiRequest("/auth/logout", {
-    method: "POST",
-    skipAuthRefresh: true,
-  });
+  try {
+    await apiRequest("/auth/logout", {
+      method: "POST",
+      skipAuthRefresh: true,
+    });
+  } finally {
+    if (isTauriDesktop) await clearDesktopSession();
+  }
 }
 
 export async function verifyEmail(token: string): Promise<UserModel | null> {

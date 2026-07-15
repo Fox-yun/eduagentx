@@ -32,6 +32,7 @@ class BackgroundTask(Base):
     target_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     target_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     target_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    agent_trace: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -90,6 +90,25 @@ describe("useTaskStream & Registry", () => {
     expect(result.current.pathId).toBe("p-1");
   });
 
+  it("exposes the path-generation task created by diagnostic grading", async () => {
+    const taskId = "task-diagnostic-grading";
+    MockTaskStreamTransport.setMockEvents(taskId, [
+      makeEvent({
+        task_id: taskId,
+        event_id: "grading-completed",
+        type: "completed",
+        status: "completed",
+        progress: 100,
+        result: { path_task_id: "task-path-generation" },
+      }),
+    ]);
+
+    const { result } = renderHook(() => useTaskStream(taskId), { wrapper });
+    await act(async () => { await new Promise(r => setTimeout(r, 200)); });
+
+    expect(result.current.nextTaskId).toBe("task-path-generation");
+  });
+
   it("handles failed terminal state and sets error", async () => {
     const taskId = "task-failed";
     MockTaskStreamTransport.setMockEvents(taskId, [

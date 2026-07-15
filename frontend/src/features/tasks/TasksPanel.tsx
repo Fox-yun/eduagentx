@@ -174,6 +174,41 @@ export function TasksPanel() {
                     </div>
                   )}
 
+                  {(task.agentTrace ?? []).length > 0 && (
+                    <div className="rounded-lg border border-primary/20 bg-primary-soft/5 p-2.5">
+                      <p className="mb-2 text-[10px] font-bold text-primary">智能体协作轨迹</p>
+                      <ol className="space-y-2">
+                        {(task.agentTrace ?? []).map((step, index) => (
+                          <li key={`${step.agentKey}-${step.iteration}`} className="flex items-start gap-2">
+                            <span
+                              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
+                                step.status === "completed"
+                                  ? "bg-success text-white"
+                                  : step.status === "running"
+                                    ? "bg-primary text-white animate-pulse"
+                                    : "bg-warning text-white"
+                              }`}
+                            >
+                              {index + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold text-ink">
+                                {step.label}
+                                {step.iteration > 1 ? ` · 第 ${step.iteration} 轮` : ""}
+                              </p>
+                              <p className="text-[9px] leading-relaxed text-muted">{step.summary}</p>
+                              {step.artifactType && (
+                                <span className="mt-1 inline-block rounded bg-panel px-1.5 py-0.5 text-[8px] text-primary">
+                                  产物：{step.artifactType}
+                                </span>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+
                   {/* Error display */}
                   {task.error && (
                     <p className="text-[10px] text-danger bg-danger-soft/10 p-2 rounded border border-danger/20 font-mono">

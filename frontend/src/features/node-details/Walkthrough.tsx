@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, HelpCircle, CheckCircle, Code } from "lucide-react";
+import { ChevronDown, ChevronUp, HelpCircle, CheckCircle, Loader2, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
 interface WalkthroughItem {
@@ -17,13 +17,15 @@ interface WalkthroughProps {
     description: string;
     items: WalkthroughItem[];
   };
+  onRegenerate?: () => void;
+  isRegenerating?: boolean;
 }
 
-export function Walkthrough({ content }: WalkthroughProps) {
+export function Walkthrough({ content, onRegenerate, isRegenerating }: WalkthroughProps) {
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set([1]));
   const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set());
 
-  const items = content.items || [];
+  const items = content.items;
 
   const toggleExpand = (step: number) => {
     setExpandedSteps((prev) => {
@@ -46,9 +48,22 @@ export function Walkthrough({ content }: WalkthroughProps) {
   return (
     <div className="flex flex-col gap-3">
       {/* Header */}
-      <div>
-        <h3 className="text-sm font-bold text-ink">{content.title}</h3>
-        <p className="text-xs text-muted mt-0.5">{content.description}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-ink">{content.title}</h3>
+          <p className="text-xs text-muted mt-0.5">{content.description}</p>
+        </div>
+        {onRegenerate && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-page disabled:opacity-50"
+          >
+            {isRegenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            重新生成
+          </button>
+        )}
       </div>
 
       {/* Steps */}

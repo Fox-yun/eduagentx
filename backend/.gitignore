@@ -12,6 +12,7 @@ cookies*.txt
 *.sqlite3
 data/
 !data/.gitkeep
+.local-storage/
 
 # Python cache
 __pycache__/

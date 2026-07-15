@@ -5,6 +5,7 @@ Falls back to template-based generation if the API is unavailable.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -53,16 +54,22 @@ async def llm_chat(
         body["response_format"] = response_format
 
     try:
-        async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
-            resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-            content: str = data["choices"][0]["message"]["content"]
-            logger.info("llm_call_success", model=settings.llm_model, tokens=data.get("usage"))
-            return content
+        async with asyncio.timeout(_LLM_TIMEOUT):
+            async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
+                resp = await client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+                content: str = data["choices"][0]["message"]["content"]
+                logger.info("llm_call_success", model=settings.llm_model, tokens=data.get("usage"))
+                return content
     except httpx.HTTPStatusError as exc:
         logger.error("llm_http_error", status=exc.response.status_code, body=exc.response.text[:500])
+        if response_format and exc.response.status_code in {400, 422}:
+            raise LLMResponseFormatError(f"LLM HTTP {exc.response.status_code}: response_format unsupported") from exc
         raise LLMError(f"LLM HTTP {exc.response.status_code}") from exc
+    except TimeoutError as exc:
+        logger.error("llm_call_timeout", timeout_seconds=_LLM_TIMEOUT)
+        raise LLMError(f"LLM call exceeded {_LLM_TIMEOUT:g}s total timeout") from exc
     except (httpx.RequestError, KeyError, IndexError) as exc:
         logger.error("llm_call_error", error=str(exc))
         raise LLMError(f"LLM call failed: {exc}") from exc
@@ -87,7 +94,7 @@ async def llm_json(
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
-    except LLMError:
+    except LLMResponseFormatError:
         # Retry without response_format (some providers don't support it)
         raw = await llm_chat(
             system_prompt,
@@ -113,3 +120,7 @@ def _parse_json(text: str) -> Any:
 
 class LLMError(Exception):
     """Raised when an LLM API call fails."""
+
+
+class LLMResponseFormatError(LLMError):
+    """Raised when a provider rejects JSON response-format parameters."""

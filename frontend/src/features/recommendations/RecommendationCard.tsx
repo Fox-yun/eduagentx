@@ -26,14 +26,14 @@ interface RecommendationCardProps {
 }
 
 export function RecommendationCard({ recommendation, pathId }: RecommendationCardProps) {
-  const { id, type, title, reason, nodeIds, evidence, action, feedbackKey } = recommendation;
+  const { id, type, title, reason, nodeIds, evidence, action, feedbackKey, feedbackState } = recommendation;
   const selectedRecommendationId = useWorkspaceStore((state) => state.selectedRecommendationId);
   const activateRecommendation = useWorkspaceStore((state) => state.activateRecommendation);
   const readRecommendationIds = useWorkspaceStore((state) => state.readRecommendationIds);
 
   const [, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const [feedbackAction, setFeedbackAction] = useState<string | null>(null);
+  const [feedbackAction, setFeedbackAction] = useState<string | null>(feedbackState ?? null);
 
   const isSelected = selectedRecommendationId === id;
   const isRead = readRecommendationIds.includes(id);

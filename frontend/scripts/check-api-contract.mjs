@@ -13,7 +13,7 @@ function assertPass(schema, data, desc) {
   const result = schema.safeParse(data);
   if (!result.success) {
     console.error(`❌ FAIL: ${desc}`);
-    console.error(result.error.errors);
+    console.error(result.error.issues);
     process.exit(1);
   }
   console.log(`✅ PASS: ${desc}`);
@@ -26,6 +26,9 @@ function assertFail(schema, data, desc) {
     process.exit(1);
   }
   console.log(`✅ PASS (Successfully rejected): ${desc}`);
+  if (result.error && result.error.issues) {
+    // Zod 4 uses .issues instead of .errors
+  }
 }
 
 async function main() {
@@ -184,6 +187,7 @@ async function main() {
   // 7. Test PathVersionDtoSchema
   logSection("7. Path Version DTO Schema Validation");
   const validVersion = {
+    version_id: "version-1",
     path_id: "path-1",
     version: 2,
     parent_version: 1,

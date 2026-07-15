@@ -4,6 +4,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createQueryClient } from "./queryClient";
 import { ToastProvider } from "../components/feedback/Toast";
 import { AuthBootstrap } from "../auth/AuthBootstrap";
+import { DesktopBootstrap } from "../desktop/DesktopBootstrap";
+import { NetworkStatusBanner } from "../desktop/NetworkStatusBanner";
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -14,12 +16,15 @@ export function AppProviders({ children }: AppProvidersProps) {
   const [queryClient] = useState(() => createQueryClient());
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider delayDuration={300}>
-        <ToastProvider>
-          <AuthBootstrap>{children}</AuthBootstrap>
-        </ToastProvider>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <DesktopBootstrap>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider delayDuration={300}>
+          <ToastProvider>
+            <NetworkStatusBanner />
+            <AuthBootstrap>{children}</AuthBootstrap>
+          </ToastProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </DesktopBootstrap>
   );
 }

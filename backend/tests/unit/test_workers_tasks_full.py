@@ -13,16 +13,156 @@ import pytest
 
 # Pre-import functions under test so patches apply to the already-cached module
 from app.workers.tasks import (
+    _build_fallback_content,
+    _build_fallback_lecture,
     _cleanup_engine,
     _execute_e2e_progress_task,
     _execute_knowledge_index,
+    _execute_lecture_generation,
     _execute_path_generation,
     _execute_unit_generation,
+    _extract_topic,
+    _normalize_learning_material,
+    _normalize_lecture_material,
     execute_background_task,
     publish_outbox_task,
     recover_stale_tasks_task,
     run_async,
 )
+
+
+class TestLearningContentFallbacks:
+    def test_extract_topic_removes_direct_learning_verb(self):
+        assert _extract_topic("学习 Python 编程基础和算法") == "Python 编程基础和算法"
+
+    def test_python_basics_fallback_is_runnable_and_specific(self):
+        content = _build_fallback_content(
+            "Python 环境配置与基本语法",
+            "安装解释器并学习变量和控制台交互。",
+            "beginner",
+            ["运行 Python 脚本", "使用 print 和 input"],
+        )
+
+        combined = "\n".join(section["content"] for section in content["sections"])
+        assert "python --version" in combined
+        assert "input(" in combined
+        assert "type(" in combined
+        assert "process()" not in combined
+        assert content["practice_tasks"][2]["title"] == "制作个人信息卡"
+        assert all(section["concepts"] for section in content["sections"])
+        assert all(section["checkpoints"] for section in content["sections"])
+        assert content["project"]["deliverables"]
+
+    def test_lecture_fallback_preserves_source_without_repeated_boilerplate(self):
+        source = {
+            "introduction": "# Python 基础\n\n直接开始实践。",
+            "objectives": ["运行脚本"],
+            "sections": [
+                {
+                    "title": "首次运行",
+                    "content": "执行 `python hello.py`。",
+                    "order": 1,
+                }
+            ],
+            "summary": "已完成首次运行。",
+        }
+
+        lecture = _build_fallback_lecture("Python 基础", "beginner", source)
+
+        assert lecture["introduction"] == source["introduction"]
+        assert lecture["sections"][0]["title"] == "首次运行"
+        assert lecture["sections"][0]["content"] == "执行 `python hello.py`。"
+        assert lecture["key_takeaways"] == ["运行脚本"]
+        assert "深度解析" not in str(lecture)
+        assert "process()" not in str(lecture)
+        assert lecture["sections"][0]["source_section_id"] == "sec-1"
+
+    def test_python_overview_fallback_has_real_history_examples_and_boundaries(self):
+        content = _build_fallback_content(
+            "Python 编程概述与发展背景",
+            "了解 Python 的定义、应用场景和发展历史",
+            "beginner",
+            ["理解 Python 的基本定义", "了解典型应用场景"],
+        )
+
+        combined = "\n".join(section["content"] for section in content["sections"])
+        assert "1991" in combined
+        assert "Python 虚拟机" in combined
+        assert "FastAPI" in combined
+        assert "process()" not in combined
+        assert "内部机制和数据流动方式" not in combined
+        assert content["completion_criteria"]
+        assert content["project"]["deliverables"]
+
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            ("Python 的核心概念与术语", "summarize"),
+            ("Python 的基本操作与工具", "sys.executable"),
+            ("Python 的常见模式与最佳实践", "@dataclass"),
+            ("Python 的进阶技巧与性能优化", "timeit"),
+            ("Python 的错误处理与调试", "parse_age"),
+            ("Python 的项目实战应用", "count_lines"),
+            ("Python 的扩展与生态", "importlib.metadata"),
+            ("Python 总结与持续学习路径", "next_topic"),
+            ("Python 算法与数据结构", "binary_search"),
+        ],
+    )
+    def test_python_topic_fallbacks_are_distinct_and_runnable(self, title, expected):
+        content = _build_fallback_content(
+            title,
+            f"学习{title}中的具体方法",
+            "intermediate",
+            [f"掌握{title}"],
+        )
+
+        combined = "\n".join(section["content"] for section in content["sections"])
+        assert expected in combined
+        assert "process()" not in combined
+        assert "内部机制和数据流动方式" not in combined
+        assert len(content["sections"]) == 4
+        assert all(section["mind_map_nodes"] for section in content["sections"])
+
+    def test_quality_gate_flags_generic_shallow_material(self):
+        material, quality = _normalize_learning_material(
+            {
+                "sections": [
+                    {"title": "概念介绍", "content": "内部机制和数据流动方式，有广泛的应用场景。"}
+                ]
+            },
+            node_title="Python 基础",
+            node_difficulty="beginner",
+            objectives=["运行脚本"],
+        )
+
+        assert quality["passed"] is False
+        assert quality["generic_phrase_hits"] >= 1
+        assert material["sections"][0]["section_id"] == "sec-1"
+        assert material["sections"][0]["checkpoints"]
+
+    def test_lecture_sections_keep_canonical_source_links(self):
+        source = {
+            "introduction": "开始学习",
+            "objectives": ["掌握变量"],
+            "sections": [
+                {"section_id": "variables", "title": "变量", "content": "变量内容"}
+            ],
+        }
+        lecture, quality = _normalize_lecture_material(
+            {
+                "introduction": "讲义导入",
+                "sections": [
+                    {"section_id": "lec-1", "title": "变量详解", "content": "详细内容", "order": 1}
+                ],
+                "key_takeaways": ["掌握变量"],
+                "common_mistakes": [],
+                "summary": "完成",
+            },
+            source=source,
+        )
+
+        assert lecture["sections"][0]["source_section_id"] == "variables"
+        assert quality["section_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +475,7 @@ class TestExecuteUnitGeneration:
         mock_task.target_id = "node-1"
         mock_task.user_id = "user-1"
         mock_task.target_metadata = {"path_id": "path-1", "unit_content_version_id": "ver-gen-1"}
+        mock_task.agent_trace = []
 
         # Mock node
         mock_node = MagicMock()
@@ -431,6 +572,13 @@ class TestExecuteUnitGeneration:
 
         assert "unit_id" in result
         assert result["node_id"] == "node-1"
+        assert [step["agent_key"] for step in mock_task.agent_trace] == [
+            "profile_context",
+            "content_generator",
+            "quality_gate",
+            "content_reviewer",
+        ]
+        assert mock_task.agent_trace[-1]["status"] == "completed"
 
     @pytest.mark.asyncio
     async def test_unit_generation_llm_fallback_to_template(self):
@@ -506,6 +654,112 @@ class TestExecuteUnitGeneration:
         assert "unit_id" in result
 
     @pytest.mark.asyncio
+    async def test_unit_generation_revises_once_when_reviewer_rejects(self):
+        """Reviewer feedback must drive one generator revision and a second review."""
+        mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.add_all = MagicMock()
+        mock_task = MagicMock()
+        mock_task.id = "unit-task-revision"
+        mock_task.target_id = "node-revision"
+        mock_task.user_id = "user-revision"
+        mock_task.target_metadata = {"path_id": "path-revision", "unit_content_version_id": "ver-revision"}
+        mock_task.agent_trace = []
+
+        mock_node = MagicMock(
+            title="Python Functions",
+            description="Function design",
+            difficulty="beginner",
+            learning_outcomes='["Define functions"]',
+        )
+        mock_path = MagicMock(active_version_id="path-version", goal_id=None)
+        mock_version = MagicMock(id="ver-revision", unit_content_id="uc-revision", status="generating")
+        mock_unit = MagicMock(
+            id="uc-revision",
+            active_version_id=None,
+            status="generating",
+            active_task_id="unit-task-revision",
+        )
+        mock_background_task = MagicMock(status="running")
+
+        def content(section_prefix: str) -> dict[str, object]:
+            return {
+                "introduction": f"# {section_prefix}",
+                "objectives": ["Define functions"],
+                "sections": [
+                    {
+                        "section_id": "sec-1",
+                        "title": f"{section_prefix} Basics",
+                        "content": f"{section_prefix} content " * 80,
+                        "order": 1,
+                    },
+                    {
+                        "section_id": "sec-2",
+                        "title": f"{section_prefix} Practice",
+                        "content": f"{section_prefix} practice " * 80,
+                        "order": 2,
+                    },
+                ],
+                "practice_tasks": [],
+                "summary": f"{section_prefix} summary",
+                "references": [],
+            }
+
+        first_review = {
+            "passed": False,
+            "score": 45,
+            "issues": [{"severity": "error", "description": "缺少边界案例"}],
+            "summary": "需要返修",
+        }
+        second_review = {"passed": True, "score": 91, "issues": [], "summary": "返修通过"}
+
+        def scalar(value):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = value
+            return result
+
+        call_count = 0
+
+        async def execute(_statement):
+            nonlocal call_count
+            call_count += 1
+            values = {
+                1: mock_node,
+                2: mock_path,
+                3: mock_version,
+                4: mock_version,
+                5: mock_background_task,
+                6: mock_unit,
+            }
+            return scalar(values.get(call_count))
+
+        mock_db.execute = execute
+
+        with (
+            patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
+            patch("app.workers.tasks.asyncio.sleep", new_callable=AsyncMock),
+            patch("app.services.llm.llm_json", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "app.services.profile_merge.load_profile_context",
+                new_callable=AsyncMock,
+                return_value=(None, ""),
+            ),
+        ):
+            mock_llm.side_effect = [content("Draft"), first_review, content("Revised"), second_review]
+            result = await _execute_unit_generation(mock_db, mock_task)
+
+        assert result["node_id"] == "node-revision"
+        assert mock_llm.await_count == 4
+        assert mock_version.content["generation_metadata"]["source"] == "llm_revision"
+        assert mock_version.content["generation_metadata"]["review_iterations"] == 2
+        assert mock_version.content["generation_metadata"]["review_score"] == 91
+        assert [(step["agent_key"], step["iteration"], step["status"]) for step in mock_task.agent_trace][-3:] == [
+            ("content_reviewer", 1, "needs_revision"),
+            ("content_generator", 2, "completed"),
+            ("content_reviewer", 2, "completed"),
+        ]
+
+    @pytest.mark.asyncio
     async def test_unit_generation_no_path_context(self):
         """When target_metadata has no path_id, works with defaults."""
         mock_db = AsyncMock()
@@ -568,6 +822,82 @@ class TestExecuteUnitGeneration:
             return _scalar(None)
 
         mock_db.execute = mock_execute
+
+
+# ---------------------------------------------------------------------------
+# _execute_lecture_generation
+# ---------------------------------------------------------------------------
+class TestExecuteLectureGeneration:
+    @pytest.mark.asyncio
+    async def test_uses_active_unit_content_version_instead_of_legacy_content(self):
+        mock_db = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        task = MagicMock()
+        task.id = "lecture-task-1"
+        task.target_id = "node-1"
+        task.user_id = "user-1"
+        task.target_metadata = {"path_id": ""}
+
+        unit_content = MagicMock()
+        unit_content.content = {
+            "introduction": "LEGACY SOURCE",
+            "sections": [{"title": "Legacy", "content": "legacy content"}],
+        }
+        unit_content.active_version_id = "version-active"
+
+        active_version = MagicMock()
+        active_version.content = {
+            "introduction": "ACTIVE SOURCE",
+            "objectives": ["active objective"],
+            "sections": [{"title": "Active", "content": "active version content"}],
+        }
+
+        node = MagicMock(title="Python basics", difficulty="beginner")
+        lecture = MagicMock()
+
+        def scalar_result(value):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = value
+            return result
+
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                scalar_result(unit_content),
+                scalar_result(active_version),
+                scalar_result(node),
+                scalar_result(lecture),
+            ]
+        )
+
+        lecture_data = {
+            "introduction": "Generated lecture",
+            "sections": [
+                {"section_id": "1", "title": "One", "content": "First", "order": 1},
+                {"section_id": "2", "title": "Two", "content": "Second", "order": 2},
+            ],
+            "key_takeaways": [],
+            "common_mistakes": [],
+            "summary": "Done",
+        }
+
+        with (
+            patch("app.workers.tasks.update_task_status", new_callable=AsyncMock),
+            patch("app.services.llm.llm_json", new_callable=AsyncMock, return_value=lecture_data),
+            patch("app.prompts.agents.lecture_generator_user", return_value="lecture prompt") as build_prompt,
+        ):
+            result = await _execute_lecture_generation(mock_db, task)
+
+        source_summary = build_prompt.call_args.args[3]
+        assert "ACTIVE SOURCE" in source_summary
+        assert "active version content" in source_summary
+        assert "LEGACY SOURCE" not in source_summary
+        assert result == {"lecture_id": lecture.id, "node_id": "node-1"}
+        assert lecture.content["introduction"] == "ACTIVE SOURCE"
+        assert lecture.content["sections"][0]["source_section_id"] == "sec-1"
+        assert lecture.content["generation_metadata"]["source"] == "fallback_quality_gate"
+        assert lecture.status == "ready"
+        assert lecture.active_task_id is None
 
 
 # ---------------------------------------------------------------------------

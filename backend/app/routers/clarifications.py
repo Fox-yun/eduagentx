@@ -5,19 +5,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends
+import structlog
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_learning_user
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
 from app.core.errors import ApiError
 from app.models.clarification import ClarificationAnswer, ClarificationQuestion, ClarificationSet
 from app.models.user import User
 from app.services.goal import GoalService
 
 router = APIRouter()
+logger = structlog.get_logger()
 
 
 class ClarificationAnswerRequest(BaseModel):
@@ -144,6 +146,7 @@ async def get_clarifications(
 async def submit_clarifications(
     goal_id: str,
     body: ClarificationAnswerRequest,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_learning_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -194,6 +197,9 @@ async def submit_clarifications(
 
     if goal.status == "draft":
         await service.transition_goal(goal_id, user.id, "diagnosing")
+        # Pre-generate diagnostic questions in the background so they're
+        # ready by the time the user navigates to the diagnostic page.
+        background_tasks.add_task(_pregenerate_diagnostic_questions, goal_id, user.id)
 
     await db.flush()
     await db.commit()
@@ -202,3 +208,46 @@ async def submit_clarifications(
         "next_step": "diagnostic",
         "active_task_id": None,
     }
+
+
+async def _pregenerate_diagnostic_questions(goal_id: str, user_id: str) -> None:
+    """Pre-generate diagnostic questions in the background.
+
+    Runs as a response background task after clarification submission commits.
+    Creates its own DB session so it survives after the request completes.
+    Uses the same process and database locks as the GET endpoint.
+    """
+    try:
+        async with get_session_factory()() as db:
+            from app.models.goal import LearningGoal
+            from app.routers.diagnostics import _get_or_create_questions
+
+            goal_result = await db.execute(select(LearningGoal).where(LearningGoal.id == goal_id))
+            goal = goal_result.scalar_one_or_none()
+            if not goal:
+                return
+
+            profile_context = None
+            try:
+                from app.services.profile_context import load_learner_profile_context
+
+                profile_context = await load_learner_profile_context(db, user_id=user_id)
+            except Exception as exc:
+                logger.warning(
+                    "diagnostic_pregeneration_profile_failed",
+                    goal_id=goal_id,
+                    error=str(exc)[:200],
+                )
+
+            questions = await _get_or_create_questions(db, goal, profile_context)
+            logger.info(
+                "diagnostic_questions_pre_generated",
+                goal_id=goal_id,
+                count=len(questions),
+            )
+    except Exception as e:
+        logger.warning(
+            "diagnostic_pregeneration_failed",
+            goal_id=goal_id,
+            error=str(e)[:200],
+        )

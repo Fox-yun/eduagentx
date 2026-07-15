@@ -3,6 +3,11 @@ import { ApiError, ApiSchemaError, AuthExpiredError } from "./errors";
 import { getCsrfToken, shouldAddCsrf, CSRF_HEADER_NAME } from "./csrf";
 import { triggerAuthFailure } from "./authFailure";
 import { ApiErrorDtoSchema } from "../schemas/errors";
+import {
+  formDataToNativeParts,
+  isTauriDesktop,
+  nativeApiRequest,
+} from "../desktop/runtime";
 
 export interface ApiRequestOptions<T = unknown> extends Omit<RequestInit, "body"> {
   body?: unknown;
@@ -119,7 +124,27 @@ export async function apiRequest<T = unknown>(
   }
 
   try {
-    const response = await fetch(url, fetchInit);
+    let response: Response;
+    if (isTauriDesktop) {
+      if (path.startsWith("http://") || path.startsWith("https://")) {
+        throw new ApiError("桌面客户端拒绝访问配置服务器之外的地址", 0, "DESKTOP_EXTERNAL_URL_BLOCKED");
+      }
+      const desktopPath = path.startsWith("/") ? path : "/" + path;
+      const nativeResponse = await nativeApiRequest({
+        path: desktopPath,
+        method,
+        headers: Object.fromEntries(headers.entries()),
+        body: typeof requestBody === "string" ? requestBody : undefined,
+        multipart: requestBody instanceof FormData ? await formDataToNativeParts(requestBody) : undefined,
+        timeoutMs,
+      });
+      response = new Response(nativeResponse.status === 204 ? null : nativeResponse.body, {
+        status: nativeResponse.status,
+        headers: nativeResponse.headers,
+      });
+    } else {
+      response = await fetch(url, fetchInit);
+    }
     const requestId = response.headers.get("X-Request-Id") || undefined;
 
     // 5. Check response status

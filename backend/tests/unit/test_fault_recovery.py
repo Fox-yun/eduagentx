@@ -485,7 +485,7 @@ class TestLLMFallback:
     @pytest.mark.asyncio
     async def test_llm_json_retries_without_response_format(self):
         """llm_json retries without response_format if the first call fails."""
-        from app.services.llm import LLMError, llm_json
+        from app.services.llm import LLMResponseFormatError, llm_json
 
         call_count = 0
 
@@ -493,7 +493,7 @@ class TestLLMFallback:
             nonlocal call_count
             call_count += 1
             if call_count == 1 and response_format:
-                raise LLMError("response_format not supported")
+                raise LLMResponseFormatError("response_format not supported")
             return '{"key": "value"}'
 
         with patch("app.services.llm.llm_chat", side_effect=mock_llm_chat):

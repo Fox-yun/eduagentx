@@ -7,12 +7,16 @@ and creates slides deterministically.
 
 from __future__ import annotations
 
-import structlog
 from typing import Any
+
+import structlog
+
+from app.services.presentation_text import extract_presentation_title
 
 try:
     from pptx import Presentation
-    from pptx.util import Inches, Pt
+    from pptx.enum.text import MSO_AUTO_SIZE
+    from pptx.presentation import Presentation as PresentationType
 
     PPTX_AVAILABLE = True
 except ImportError:
@@ -91,18 +95,20 @@ class PPTXGenerator:
     @classmethod
     def _add_title_slide(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         unit_content: dict[str, Any],
     ) -> None:
         """Add title slide with course title and introduction."""
         intro_text = unit_content.get("introduction", "").strip("# \n")
-        title = intro_text.split("\n")[0] if intro_text else "课程内容"
+        title = extract_presentation_title(unit_content, fallback="课程内容")
 
         slide_layout = prs.slide_layouts[0]  # Title slide layout
         slide = prs.slides.add_slide(slide_layout)
 
         title_shape = slide.shapes.title
         title_shape.text = title
+        title_shape.text_frame.word_wrap = True
+        title_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
         # Add introduction as subtitle if available
         if len(intro_text.split("\n")) > 1:
@@ -115,7 +121,7 @@ class PPTXGenerator:
     @classmethod
     def _add_objectives_slide(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         objectives: list[str],
     ) -> None:
         """Add slide with learning objectives as bullet points."""
@@ -140,7 +146,7 @@ class PPTXGenerator:
     @classmethod
     def _add_section_slides(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         sections: list[dict[str, Any]],
     ) -> None:
         """Add slides for each section, splitting long content."""
@@ -153,7 +159,7 @@ class PPTXGenerator:
     @classmethod
     def _add_section_content_slides(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         title: str,
         content: str,
     ) -> None:
@@ -201,7 +207,7 @@ class PPTXGenerator:
     @classmethod
     def _add_practice_tasks_slide(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         tasks: list[Any],
     ) -> None:
         """Add slide with practice tasks."""
@@ -218,10 +224,7 @@ class PPTXGenerator:
             body.clear()
 
             for i, task in enumerate(tasks[: cls._MAX_TASK_BULLETS]):
-                if isinstance(task, dict):
-                    desc = task.get("description", task.get("task", str(task)))
-                else:
-                    desc = str(task)
+                desc = str(task.get("description") or task.get("task") or task) if isinstance(task, dict) else str(task)
 
                 if i == 0:
                     body.text = f"• {desc[:100]}"
@@ -233,7 +236,7 @@ class PPTXGenerator:
     @classmethod
     def _add_summary_slide(
         cls,
-        prs: Presentation,
+        prs: PresentationType,
         summary: str,
     ) -> None:
         """Add summary slide."""

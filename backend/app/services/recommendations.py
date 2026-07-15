@@ -32,8 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.path import LearningNode, LearningPath
 from app.models.profile import StudentProfile
-from app.models.progress import LearningProgress
-from app.models.unit import AssessmentAttempt
+from app.models.progress import LearningProgress, RecommendationFeedback
+from app.models.unit import Assessment, AssessmentAttempt
 from app.services.knowledge import KnowledgeService
 
 logger = structlog.get_logger()
@@ -125,9 +125,47 @@ class RecommendationService:
         resource_recs = await self._generate_resource_recommendations(user_id, effective_nodes, profile)
         recommendations.extend(resource_recs)
 
-        # Sort by priority (descending) then limit
-        recommendations.sort(key=lambda r: r.get("priority", PRIORITY_LOW), reverse=True)
+        # Learner feedback is a real ranking signal: ignored items disappear,
+        # accepted items are promoted, and "later" items are deferred.
+        recommendations = await self._apply_feedback(path_id, user_id, recommendations)
+
+        # Sort by priority (descending), then confidence, then limit.
+        recommendations.sort(
+            key=lambda r: (r.get("priority", PRIORITY_LOW), r.get("confidence", 0.0)),
+            reverse=True,
+        )
         return recommendations[:MAX_RECOMMENDATIONS]
+
+    async def _apply_feedback(
+        self,
+        path_id: str,
+        user_id: str,
+        recommendations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        result = await self.db.execute(
+            select(RecommendationFeedback).where(
+                RecommendationFeedback.user_id == user_id,
+                RecommendationFeedback.path_id == path_id,
+            )
+        )
+        feedback_by_key = {item.recommendation_key: item for item in result.scalars().all()}
+        ranked: list[dict[str, Any]] = []
+        for recommendation in recommendations:
+            node_ids = recommendation.get("node_ids") or []
+            key = f"{recommendation.get('type')}:{node_ids[0] if node_ids else 'none'}"
+            recommendation["feedback_key"] = key
+            feedback = feedback_by_key.get(key)
+            if feedback and feedback.action == "ignore":
+                continue
+            if feedback and feedback.action == "accept":
+                recommendation["priority"] = min(int(recommendation.get("priority", 1)) + 1, 4)
+                recommendation["confidence"] = min(float(recommendation.get("confidence", 0.5)) + 0.05, 1.0)
+                recommendation["feedback_state"] = "accepted"
+            elif feedback and feedback.action == "later":
+                recommendation["priority"] = max(int(recommendation.get("priority", 1)) - 1, 0)
+                recommendation["feedback_state"] = "later"
+            ranked.append(recommendation)
+        return ranked
 
     async def _get_path(self, path_id: str, user_id: str) -> LearningPath | None:
         """Get a learning path, verifying ownership."""
@@ -183,30 +221,23 @@ class RecommendationService:
         on the most recent assessments.
         """
         result = await self.db.execute(
-            select(
-                AssessmentAttempt.user_id,
-                AssessmentAttempt.assessment_id,
-            )
+            select(AssessmentAttempt.assessment_passed, Assessment.node_id)
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
             .where(
                 AssessmentAttempt.user_id == user_id,
-                AssessmentAttempt.passed == False,  # noqa: E712
+                Assessment.path_id == path_id,
                 AssessmentAttempt.status == "completed",
+                AssessmentAttempt.finalized_at.is_not(None),
             )
-            .order_by(AssessmentAttempt.submitted_at.desc())
-            .limit(20)
+            .order_by(AssessmentAttempt.finalized_at.desc())
+            .limit(CONSECUTIVE_FAILURE_THRESHOLD)
         )
         rows = result.all()
-        if not rows:
+        if len(rows) < CONSECUTIVE_FAILURE_THRESHOLD:
             return []
-
-        # Count failures per assessment_id
-        failure_counts: dict[str, int] = {}
-        for row in rows:
-            assessment_id = row[1]
-            failure_counts[assessment_id] = failure_counts.get(assessment_id, 0) + 1
-
-        # Return assessment_ids with 2+ failures
-        return [aid for aid, count in failure_counts.items() if count >= CONSECUTIVE_FAILURE_THRESHOLD]
+        if any(bool(row[0]) for row in rows):
+            return []
+        return list(dict.fromkeys(str(row[1]) for row in rows))
 
     def _merge_node_and_progress(
         self,

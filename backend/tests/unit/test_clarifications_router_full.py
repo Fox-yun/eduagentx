@@ -158,7 +158,13 @@ class TestSubmitClarifications:
         clar_set = _make_clar_set()
         question = _make_clar_question()
 
-        with patch("app.routers.clarifications.GoalService") as MockGoalSvc:
+        with (
+            patch("app.routers.clarifications.GoalService") as MockGoalSvc,
+            patch(
+                "app.routers.clarifications._pregenerate_diagnostic_questions",
+                new_callable=AsyncMock,
+            ) as mock_pregenerate,
+        ):
             goal_svc = MockGoalSvc.return_value
             goal_svc.get_goal = AsyncMock(return_value=goal)
             goal_svc.transition_goal = AsyncMock(return_value=goal)
@@ -186,13 +192,20 @@ class TestSubmitClarifications:
             assert resp.status_code == 200
             data = resp.json()
             assert data["next_step"] == "diagnostic"
+            mock_pregenerate.assert_awaited_once_with("goal-1", "user-1")
 
     def test_submit_no_clarification_set(self, app_with_mocked_auth):
         app, mock_db = app_with_mocked_auth
 
         goal = _make_goal()
 
-        with patch("app.routers.clarifications.GoalService") as MockGoalSvc:
+        with (
+            patch("app.routers.clarifications.GoalService") as MockGoalSvc,
+            patch(
+                "app.routers.clarifications._pregenerate_diagnostic_questions",
+                new_callable=AsyncMock,
+            ),
+        ):
             goal_svc = MockGoalSvc.return_value
             goal_svc.get_goal = AsyncMock(return_value=goal)
 
@@ -214,7 +227,13 @@ class TestSubmitClarifications:
         existing_answer = MagicMock()
         existing_answer.answer_value = '"old_value"'
 
-        with patch("app.routers.clarifications.GoalService") as MockGoalSvc:
+        with (
+            patch("app.routers.clarifications.GoalService") as MockGoalSvc,
+            patch(
+                "app.routers.clarifications._pregenerate_diagnostic_questions",
+                new_callable=AsyncMock,
+            ),
+        ):
             goal_svc = MockGoalSvc.return_value
             goal_svc.get_goal = AsyncMock(return_value=goal)
             goal_svc.transition_goal = AsyncMock(return_value=goal)

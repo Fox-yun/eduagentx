@@ -160,6 +160,26 @@ class TestAuthServiceRegister:
             assert result["verification_token"] is not None
             assert result["next_step"] == "verify_email"
 
+    @pytest.mark.asyncio
+    async def test_register_test_env_cannot_auto_verify(self):
+        from app.services.auth import AuthService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        svc = AuthService(db)
+        db.execute = AsyncMock(return_value=_mock_scalar_result(None))
+
+        with patch("app.services.auth.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                app_env="test",
+                email_auto_verify=True,
+            )
+
+            result = await svc.register("test@example.com", "SecureP@ss123!", "Test User")
+
+        assert result["verification_token"] is not None
+        assert result["next_step"] == "verify_email"
+
 
 class TestAuthServiceVerifyEmail:
     @pytest.mark.asyncio

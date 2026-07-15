@@ -412,23 +412,27 @@ export const handlers = [
     db.diagnostics.set(goalId, {
       diagnostic_id: `diag-${goalId}`,
       goal_id: goalId,
-      status: "pending",
+      attempt_id: `attempt-${goalId}`,
+      status: "draft",
       questions: [
         {
           question_id: "q-diag-1",
-          type: "single_choice",
+          question_type: "single_choice",
           prompt: "在完全二叉树中，若叶子节点数为 10，则树中度为 2 的节点数是？",
           options: [
             { value: "9", label: "9 个" },
             { value: "10", label: "10 个" },
             { value: "11", label: "11 个" },
           ],
+          dimension: "algorithms",
+          max_score: 10,
+          required: true,
           answer: null,
         },
       ],
       saved_answers: {},
       result: null,
-      next_step: "generating",
+      next_step: "diagnostic",
     });
 
     // Create background path generator task
@@ -511,8 +515,9 @@ export const handlers = [
       }
 
       return HttpResponse.json({
-        next_step: "generating",
-        active_task_id: goal.active_task_id || `task-gen-${goalId}`,
+        attempt_id: `attempt-${goalId}`,
+        status: "submitted",
+        task_id: goal.active_task_id || `task-gen-${goalId}`,
       });
     }
     return new HttpResponse(null, { status: 404 });

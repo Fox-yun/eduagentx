@@ -12,6 +12,33 @@ import pytest
 # ---------------------------------------------------------------------------
 class TestLifespan:
     @pytest.mark.asyncio
+    async def test_development_startup_recovers_stale_tasks(self):
+        """Development startup repairs tasks orphaned by a previous process."""
+        from app.lifespan import lifespan
+
+        mock_app = MagicMock()
+        mock_db = AsyncMock()
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("app.lifespan.setup_logging"),
+            patch("app.lifespan.get_settings") as mock_settings,
+            patch("app.lifespan.get_engine"),
+            patch("app.lifespan.get_redis"),
+            patch("app.lifespan.close_database", new_callable=AsyncMock),
+            patch("app.lifespan.close_redis", new_callable=AsyncMock),
+            patch("app.core.database.get_session_factory", return_value=mock_factory),
+            patch("app.workers.task_runtime.recover_stale_tasks", new_callable=AsyncMock, return_value=["task-1"]) as recover,
+            patch("app.workers.inline_runner.run_inline_outbox_poller", new_callable=AsyncMock),
+        ):
+            mock_settings.return_value = MagicMock(app_env="development")
+
+            async with lifespan(mock_app):
+                recover.assert_awaited_once_with(mock_db, finalize_cancel_requests=True)
+
+    @pytest.mark.asyncio
     async def test_lifespan_startup_success(self):
         """All services start successfully."""
         from app.lifespan import lifespan

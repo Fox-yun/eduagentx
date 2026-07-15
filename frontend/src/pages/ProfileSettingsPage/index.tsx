@@ -1,12 +1,13 @@
 import React, { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { User, Shield, ArrowLeft, Loader2, Save } from "lucide-react";
+import { User, Shield, ArrowLeft, Loader2, Save, Monitor } from "lucide-react";
 import { AppShell } from "../../components/layout/AppShell";
 import { useCurrentUser } from "../../auth/authHooks";
 import { updateProfile } from "../../api/users";
 import { useToast } from "../../components/feedback/Toast";
 import { queryKeys } from "../../api/queryKeys";
+import { isTauriDesktop } from "../../desktop/runtime";
 
 const TIMEZONES = [
   { value: "Asia/Shanghai", label: "中国标准时间 (Asia/Shanghai)" },
@@ -22,6 +23,7 @@ export function SettingsSidebar() {
   
   const isProfile = location.pathname === "/settings/profile";
   const isSecurity = location.pathname === "/settings/security";
+  const isDesktop = location.pathname === "/settings/desktop";
 
   return (
     <div className="w-full md:w-64 md:shrink-0 flex md:flex-col gap-1 border-b md:border-b-0 md:border-r border-border pb-4 md:pb-0 md:pr-6">
@@ -47,6 +49,15 @@ export function SettingsSidebar() {
         <Shield className="h-4 w-4" />
         账号安全
       </Link>
+      {isTauriDesktop && (
+        <Link
+          to="/settings/desktop"
+          className={"flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all " + (isDesktop ? "bg-primary font-bold text-white shadow-sm" : "text-muted hover:bg-page hover:text-ink")}
+        >
+          <Monitor className="h-4 w-4" />
+          桌面客户端
+        </Link>
+      )}
     </div>
   );
 }

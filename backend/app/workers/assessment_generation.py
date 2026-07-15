@@ -22,7 +22,7 @@ from sqlalchemy import select
 from app.models.unit import Assessment, AssessmentQuestion
 from app.services.llm import llm_json
 from app.workers.task_handlers import register_handler
-from app.workers.task_runtime import update_task_status
+from app.workers.task_runtime import record_agent_step, update_task_status
 
 logger = structlog.get_logger()
 
@@ -223,6 +223,22 @@ async def execute_assessment_generation(db: Any, task: Any) -> dict[str, Any]:
     # Commit Transaction A
     await db.commit()
 
+    record_agent_step(
+        task,
+        agent_key="profile_context",
+        label="画像分析智能体",
+        status="completed",
+        summary="已提取画像偏好和错误模式用于调整考查重点。" if ctx.profile_context else "当前无画像证据，按节点目标设计评估。",
+        artifact_type="评估个性化约束",
+    )
+    record_agent_step(
+        task,
+        agent_key="assessment_designer",
+        label="评估设计智能体",
+        status="running",
+        summary="正在依据学习目标、难度和薄弱点设计题目。",
+        artifact_type="评估题目",
+    )
     await update_task_status(
         db, task.id, "running", progress=25, stage="generating", message="智能体正在调用大语言模型生成题目..."
     )
@@ -269,6 +285,23 @@ async def execute_assessment_generation(db: Any, task: Any) -> dict[str, Any]:
 
     if not questions:
         raise ValueError("No questions generated — both LLM and fallback failed")
+
+    record_agent_step(
+        task,
+        agent_key="assessment_designer",
+        label="评估设计智能体",
+        status="completed",
+        summary=f"已通过 {generation_source} 生成 {len(questions)} 道针对性题目。",
+        artifact_type="评估题目",
+    )
+    record_agent_step(
+        task,
+        agent_key="assessment_validator",
+        label="评估质量校验器",
+        status="completed",
+        summary="已完成题型、选项、答案、评分与重复题校验。",
+        artifact_type="评估校验报告",
+    )
 
     # ==================================================================
     # Transaction B: Save questions, mark assessment ready
@@ -680,27 +713,47 @@ def _build_fallback_assessment(ctx: AssessmentGenerationInput) -> GeneratedAsses
         )
     )
 
-    # Question 6: short_answer
-    questions.append(
-        GeneratedAssessmentQuestion(
-            question_type="short_answer",
-            prompt=f"请用自己的话简要说明「{ctx.node_title}」的核心概念，以及它在实际开发中的一个应用场景。",
-            correct_answer=None,
-            reference_answer=f"{ctx.node_title}的核心概念是{o1}。在实际开发中，它常用于{o2}相关的场景。",
-            rubric=[
-                "正确描述了核心概念（3分）",
-                "提供了合理的实际应用场景（3分）",
-                "表述清晰，逻辑合理（2分）",
-                "举例具体且切题（2分）",
-            ],
-            explanation=(
-                f"本题考查对{ctx.node_title}核心概念的理解和应用能力。核心概念应围绕{o1}展开，应用场景应与{o2}相关。"
-            ),
-            difficulty="medium",
-            knowledge_point=f"{ctx.node_title}综合应用",
-            max_score=10,
+    # Question 6: formal fallback assessments must remain fully scoreable
+    # without an LLM. Other purposes can still offer an open-ended exercise.
+    if ctx.purpose == "formal":
+        questions.append(
+            GeneratedAssessmentQuestion(
+                question_type="single_choice",
+                prompt=f"以下哪个描述最能体现「{ctx.node_title}」的核心概念与实际应用？",
+                options=[
+                    GeneratedQuestionOption(value="a", label="只记忆术语，不考虑实际问题"),
+                    GeneratedQuestionOption(value="b", label=f"理解{o1}，并将其用于{o2}相关场景"),
+                    GeneratedQuestionOption(value="c", label="完全依赖现成答案，不验证结果"),
+                    GeneratedQuestionOption(value="d", label="跳过核心概念，只关注工具操作"),
+                ],
+                correct_answer="b",
+                explanation=f"掌握{ctx.node_title}需要理解{o1}，并能在{o2}相关场景中应用。",
+                difficulty="medium",
+                knowledge_point=f"{ctx.node_title}综合应用",
+                max_score=2,
+            )
         )
-    )
+    else:
+        questions.append(
+            GeneratedAssessmentQuestion(
+                question_type="short_answer",
+                prompt=f"请用自己的话简要说明「{ctx.node_title}」的核心概念，以及它在实际开发中的一个应用场景。",
+                correct_answer=None,
+                reference_answer=f"{ctx.node_title}的核心概念是{o1}。在实际开发中，它常用于{o2}相关的场景。",
+                rubric=[
+                    "正确描述了核心概念（3分）",
+                    "提供了合理的实际应用场景（3分）",
+                    "表述清晰，逻辑合理（2分）",
+                    "举例具体且切题（2分）",
+                ],
+                explanation=(
+                    f"本题考查对{ctx.node_title}核心概念的理解和应用能力。核心概念应围绕{o1}展开，应用场景应与{o2}相关。"
+                ),
+                difficulty="medium",
+                knowledge_point=f"{ctx.node_title}综合应用",
+                max_score=10,
+            )
+        )
 
     # Question 7: single_choice about application
     questions.append(
@@ -755,20 +808,22 @@ def _build_fallback_assessment(ctx: AssessmentGenerationInput) -> GeneratedAsses
         )
         questions.append(
             GeneratedAssessmentQuestion(
-                question_type="short_answer",
-                prompt=f"学习完「{ctx.node_title}」后，你认为下一步应该学习什么？请说明理由。",
-                correct_answer=None,
-                reference_answer=f"学习完{ctx.node_title}后，下一步应学习与之相关的进阶主题，如{ctx.node_title}的高级用法或与之配套的技术，以形成完整的知识体系。",
-                rubric=[
-                    "提出了合理的进阶方向（3分）",
-                    "说明了选择该方向的理由（3分）",
-                    "与实际学习目标关联（2分）",
-                    "表述清晰（2分）",
+                question_type="single_choice",
+                prompt=f"学习完「{ctx.node_title}」后，以下哪个进阶计划最合理？",
+                options=[
+                    GeneratedQuestionOption(
+                        value="a",
+                        label=f"结合学习目标继续学习{ctx.node_title}的高级用法或配套技术，并通过项目验证",
+                    ),
+                    GeneratedQuestionOption(value="b", label="停止实践，只重复记忆当前内容"),
+                    GeneratedQuestionOption(value="c", label="转向完全无关的主题，不考虑知识衔接"),
+                    GeneratedQuestionOption(value="d", label="跳过验证，直接假定已经完全掌握"),
                 ],
-                explanation=f"本题考查学习路径规划能力，进阶方向应与{ctx.node_title}相关。",
+                correct_answer="a",
+                explanation=f"合理的下一步应与{ctx.node_title}和学习目标衔接，并包含实践验证。",
                 difficulty="hard",
                 knowledge_point="学习路径规划",
-                max_score=10,
+                max_score=2,
             )
         )
 

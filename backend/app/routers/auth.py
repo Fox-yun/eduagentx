@@ -365,15 +365,12 @@ async def verify_email(
     user = await service.verify_email(body.token)
     return JSONResponse(
         content={
-            "message": "Email verified successfully",
-            "user": {
-                "user_id": user.id,
-                "email": user.email,
-                "display_name": user.display_name,
-                "email_verified": True,
-                "onboarding_completed": user.onboarding_completed_at is not None,
-                "status": user.status,
-            },
+            "user_id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "email_verified": True,
+            "onboarding_completed": user.onboarding_completed_at is not None,
+            "status": user.status,
         }
     )
 

@@ -81,8 +81,8 @@ EduAgentX 采用多层测试策略，确保系统质量和可靠性：
 |---|---|---|
 | Ruff | `ruff check .` | ✅ 通过 |
 | Ruff Format | `ruff format --check .` | ✅ 通过 |
-| MyPy | `mypy app` | ✅ 通过 |
-| Bandit | `bandit -r app` | ✅ 通过 |
+| MyPy | `mypy app` | ✅ 通过 (99 文件) |
+| Bandit | `bandit -r app --severity-level medium` | ✅ 通过 (0 Low/Medium/High, 11 nosec) |
 
 ## 3. 前端测试
 
@@ -163,7 +163,7 @@ alembic heads
 
 ### 5.2 迁移文件
 
-共 27 个迁移文件，从 001_initial_tables 到 027_add_learning_resources_table。
+共 31 个迁移文件，从 001_initial_tables 到 031_learning_behavior_adaptation。
 
 ## 6. Docker 栈验证
 
@@ -218,8 +218,13 @@ docker-compose ps  # 所有服务 healthy
 | 后端安全测试 | 4 文件 | ✅ 通过 |
 | 前端单元测试 | 20+ 文件 | ✅ 通过 |
 | Real Backend E2E | 13 场景 | ✅ 通过 |
-| 数据库迁移 | 27 个迁移 | ✅ 通过 |
+| 数据库迁移 | 31 个迁移 | ✅ 通过 |
 | Docker 栈 | 全部服务 | ✅ 通过 |
 | 代码质量门禁 | Ruff/MyPy/ESLint/TypeScript | ✅ 通过 |
 
-**总体结论：系统所有测试通过，可以交付。**
+**总体结论：Web 与后端核心功能测试通过；桌面安装器和全栈部署仍处于 Release Candidate 验证阶段。**
+
+> 注：此报告反映截至 4.1.0 版本的测试状态。实际交付前请参照最新复检结论。
+> Bandit 11 个已标注 nosec 的低级别问题均为误报（Cookie 名称、E2E 测试密码、FFmpeg 子进程等），实际 0 Low/Medium/High。
+> Windows 安装器尚未经真实构建验证，Release 工作流已配置但需在 GitHub Actions 上执行。
+> 代码签名尚未配置，用户安装时会看到“未知发布者”警告。

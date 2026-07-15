@@ -88,17 +88,15 @@ class TestLoginContract:
 class TestPasswordResetContract:
     """Test password reset endpoint contract."""
 
-    def test_reset_password_uses_password_field(self, client: TestClient) -> None:
-        """Reset password should accept 'password' not 'new_password'."""
-        response = client.post(
-            "/api/auth/reset-password",
-            json={
-                "token": "some-token",
-                "password": "NewStrongPass123!",
-            },
+    def test_reset_password_uses_password_field(self) -> None:
+        """Reset password DTO should accept ``password`` without requiring a database."""
+        from app.routers.auth import ResetPasswordRequest
+
+        request = ResetPasswordRequest(
+            token="some-token",
+            password="NewStrongPass123!",
         )
-        # Should not fail schema validation
-        assert response.status_code != 422 or "password" not in response.text.lower()
+        assert request.password == "NewStrongPass123!"
 
 
 class TestCSRFContract:

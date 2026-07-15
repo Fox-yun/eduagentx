@@ -34,7 +34,51 @@ def _make_task(**overrides):
     t.max_retries = overrides.get("max_retries", 3)
     t.heartbeat_at = overrides.get("heartbeat_at", datetime.now(UTC))
     t.next_event_sequence = overrides.get("next_event_sequence", 1)
+    t.agent_trace = overrides.get("agent_trace", [])
     return t
+
+
+class TestRecordAgentStep:
+    def test_appends_and_completes_same_agent_iteration(self):
+        from app.workers.task_runtime import record_agent_step
+
+        task = _make_task()
+        record_agent_step(
+            task,
+            agent_key="content_generator",
+            label="课程内容生成智能体",
+            status="running",
+            summary="生成中",
+            artifact_type="课程内容",
+        )
+        record_agent_step(
+            task,
+            agent_key="content_generator",
+            label="课程内容生成智能体",
+            status="completed",
+            summary="生成完成",
+            artifact_type="课程内容",
+        )
+
+        assert len(task.agent_trace) == 1
+        assert task.agent_trace[0]["status"] == "completed"
+        assert task.agent_trace[0]["completed_at"] is not None
+
+    def test_keeps_revision_iteration_as_separate_step(self):
+        from app.workers.task_runtime import record_agent_step
+
+        task = _make_task()
+        for iteration in (1, 2):
+            record_agent_step(
+                task,
+                agent_key="content_generator",
+                label="课程内容生成智能体",
+                status="completed",
+                summary=f"第 {iteration} 轮",
+                iteration=iteration,
+            )
+
+        assert [step["iteration"] for step in task.agent_trace] == [1, 2]
 
 
 class TestUpdateTaskStatus:
@@ -223,6 +267,41 @@ class TestStatusToEventType:
 
 
 class TestRecoverStaleTasks:
+    @pytest.mark.asyncio
+    async def test_recover_cancel_requested_unit_task_cleans_target(self):
+        from app.workers.task_runtime import recover_stale_tasks
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        task = _make_task(
+            status="cancel_requested",
+            heartbeat_at=datetime(2020, 1, 1, tzinfo=UTC),
+            next_event_sequence=4,
+        )
+        task.task_type = "learning_unit_generation"
+        task.target_metadata = {"unit_content_version_id": "version-1"}
+
+        version = MagicMock(status="generating")
+        content = MagicMock(active_task_id=task.id, active_version_id=None)
+        query_results = [
+            _mock_scalars([task]),
+            _mock_scalar_result(version),
+            _mock_scalar_result(content),
+        ]
+        db.execute = AsyncMock(side_effect=query_results)
+
+        result = await recover_stale_tasks(db)
+
+        assert result == ["task-1"]
+        assert task.status == "cancelled"
+        assert task.next_event_sequence == 5
+        assert version.status == "failed"
+        assert version.error_code == "TASK_CANCELLED"
+        assert content.active_task_id is None
+        assert content.status == "failed"
+        db.add.assert_called_once()
+        db.commit.assert_awaited_once()
+
     @pytest.mark.asyncio
     async def test_recover_retryable_tasks(self):
         from app.workers.task_runtime import recover_stale_tasks

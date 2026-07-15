@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EduAgentX API",
-    "description": "EduAgentX Backend - Phase 3",
-    "version": "3.0.0"
+    "description": "EduAgentX Backend",
+    "version": "4.1.0"
   },
   "paths": {
     "/health/live": {
@@ -42,16 +42,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "boolean"
-                      }
-                    ]
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Health Ready Health Ready Get"
                 }
@@ -221,40 +212,12 @@
         "summary": "Refresh",
         "description": "Refresh the access token.",
         "operationId": "refresh_api_auth_refresh_post",
-        "parameters": [
-          {
-            "name": "refresh_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Refresh Token"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -293,6 +256,225 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout All",
+        "description": "Logout from all sessions.",
+        "operationId": "logout_all_api_auth_logout_all_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/change-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change Password",
+        "description": "Change the current user's password.",
+        "operationId": "change_password_api_auth_change_password_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__auth__ChangePasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List Sessions",
+        "description": "List all active sessions for the current user.",
+        "operationId": "list_sessions_api_auth_sessions_get",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Sessions Api Auth Sessions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Delete Session",
+        "description": "Delete (revoke) a specific session.",
+        "operationId": "delete_session_api_auth_sessions__session_id__delete",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Session Api Auth Sessions  Session Id  Delete"
+                }
               }
             }
           },
@@ -357,11 +539,111 @@
         "summary": "Resend Verification",
         "description": "Resend email verification token.",
         "operationId": "resend_verification_api_auth_resend_verification_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Resend Verification Api Auth Resend Verification Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Forgot Password",
+        "description": "Request password reset. Does not leak email existence.",
+        "operationId": "forgot_password_api_auth_forgot_password_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResendVerificationRequest"
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Forgot Password Api Auth Forgot Password Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Reset Password",
+        "description": "Reset password with token.",
+        "operationId": "reset_password_api_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
               }
             }
           },
@@ -420,7 +702,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Me Api Users Me Get"
+                }
               }
             }
           },
@@ -476,7 +762,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update Me Api Users Me Patch"
+                }
               }
             }
           },
@@ -534,7 +824,127 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Complete Onboarding Api Users Me Onboarding Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/me/password": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Change Password",
+        "description": "Change user password.",
+        "operationId": "change_password_api_users_me_password_put",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__users__ChangePasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Change Password Api Users Me Password Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/me/sessions": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List Sessions",
+        "description": "List user's active sessions.",
+        "operationId": "list_sessions_api_users_me_sessions_get",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Sessions Api Users Me Sessions Get"
+                }
               }
             }
           },
@@ -671,7 +1081,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CursorPage"
+                  "$ref": "#/components/schemas/CursorPage_GoalResponse_"
                 }
               }
             }
@@ -853,7 +1263,336 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Goal Api Learning Goals  Goal Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-goals/{goal_id}/clarifications": {
+      "get": {
+        "tags": [
+          "clarifications"
+        ],
+        "summary": "Get Clarifications",
+        "description": "Get clarification questions for a goal.",
+        "operationId": "get_clarifications_api_learning_goals__goal_id__clarifications_get",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Clarifications Api Learning Goals  Goal Id  Clarifications Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "clarifications"
+        ],
+        "summary": "Submit Clarifications",
+        "description": "Submit clarification answers.",
+        "operationId": "submit_clarifications_api_learning_goals__goal_id__clarifications_post",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClarificationAnswerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Submit Clarifications Api Learning Goals  Goal Id  Clarifications Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-goals/{goal_id}/diagnostic": {
+      "get": {
+        "tags": [
+          "diagnostics"
+        ],
+        "summary": "Get Diagnostic",
+        "description": "Get diagnostic quiz for a goal.\n\nCreates a draft attempt if none exists.\nReturns questions without correct_answer or rubric.",
+        "operationId": "get_diagnostic_api_learning_goals__goal_id__diagnostic_get",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Diagnostic Api Learning Goals  Goal Id  Diagnostic Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-goals/{goal_id}/diagnostic/submit": {
+      "post": {
+        "tags": [
+          "diagnostics"
+        ],
+        "summary": "Submit Diagnostic",
+        "description": "Submit diagnostic answers.\n\nScores objective questions synchronously, then creates a grading\ntask for short-answer LLM evaluation.",
+        "operationId": "submit_diagnostic_api_learning_goals__goal_id__diagnostic_submit_post",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnosticSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Submit Diagnostic Api Learning Goals  Goal Id  Diagnostic Submit Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-goals/{goal_id}/diagnostic/result": {
+      "get": {
+        "tags": [
+          "diagnostics"
+        ],
+        "summary": "Get Diagnostic Result",
+        "description": "Get the latest diagnostic result for a goal.",
+        "operationId": "get_diagnostic_result_api_learning_goals__goal_id__diagnostic_result_get",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Diagnostic Result Api Learning Goals  Goal Id  Diagnostic Result Get"
+                }
               }
             }
           },
@@ -901,7 +1640,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Resume Api Learning Resume Get"
+                }
               }
             }
           },
@@ -978,7 +1721,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CursorPage"
+                  "$ref": "#/components/schemas/CursorPage_dict_str__Any__"
                 }
               }
             }
@@ -1036,7 +1779,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Task Api Tasks  Task Id  Get"
+                }
               }
             }
           },
@@ -1093,7 +1840,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Cancel Task Api Tasks  Task Id  Cancel Post"
+                }
               }
             }
           },
@@ -1116,7 +1867,7 @@
           "tasks"
         ],
         "summary": "Stream Task Events",
-        "description": "Stream task events via SSE.\n\nSupports:\n- Last-Event-ID header for reconnection\n- Real-time updates via polling (Redis Pub/Sub in production)\n- Heartbeat every 15 seconds\n- Auto-close on terminal state",
+        "description": "Stream task events via SSE.\n\nSupports:\n- Last-Event-ID header for reconnection\n- Real-time updates via polling (Redis Pub/Sub in production)\n- Heartbeat every 15 seconds\n- Auto-close on terminal state\n\nNote: The initial DB session (from get_db) is used only for ownership\nverification. The event generator creates short-lived sessions for each\nquery to avoid holding a connection from the pool for the entire stream.",
         "operationId": "stream_task_events_api_tasks__task_id__stream_get",
         "parameters": [
           {
@@ -1167,7 +1918,120 @@
         }
       }
     },
+    "/api/learning-paths/": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "List Paths",
+        "description": "List all learning paths for the current user.",
+        "operationId": "list_paths_api_learning_paths__get",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Paths Api Learning Paths  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/learning-paths/{path_id}": {
+      "delete": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Delete Path",
+        "description": "Delete (archive) a learning path.",
+        "operationId": "delete_path_api_learning_paths__path_id__delete",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Path Api Learning Paths  Path Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "paths"
@@ -1207,7 +2071,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Path Api Learning Paths  Path Id  Get"
+                }
               }
             }
           },
@@ -1264,7 +2132,221 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Versions Api Learning Paths  Path Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Get Version",
+        "description": "Get a specific version's full details.",
+        "operationId": "get_version_api_learning_paths__path_id__versions__version_id__get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Version Api Learning Paths  Path Id  Versions  Version Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/versions/{version_id}/diff": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Get Version Diff",
+        "description": "Compute diff between active version and the specified version.",
+        "operationId": "get_version_diff_api_learning_paths__path_id__versions__version_id__diff_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Version Diff Api Learning Paths  Path Id  Versions  Version Id  Diff Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/versions/{version_id}/activate": {
+      "post": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Activate Version",
+        "description": "Activate a specific version of a learning path.\n\nThe version must be in_review status.\nOld active version is superseded atomically.\nLearning progress is migrated by logical_key.",
+        "operationId": "activate_version_api_learning_paths__path_id__versions__version_id__activate_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Activate Version Api Learning Paths  Path Id  Versions  Version Id  Activate Post"
+                }
               }
             }
           },
@@ -1287,7 +2369,7 @@
           "paths"
         ],
         "summary": "Activate Path",
-        "description": "Activate the latest draft version of a path.",
+        "description": "Activate the newest draft/review version of a learning path.",
         "operationId": "activate_path_api_learning_paths__path_id__activate_post",
         "parameters": [
           {
@@ -1321,7 +2403,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Activate Path Api Learning Paths  Path Id  Activate Post"
+                }
               }
             }
           },
@@ -1344,7 +2430,7 @@
           "paths"
         ],
         "summary": "Create Revision Request",
-        "description": "Create a revision request for a path.",
+        "description": "Create a revision request for a path.\n\nAtomically creates the revision request and a background task.\nReturns a real active_task_id so the frontend can poll progress.",
         "operationId": "create_revision_request_api_learning_paths__path_id__revision_requests_post",
         "parameters": [
           {
@@ -1388,7 +2474,282 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Revision Request Api Learning Paths  Path Id  Revision Requests Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/recommendations": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Get Recommendations",
+        "description": "Get dynamic learning recommendations for a path.\n\nGenerates recommendations based on:\n  - Review: nodes with mastery < 60% or failed assessments\n  - Review Weak Point: error_pattern from profile triggers targeted review\n  - Practice: available nodes not yet completed\n  - Continue: earliest available node\n  - Ask Tutor: low concept_grasp suggests asking the tutor\n  - Resource: knowledge base search hits matching node titles\n  - Revise Path: consecutive assessment failures suggest path revision\n\nEach recommendation includes evidence, priority, confidence, and action.",
+        "operationId": "get_recommendations_api_learning_paths__path_id__recommendations_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Recommendations Api Learning Paths  Path Id  Recommendations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/adaptation-proposals": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Get Adaptation Proposals",
+        "operationId": "get_adaptation_proposals_api_learning_paths__path_id__adaptation_proposals_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Adaptation Proposals Api Learning Paths  Path Id  Adaptation Proposals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/adaptation-proposals/{proposal_id}/decision": {
+      "post": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Decide Adaptation",
+        "operationId": "decide_adaptation_api_learning_paths__path_id__adaptation_proposals__proposal_id__decision_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptationDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Decide Adaptation Api Learning Paths  Path Id  Adaptation Proposals  Proposal Id  Decision Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/recommendations/feedback": {
+      "post": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Submit Recommendation Feedback",
+        "description": "Submit user feedback on a recommendation (accept / ignore / later).\n\nThe feedback is persisted to track user preferences and improve\nfuture recommendation ordering. The recommendation_key uniquely\nidentifies a recommendation type+node combination for deduplication.",
+        "operationId": "submit_recommendation_feedback_api_learning_paths__path_id__recommendations_feedback_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationFeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Submit Recommendation Feedback Api Learning Paths  Path Id  Recommendations Feedback Post"
+                }
               }
             }
           },
@@ -1454,7 +2815,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Unit Content Api Learning Paths  Path Id  Nodes  Node Id  Content Get"
+                }
               }
             }
           },
@@ -1475,7 +2840,7 @@
           "units"
         ],
         "summary": "Generate Unit Content",
-        "description": "Generate unit content for a learning node.",
+        "description": "Generate unit content for a learning node.\n\nIdempotent: returns existing content if already ready,\nor returns existing task_id if already generating.",
         "operationId": "generate_unit_content_api_learning_paths__path_id__nodes__node_id__content_post",
         "parameters": [
           {
@@ -1518,7 +2883,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Generate Unit Content Api Learning Paths  Path Id  Nodes  Node Id  Content Post"
+                }
               }
             }
           },
@@ -1535,14 +2904,94 @@
         }
       }
     },
-    "/api/learning-paths/{path_id}/nodes/{node_id}/assessments": {
+    "/api/learning-paths/{path_id}/nodes/{node_id}/content/regenerate": {
       "post": {
         "tags": [
           "units"
         ],
-        "summary": "Create Assessment",
-        "description": "Create an assessment for a learning node.",
-        "operationId": "create_assessment_api_learning_paths__path_id__nodes__node_id__assessments_post",
+        "summary": "Regenerate Unit Content",
+        "description": "Regenerate unit content preserving existing active version.\n\nSafe regeneration: old content remains available via active_version\nuntil the worker atomically switches to the new version.",
+        "operationId": "regenerate_unit_content_api_learning_paths__path_id__nodes__node_id__content_regenerate_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateContentRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Regenerate Unit Content Api Learning Paths  Path Id  Nodes  Node Id  Content Regenerate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/content/lecture": {
+      "post": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Generate Lecture",
+        "description": "Generate a detailed lecture for an existing unit content.",
+        "operationId": "generate_lecture_api_learning_paths__path_id__nodes__node_id__content_lecture_post",
         "parameters": [
           {
             "name": "path_id",
@@ -1584,6 +3033,837 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Generate Lecture Api Learning Paths  Path Id  Nodes  Node Id  Content Lecture Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/assessments": {
+      "post": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Create Assessment",
+        "description": "Create an assessment for a learning node.\n\nUses async background generation via learning_assessment_generation worker.\nReturns generating status and active_task_id for SSE progress tracking.\nIdempotent: returns existing if ready, or existing task_id if generating.\n\nPurpose defaults to 'formal' (scored, updates mastery). Use\n`purpose=quiz_bank` for practice question sets.",
+        "operationId": "create_assessment_api_learning_paths__path_id__nodes__node_id__assessments_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "formal",
+              "title": "Purpose"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Assessment Api Learning Paths  Path Id  Nodes  Node Id  Assessments Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/assessments/{assessment_id}": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Assessment",
+        "description": "Get assessment status and questions (if ready).\n\nReturns the current state of an assessment. When status is \"ready\",\nincludes the full question list (without answers). Use this endpoint\nto poll for async generation completion.",
+        "operationId": "get_assessment_api_learning_paths__path_id__nodes__node_id__assessments__assessment_id__get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Assessment Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Assessment Api Learning Paths  Path Id  Nodes  Node Id  Assessments  Assessment Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/practice": {
+      "post": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Create Practice",
+        "description": "Create a repeatable, unscored practice set with answer feedback.",
+        "operationId": "create_practice_api_learning_paths__path_id__nodes__node_id__practice_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Practice Api Learning Paths  Path Id  Nodes  Node Id  Practice Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/mind-map": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Mind Map",
+        "description": "Get a mind map tree generated from unit content (deterministic, no LLM).",
+        "operationId": "get_mind_map_api_learning_paths__path_id__nodes__node_id__mind_map_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Mind Map Api Learning Paths  Path Id  Nodes  Node Id  Mind Map Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/interactive-cards": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Interactive Cards",
+        "description": "Get interactive learning cards generated from unit content (deterministic, no LLM).\n\nReturns flip cards with front (question) and back (answer),\ncovering concepts, key terms, and practice tasks.",
+        "operationId": "get_interactive_cards_api_learning_paths__path_id__nodes__node_id__interactive_cards_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Interactive Cards Api Learning Paths  Path Id  Nodes  Node Id  Interactive Cards Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/quiz-bank": {
+      "post": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Generate Quiz Bank",
+        "description": "Generate a quiz bank for a learning node (async background task).\n\nUses transactional outbox for reliability. Idempotent:\nreturns existing if already ready, or existing task if generating.",
+        "operationId": "generate_quiz_bank_api_learning_paths__path_id__nodes__node_id__quiz_bank_post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Generate Quiz Bank Api Learning Paths  Path Id  Nodes  Node Id  Quiz Bank Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Quiz Bank",
+        "description": "Get existing quiz bank for a node, if ready.",
+        "operationId": "get_quiz_bank_api_learning_paths__path_id__nodes__node_id__quiz_bank_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Quiz Bank Api Learning Paths  Path Id  Nodes  Node Id  Quiz Bank Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/attempts/{attempt_id}": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Attempt Result",
+        "description": "Get the result of a completed assessment attempt.\n\nValidates that the attempt belongs to an assessment for the given\npath_id and node_id, preventing cross-path access.",
+        "operationId": "get_attempt_result_api_learning_paths__path_id__nodes__node_id__attempts__attempt_id__get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Attempt Result Api Learning Paths  Path Id  Nodes  Node Id  Attempts  Attempt Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/resources/{resource_type}": {
+      "post": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Generate Resource",
+        "description": "Generate a multimodal learning resource.\n\nSupported resource types:\n- pptx: PowerPoint presentation\n- code_zip: Code project ZIP archive\n- interactive_cards: Flip card learning resources\n- walkthrough: Step-by-step case study\n- narrated_video: Narrated MP4 lesson with synchronized captions\n\nReturns generating status with active_task_id for SSE progress tracking.\nIdempotent: returns existing resource if ready, or existing task_id if generating.",
+        "operationId": "generate_resource_api_learning_paths__path_id__nodes__node_id__resources__resource_type__post",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Generate Resource Api Learning Paths  Path Id  Nodes  Node Id  Resources  Resource Type  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Get Resource",
+        "description": "Get a multimodal learning resource.\n\nFor binary resources (PPTX, ZIP), returns metadata including storage key.\nFor JSON resources (interactive cards and walkthrough), returns full content.",
+        "operationId": "get_resource_api_learning_paths__path_id__nodes__node_id__resources__resource_type__get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Resource Api Learning Paths  Path Id  Nodes  Node Id  Resources  Resource Type  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning-paths/{path_id}/nodes/{node_id}/resources/{resource_type}/download": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Download Resource",
+        "description": "Download a binary learning resource, including seekable MP4 ranges.\n\nValidates user access and resource readiness before streaming the\nbinary artifact from object storage.  The storage key is never exposed\nto the client — only a safe filename is returned in the\nContent-Disposition header.\n\nSupported resource types: ``pptx``, ``code_zip``, ``narrated_video``.",
+        "operationId": "download_resource_api_learning_paths__path_id__nodes__node_id__resources__resource_type__download_get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
                 "schema": {}
               }
             }
@@ -1601,14 +3881,611 @@
         }
       }
     },
-    "/api/learning-paths/assessments/{assessment_id}/submit": {
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat",
+        "description": "Ask a question about a learning node (tutor agent).",
+        "operationId": "chat_api_chat_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Chat Api Chat Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/conversations": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Create Conversation",
+        "description": "Create a new profile conversation session.",
+        "operationId": "create_conversation_api_profile_conversations_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConversationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/conversations/{session_id}": {
+      "get": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Get Conversation",
+        "description": "Get conversation session state and messages.",
+        "operationId": "get_conversation_api_profile_conversations__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Conversation Api Profile Conversations  Session Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/conversations/{session_id}/messages": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Send Message",
+        "description": "Send a message in a profile conversation and get the assistant response.",
+        "operationId": "send_message_api_profile_conversations__session_id__messages_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/conversations/{session_id}/finalize": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Finalize Conversation",
+        "description": "Finalize a profile conversation and create/update the student profile.",
+        "operationId": "finalize_conversation_api_profile_conversations__session_id__finalize_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/me": {
+      "get": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Get My Profile",
+        "description": "Get the current user's profile.",
+        "operationId": "get_my_profile_api_profile_me_get",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/me/evidence": {
+      "get": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Get My Evidence",
+        "description": "Get all evidence records for the current user's profile.",
+        "operationId": "get_my_evidence_api_profile_me_evidence_get",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceResponse"
+                  },
+                  "title": "Response Get My Evidence Api Profile Me Evidence Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/me/dimensions": {
+      "patch": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Manual Correction",
+        "description": "Manually correct a profile dimension.\n\nWrites a manual_correction evidence record and updates the profile.",
+        "operationId": "manual_correction_api_profile_me_dimensions_patch",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualCorrectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning/events": {
+      "post": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Create Learning Event",
+        "operationId": "create_learning_event_api_learning_events_post",
+        "parameters": [
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearningEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Learning Event Api Learning Events Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning/effectiveness/{path_id}": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Get Effectiveness Report",
+        "description": "Return an explainable, path-scoped learning effectiveness report.",
+        "operationId": "get_effectiveness_report_api_learning_effectiveness__path_id__get",
+        "parameters": [
+          {
+            "name": "path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Effectiveness Report Api Learning Effectiveness  Path Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/assessments/{assessment_id}/submit": {
       "post": {
         "tags": [
           "units"
         ],
         "summary": "Submit Assessment",
         "description": "Submit an assessment attempt.",
-        "operationId": "submit_assessment_api_learning_paths_assessments__assessment_id__submit_post",
+        "operationId": "submit_assessment_api_assessments__assessment_id__submit_post",
         "parameters": [
           {
             "name": "assessment_id",
@@ -1651,7 +4528,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Submit Assessment Api Assessments  Assessment Id  Submit Post"
+                }
               }
             }
           },
@@ -1728,7 +4609,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CursorPage"
+                  "$ref": "#/components/schemas/CursorPage_dict_str__Any__"
                 }
               }
             }
@@ -1750,7 +4631,7 @@
           "knowledge"
         ],
         "summary": "Upload Document",
-        "description": "Upload a document to the knowledge base.",
+        "description": "Upload a document to the knowledge base.\n\nStreams the file to object storage while computing SHA-256 checksum.\nCreates a DB record only after successful upload.\nTriggers a background indexing task.",
         "operationId": "upload_document_api_knowledge_documents_post",
         "parameters": [
           {
@@ -1785,7 +4666,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Upload Document Api Knowledge Documents Post"
+                }
               }
             }
           },
@@ -1842,7 +4727,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Document Api Knowledge Documents  Document Id  Get"
+                }
               }
             }
           },
@@ -1897,7 +4786,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Document Api Knowledge Documents  Document Id  Delete"
+                }
               }
             }
           },
@@ -1920,7 +4815,7 @@
           "knowledge"
         ],
         "summary": "Reindex Document",
-        "description": "Reindex a document.",
+        "description": "Reindex a document.\n\nCreates a background task for reindexing and updates document status.\nThe reindex uses version-based logic: new chunks are created with a\nnew version number, and old chunks are deleted only after success.",
         "operationId": "reindex_document_api_knowledge_documents__document_id__reindex_post",
         "parameters": [
           {
@@ -1954,7 +4849,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reindex Document Api Knowledge Documents  Document Id  Reindex Post"
+                }
               }
             }
           },
@@ -1977,7 +4876,7 @@
           "knowledge"
         ],
         "summary": "Search Knowledge",
-        "description": "Search the knowledge base.",
+        "description": "Search the knowledge base using PostgreSQL full-text search.",
         "operationId": "search_knowledge_api_knowledge_search_get",
         "parameters": [
           {
@@ -2024,7 +4923,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Knowledge Api Knowledge Search Get"
+                }
               }
             }
           },
@@ -2044,6 +4947,58 @@
   },
   "components": {
     "schemas": {
+      "AdaptationDecisionRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "dismiss"
+            ],
+            "title": "Action"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "AdaptationDecisionRequest"
+      },
+      "AnswerSubmitItem": {
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "title": "Question Id"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question_id"
+        ],
+        "title": "AnswerSubmitItem"
+      },
       "Body_upload_document_api_knowledge_documents_post": {
         "properties": {
           "file": {
@@ -2057,6 +5012,141 @@
           "file"
         ],
         "title": "Body_upload_document_api_knowledge_documents_post"
+      },
+      "ChatRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "path_id": {
+            "type": "string",
+            "title": "Path Id"
+          },
+          "response_modes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Modes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question",
+          "node_id",
+          "path_id"
+        ],
+        "title": "ChatRequest"
+      },
+      "ClarificationAnswerRequest": {
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "ClarificationAnswerRequest"
+      },
+      "CreateConversationRequest": {
+        "properties": {
+          "learning_goal": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Learning Goal"
+          },
+          "target_context": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Context"
+          },
+          "learning_goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Goal Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "learning_goal"
+        ],
+        "title": "CreateConversationRequest"
+      },
+      "CreateConversationResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "assistant_message": {
+            "type": "string",
+            "title": "Assistant Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status",
+          "assistant_message"
+        ],
+        "title": "CreateConversationResponse"
       },
       "CreateGoalRequest": {
         "properties": {
@@ -2144,10 +5234,12 @@
         ],
         "title": "CreateGoalRequest"
       },
-      "CursorPage": {
+      "CursorPage_GoalResponse_": {
         "properties": {
           "items": {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/GoalResponse"
+            },
             "type": "array",
             "title": "Items"
           },
@@ -2179,8 +5271,174 @@
         "required": [
           "items"
         ],
-        "title": "CursorPage",
-        "description": "Generic cursor-based pagination response."
+        "title": "CursorPage[GoalResponse]"
+      },
+      "CursorPage_dict_str__Any__": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CursorPage[dict[str, Any]]"
+      },
+      "DiagnosticSubmitRequest": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/AnswerSubmitItem"
+            },
+            "type": "array",
+            "title": "Answers"
+          },
+          "skip": {
+            "type": "boolean",
+            "title": "Skip",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "answers"
+        ],
+        "title": "DiagnosticSubmitRequest"
+      },
+      "EvidenceResponse": {
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "title": "Evidence Id"
+          },
+          "dimension": {
+            "type": "string",
+            "title": "Dimension"
+          },
+          "evidence_type": {
+            "type": "string",
+            "title": "Evidence Type"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "evidence_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Metadata"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "dimension",
+          "evidence_type",
+          "value",
+          "confidence",
+          "evidence_metadata",
+          "created_at"
+        ],
+        "title": "EvidenceResponse"
+      },
+      "FinalizeResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "profile_version": {
+            "type": "integer",
+            "title": "Profile Version"
+          },
+          "dimensions": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "profile_version",
+          "dimensions",
+          "summary",
+          "confidence"
+        ],
+        "title": "FinalizeResponse"
+      },
+      "ForgotPasswordRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "ForgotPasswordRequest"
       },
       "GoalResponse": {
         "properties": {
@@ -2288,6 +5546,17 @@
             ],
             "title": "Active Task Id"
           },
+          "current_path_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Path Id"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -2312,6 +5581,7 @@
           "status",
           "next_step",
           "active_task_id",
+          "current_path_id",
           "created_at",
           "updated_at"
         ],
@@ -2336,10 +5606,20 @@
             "type": "string",
             "title": "Status"
           },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "default": "eduagentx-api"
+          },
           "version": {
             "type": "string",
             "title": "Version",
-            "default": "3.0.0"
+            "default": "4.1.0"
+          },
+          "api_version": {
+            "type": "string",
+            "title": "Api Version",
+            "default": "4.1"
           },
           "environment": {
             "type": "string",
@@ -2354,6 +5634,105 @@
         "title": "HealthResponse",
         "description": "Health check response."
       },
+      "LearningEventRequest": {
+        "properties": {
+          "path_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Path Id"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36,
+                "minLength": 36
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "node_opened",
+              "resource_opened",
+              "resource_completed",
+              "resource_downloaded",
+              "practice_started",
+              "practice_completed",
+              "tutor_question",
+              "tutor_feedback"
+            ],
+            "title": "Event Type"
+          },
+          "resource_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Type"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 86400.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "client_event_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Event Id"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path_id",
+          "event_type"
+        ],
+        "title": "LearningEventRequest"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -2364,14 +5743,88 @@
           "password": {
             "type": "string",
             "title": "Password"
+          },
+          "remember_me": {
+            "type": "boolean",
+            "title": "Remember Me",
+            "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "email",
           "password"
         ],
-        "title": "LoginRequest"
+        "title": "LoginRequest",
+        "description": "Login request with optional remember_me."
+      },
+      "ManualCorrectionRequest": {
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "knowledge_depth",
+              "prerequisite_mastery",
+              "concept_grasp",
+              "problem_solving",
+              "practice_ability",
+              "learning_pace",
+              "resource_preference",
+              "error_pattern"
+            ],
+            "title": "Dimension"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Value"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "default": 1.0
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dimension",
+          "value"
+        ],
+        "title": "ManualCorrectionRequest"
       },
       "OnboardingRequest": {
         "properties": {
@@ -2422,6 +5875,118 @@
         ],
         "title": "OnboardingRequest"
       },
+      "ProfileSummaryResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "profile_version": {
+            "type": "integer",
+            "title": "Profile Version"
+          },
+          "dimensions": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "user_id",
+          "status",
+          "profile_version",
+          "dimensions",
+          "summary",
+          "confidence"
+        ],
+        "title": "ProfileSummaryResponse"
+      },
+      "RecommendationFeedbackRequest": {
+        "properties": {
+          "recommendation_key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Recommendation Key"
+          },
+          "recommendation_type": {
+            "type": "string",
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Recommendation Type"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "ignore",
+              "later"
+            ],
+            "title": "Action"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recommendation_key",
+          "recommendation_type",
+          "action"
+        ],
+        "title": "RecommendationFeedbackRequest"
+      },
+      "RegenerateContentRequest": {
+        "properties": {
+          "preferences": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferences"
+          }
+        },
+        "type": "object",
+        "title": "RegenerateContentRequest"
+      },
       "RegisterRequest": {
         "properties": {
           "email": {
@@ -2435,16 +6000,29 @@
           },
           "display_name": {
             "type": "string",
-            "title": "Display Name"
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[\\w\\s一-鿿㐀-䶿\\-'.]+$",
+            "title": "Display Name",
+            "description": "Display name: letters, digits, spaces, CJK, hyphens, apostrophes"
+          },
+          "accept_terms": {
+            "type": "boolean",
+            "const": true,
+            "title": "Accept Terms",
+            "description": "User must accept terms of service"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "email",
           "password",
-          "display_name"
+          "display_name",
+          "accept_terms"
         ],
-        "title": "RegisterRequest"
+        "title": "RegisterRequest",
+        "description": "Registration request with terms acceptance."
       },
       "RegisterResponse": {
         "properties": {
@@ -2463,19 +6041,26 @@
         ],
         "title": "RegisterResponse"
       },
-      "ResendVerificationRequest": {
+      "ResetPasswordRequest": {
         "properties": {
-          "email": {
+          "token": {
             "type": "string",
-            "format": "email",
-            "title": "Email"
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "email"
+          "token",
+          "password"
         ],
-        "title": "ResendVerificationRequest"
+        "title": "ResetPasswordRequest"
       },
       "RevisionRequest": {
         "properties": {
@@ -2490,6 +6075,54 @@
         ],
         "title": "RevisionRequest"
       },
+      "SendMessageRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "SendMessageRequest"
+      },
+      "SendMessageResponse": {
+        "properties": {
+          "assistant_message": {
+            "type": "string",
+            "title": "Assistant Message"
+          },
+          "extracted_dimensions": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Extracted Dimensions"
+          },
+          "missing_dimensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Dimensions"
+          },
+          "ready_to_finalize": {
+            "type": "boolean",
+            "title": "Ready To Finalize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assistant_message",
+          "extracted_dimensions",
+          "missing_dimensions",
+          "ready_to_finalize"
+        ],
+        "title": "SendMessageResponse"
+      },
       "SubmitAssessmentRequest": {
         "properties": {
           "answers": {
@@ -2503,13 +6136,28 @@
                     "type": "string"
                   },
                   "type": "array"
+                },
+                {
+                  "type": "boolean"
                 }
               ]
             },
             "type": "object",
             "title": "Answers"
+          },
+          "client_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Request Id"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "answers"
@@ -2701,11 +6349,51 @@
             "title": "Token"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "token"
         ],
         "title": "VerifyEmailRequest"
+      },
+      "app__routers__auth__ChangePasswordRequest": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest"
+      },
+      "app__routers__users__ChangePasswordRequest": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest"
       }
     }
   }

@@ -98,6 +98,83 @@ describe("Path Generation and Review Workflow Tests", () => {
     });
   });
 
+  it("follows diagnostic grading into the path-generation task", async () => {
+    server.use(
+      http.get("/api/learning-goals/goal-diagnostic", () => {
+        return HttpResponse.json({
+          goal_id: "goal-diagnostic",
+          raw_goal: "Learn Python basics",
+          normalized_goal: "Learn Python basics",
+          current_level: "beginner",
+          target_level: "intermediate",
+          duration_weeks: 4,
+          weekly_hours: 5,
+          preferences: [],
+          use_diagnostic: true,
+          use_knowledge_base: false,
+          status: "planning",
+          next_step: "generating",
+          active_task_id: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      })
+    );
+
+    FakeTaskStreamTransport.setMockEvents("task-grading", [
+      {
+        event_id: "evt-grading-completed",
+        task_id: "task-grading",
+        type: "completed",
+        status: "completed",
+        progress: 100,
+        message: "Diagnostic graded",
+        stage: "grading_completed",
+        result: { path_task_id: "task-path" },
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    FakeTaskStreamTransport.setMockEvents("task-path", [
+      {
+        event_id: "evt-path-progress",
+        task_id: "task-path",
+        type: "progress",
+        status: "running",
+        progress: 60,
+        message: "Building learning path",
+        stage: "path_generation",
+        result: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        event_id: "evt-path-completed",
+        task_id: "task-path",
+        type: "completed",
+        status: "completed",
+        progress: 100,
+        message: "Learning path ready",
+        stage: "completed",
+        result: { path_id: "path-from-diagnostic" },
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/goals/:goalId/generating" element={<PathGeneratingPage />} />
+      </Routes>,
+      { route: "/goals/goal-diagnostic/generating?task=task-grading" }
+    );
+
+    expect(await screen.findByText("Building learning path")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/learning-paths/path-from-diagnostic/review",
+        { replace: true },
+      );
+    });
+  });
+
   it("should show failed state on PathGeneratingPage if task fails", async () => {
     server.use(
       http.get("/api/learning-goals/goal-123", () => {

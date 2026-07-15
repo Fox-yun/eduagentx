@@ -65,12 +65,10 @@ class AuthService:
         if existing.scalar_one_or_none():
             raise ApiError(code="EMAIL_EXISTS", message="An account with this email already exists", status_code=409)
 
-        # Email auto verify setting
-        email_auto_verify_val = getattr(settings, "email_auto_verify", False)
-        if isinstance(email_auto_verify_val, bool):
-            auto_verify = email_auto_verify_val
-        else:
-            auto_verify = settings.app_env in ("development", "test")
+        # Auto-verification is a development-only convenience. Never allow a
+        # stale or accidental EMAIL_AUTO_VERIFY setting to bypass verification
+        # in test, staging, or production environments.
+        auto_verify = settings.app_env == "development" and bool(settings.email_auto_verify)
         user = User(
             id=str(uuid.uuid4()),
             email=email.strip(),

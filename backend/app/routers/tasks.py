@@ -36,6 +36,7 @@ def _task_to_dict(task: Any) -> dict[str, Any]:
         "progress": task.progress,
         "current_stage": task.current_stage,
         "message": task.message,
+        "agent_trace": task.agent_trace or [],
         "result": task.result,
         "error": task.error_message,
         "request_id": task.request_id,

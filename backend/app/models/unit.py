@@ -244,7 +244,7 @@ class LearningResource(Base):
     node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     resource_type: Mapped[str] = mapped_column(
         String(30), nullable=False, index=True
-    )  # pptx, code_zip, interactive_cards, walkthrough, simulation
+    )  # pptx, code_zip, interactive_cards, walkthrough, narrated_video
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_generated")  # not_generated, generating, ready, failed
     active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     content: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Resource-specific data (e.g., slide count)

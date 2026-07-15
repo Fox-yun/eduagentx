@@ -24,6 +24,7 @@ class TaskType(enum.StrEnum):
 
     LEARNING_GOAL_ANALYSIS = "learning_goal_analysis"
     LEARNING_DIAGNOSTIC_GENERATION = "learning_diagnostic_generation"
+    DIAGNOSTIC_GRADING = "diagnostic_grading"
     LEARNING_PATH_GENERATION = "learning_path_generation"
     LEARNING_PATH_REVISION = "learning_path_revision"
     LEARNING_UNIT_GENERATION = "learning_unit_generation"

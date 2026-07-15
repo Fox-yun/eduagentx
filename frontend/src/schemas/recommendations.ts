@@ -47,6 +47,8 @@ export const RecommendationDtoSchema = z.object({
   priority: z.number().int().optional().default(1),
   confidence: z.number().min(0).max(1).optional().default(0.5),
   action: RecommendationActionSchema.optional().default("open_node"),
+  feedback_key: z.string().optional(),
+  feedback_state: z.enum(["accepted", "later"]).optional(),
 });
 
 /** Response schema for GET /api/learning-paths/{path_id}/recommendations */
@@ -98,6 +100,7 @@ export interface RecommendationModel {
   action: RecommendationAction;
   /** Stable key for feedback deduplication */
   feedbackKey: string;
+  feedbackState?: "accepted" | "later";
 }
 
 /** Mapper: DTO → frontend model */
@@ -122,6 +125,7 @@ export function mapRecommendation(dto: RecommendationDto): RecommendationModel {
     priority: dto.priority ?? 1,
     confidence: dto.confidence ?? 0.5,
     action: dto.action ?? "open_node",
-    feedbackKey: `${dto.type}:${dto.node_ids[0] ?? "none"}`,
+    feedbackKey: dto.feedback_key ?? `${dto.type}:${dto.node_ids[0] ?? "none"}`,
+    feedbackState: dto.feedback_state,
   };
 }

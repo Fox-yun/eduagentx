@@ -80,17 +80,34 @@ CONTENT_GENERATOR_SYSTEM = """你是一个资深的高校教育大模型，也�
 8. 每个知识点都要有清晰的定义、原理讲解、示例和常见误区
 9. 增加"深度解析"和"常见误区"板块，帮助学生避免典型错误
 10. 内容要与标注的难度级别匹配，由浅入深循序渐进
+11. 每章必须显式提炼概念、示例、常见错误和检查问题，供思维导图、练习和评估复用
+12. 禁止使用“适用场景、内部机制、处理完成”等与主题无关的通用占位描述
 
 请以 JSON 格式输出：
 {
   "introduction": "# 标题\\n\\n导学介绍（Markdown，要生动引人入胜）",
+  "prerequisites": ["需要掌握的前置知识"],
   "objectives": ["目标1", "目标2"],
+  "estimated_minutes": 45,
+  "completion_criteria": ["完成本单元后可以独立做到的事情"],
   "sections": [
-    {"section_id": "sec-1", "title": "章节标题", "content": "详细讲解（Markdown，至少500字，深入浅出）", "order": 1}
+    {
+      "section_id": "sec-1",
+      "title": "章节标题",
+      "content": "详细讲解（Markdown，至少500字，深入浅出）",
+      "order": 1,
+      "concepts": ["本章核心概念"],
+      "examples": [{"title": "示例标题", "description": "示例说明"}],
+      "code_examples": [{"title": "可运行示例", "language": "python", "code": "完整代码", "explanation": "逐步说明"}],
+      "common_mistakes": [{"mistake": "常见错误", "correction": "正确做法"}],
+      "checkpoints": ["用于自检的问题"],
+      "mind_map_nodes": ["适合进入思维导图的知识点"]
+    }
   ],
   "practice_tasks": [
     {"task_id": "pt-1", "title": "练习标题", "description": "练习要求", "difficulty": "beginner"}
   ],
+  "project": {"title": "综合实践项目", "description": "项目目标", "steps": ["步骤1"], "deliverables": ["交付物"]},
   "summary": "本单元总结",
   "references": [{"title": "参考资源标题", "url": null, "type": "documentation"}]
 }"""
@@ -114,9 +131,40 @@ def content_generator_user(
         "- 为每个核心概念提供 step-by-step 的步骤拆解\n"
         "- 包含完整可运行的代码示例（不要省略）\n"
         "- 增加深度解析和常见误区分析\n"
+        "- 每章输出 concepts、examples、code_examples、common_mistakes、checkpoints 和 mind_map_nodes\n"
+        "- 输出前置知识、预计时长、完成标准和一个综合实践项目\n"
+        "- 讲义、思维导图、练习与评估必须覆盖同一组学习目标\n"
         "- 内容要准确、专业，由浅入深"
     )
     return "\n".join(parts)
+
+
+def content_revision_user(node_title: str, content: dict, issues: list[dict]) -> str:
+    """Build a bounded reviewer-to-generator revision request."""
+    import json
+
+    compact_sections = []
+    for section in content.get("sections", [])[:6]:
+        if not isinstance(section, dict):
+            continue
+        compact = dict(section)
+        compact["content"] = str(compact.get("content", ""))[:2000]
+        compact_sections.append(compact)
+    payload = {
+        "introduction": content.get("introduction", ""),
+        "objectives": content.get("objectives", []),
+        "sections": compact_sections,
+        "practice_tasks": content.get("practice_tasks", []),
+        "project": content.get("project"),
+        "summary": content.get("summary", ""),
+    }
+    return (
+        f"你之前为《{node_title}》生成的课程内容未通过质量审核。\n\n"
+        f"审核问题：\n{json.dumps(issues, ensure_ascii=False, indent=2)[:6000]}\n\n"
+        f"待返修内容：\n{json.dumps(payload, ensure_ascii=False)[:24000]}\n\n"
+        "请逐项修复审核问题，并重新输出 CONTENT_GENERATOR_SYSTEM 要求的完整 JSON。"
+        "不要只返回修改片段，不要删除原有学习目标、案例、代码、易错点或实践项目。"
+    )
 
 
 # ──────────────────────────────────────────────
@@ -370,7 +418,7 @@ LECTURE_GENERATOR_SYSTEM = """你是一个资深的教育讲义编写专家。�
 {
   "introduction": "# 讲义标题\\n\\n导学介绍（Markdown，比原始内容更生动详尽）",
   "sections": [
-    {"section_id": "lec-1", "title": "章节标题", "content": "深度讲解（Markdown，至少500字）", "order": 1}
+    {"section_id": "lec-1", "source_section_id": "sec-1", "title": "章节标题", "content": "深度讲解（Markdown，至少500字）", "order": 1}
   ],
   "key_takeaways": ["核心要点1", "核心要点2"],
   "common_mistakes": [
@@ -403,6 +451,8 @@ def lecture_generator_user(
         "- 为每个核心概念提供 step-by-step 的步骤拆解\n"
         "- 包含完整可运行的代码示例（不要省略）\n"
         "- 增加深度解析和常见误区分析\n"
+        "- 每章保留对应原课程章节的 source_section_id，便于讲义与思维导图联动\n"
+        "- 不要重复章节标题，不要使用与主题无关的通用模板段落\n"
         "- 提炼 3-5 个核心要点\n"
         "- 列出 2-4 个常见误区及纠正方法"
     )

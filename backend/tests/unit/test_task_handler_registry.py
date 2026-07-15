@@ -177,8 +177,7 @@ class TestTypeClassification:
     def test_public_is_superset_of_implemented(self) -> None:
         missing = IMPLEMENTED_TASK_TYPES - PUBLIC_TASK_TYPES
         # e2e_progress_test is internal-only, not public
-        # diagnostic_grading is separate from learning_diagnostic_generation
-        internal_only = {"e2e_progress_test", "diagnostic_grading"}
+        internal_only = {"e2e_progress_test"}
         assert missing == internal_only, f"IMPLEMENTED types not in PUBLIC (except internal): {missing - internal_only}"
 
     def test_reserved_may_be_in_public(self) -> None:

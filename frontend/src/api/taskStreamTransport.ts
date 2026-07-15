@@ -229,8 +229,9 @@ export class MockTaskStreamTransport implements TaskStreamTransport {
 }
 
 const enableMsw = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MSW === "true";
+const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-let activeTransport: TaskStreamTransport = enableMsw
+let activeTransport: TaskStreamTransport = enableMsw || isDesktop
   ? new PollingTaskStreamTransport(new HttpTaskSnapshotProvider())
   : new EventSourceTaskStreamTransport();
 

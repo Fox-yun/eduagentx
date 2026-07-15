@@ -202,15 +202,19 @@ export interface MockClarification {
 export interface MockDiagnostic {
   diagnostic_id: string;
   goal_id: string;
-  status: "pending" | "in_progress" | "submitted" | "failed";
+  attempt_id: string;
+  status: "draft" | "submitted" | "grading" | "completed" | "failed";
   questions: Array<{
     question_id: string;
-    type: "single_choice" | "multiple_choice" | "short_answer" | "code_text";
+    question_type: "single_choice" | "multiple_choice" | "true_false" | "short_answer" | "code_text";
     prompt: string;
     options?: Array<{ value: string; label: string }>;
-    answer: string | string[] | null;
+    dimension?: string;
+    max_score?: number;
+    required?: boolean;
+    answer: string | string[] | boolean | null;
   }>;
-  saved_answers: Record<string, string | string[] | null>;
+  saved_answers: Record<string, string | string[] | boolean | null>;
   result: {
     level: string;
     score: number;
@@ -218,7 +222,7 @@ export interface MockDiagnostic {
     weaknesses: string[];
     recommendation: string | null;
   } | null;
-  next_step: "generating" | "review" | "active" | null;
+  next_step: "diagnostic" | "generating" | "review" | "active" | null;
 }
 
 class ObservableMap<K, V> extends Map<K, V> {

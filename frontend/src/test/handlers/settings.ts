@@ -115,6 +115,7 @@ export const settingsHandlers = [
   http.get("/api/learning-paths/:pathId/versions", () => {
     return HttpResponse.json({
       items: mockPathVersions.map((v) => ({
+        version_id: v.version_id,
         path_id: "mock-path-123",
         version: v.version_number,
         parent_version: v.version_number > 1 ? v.version_number - 1 : null,

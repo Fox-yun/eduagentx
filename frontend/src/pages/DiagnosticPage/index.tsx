@@ -17,7 +17,7 @@ export function DiagnosticPage() {
   const { toast } = useToast();
 
  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string | string[] | null>>({});
+  const [answers, setAnswers] = useState<Record<string, string | string[] | boolean | null>>({});
   const [pageState, setPageState] = useState<DiagnosticState>("answering");
   const navigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,14 +43,20 @@ export function DiagnosticPage() {
   });
 
   const { mutate: submitAnswers } = useMutation({
-    mutationFn: (answersToSubmit: Record<string, string | string[] | null>) => {
+    mutationFn: ({
+      answers: answersToSubmit,
+      skip,
+    }: {
+      answers: Record<string, string | string[] | boolean | null>;
+      skip: boolean;
+    }) => {
       const attemptId = quizData?.attemptId;
       if (!attemptId) throw new Error("Missing attempt ID");
       const answerList = Object.entries(answersToSubmit).map(([question_id, answer]) => ({
         question_id,
         answer,
       }));
-      return submitDiagnostic(goalId || "", attemptId, answerList);
+      return submitDiagnostic(goalId || "", attemptId, answerList, skip);
     },
     onMutate: () => {
       setPageState("submitting");
@@ -68,12 +74,18 @@ export function DiagnosticPage() {
     },
   });
 
-  const handleAnswerChange = (questionId: string, value: string | string[] | null) => {
+  const handleAnswerChange = (questionId: string, value: string | string[] | boolean | null) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
+  const getTextAnswer = (questionId: string) => {
+    const answer = answers[questionId];
+    return typeof answer === "string" ? answer : "";
+  };
+
   const handleCheckboxChange = (questionId: string, option: string, checked: boolean) => {
-    const current = (answers[questionId] as string[]) || [];
+    const existingAnswer = answers[questionId];
+    const current = Array.isArray(existingAnswer) ? existingAnswer : [];
     if (checked) {
       setAnswers((prev) => ({ ...prev, [questionId]: [...current, option] }));
     } else {
@@ -95,14 +107,13 @@ export function DiagnosticPage() {
   };
 
   const handleSubmit = () => {
-    submitAnswers(answers);
+    submitAnswers({ answers, skip: false });
   };
 
   const handleSkip = () => {
     setPageState("skipped");
     toast("已跳过评估诊断", "success");
-    // Send empty answers on skip to advance directly to path generation
-    submitAnswers({});
+    submitAnswers({ answers: {}, skip: true });
   };
 
   // 1. Loading State
@@ -112,7 +123,7 @@ export function DiagnosticPage() {
         <div className="flex-grow flex items-center justify-center bg-page">
           <div className="flex flex-col items-center gap-3">
             <div className="w-10 h-10 rounded-full border-4 border-primary-soft border-t-primary animate-spin" />
-            <p className="text-xs text-muted">正在载入能力诊断测试...</p>
+            <p className="text-xs text-muted">智能体正在为您生成个性化诊断题目，请稍候...</p>
           </div>
         </div>
       </AppShell>
@@ -271,20 +282,48 @@ export function DiagnosticPage() {
                 </div>
               )}
 
-              {/* 3. Short Answer */}
+              {/* 3. True / False */}
+              {currentQuestion.type === "true_false" && (
+                <div className="flex flex-col gap-2.5 pl-2">
+                  {[
+                    { value: true, label: "正确" },
+                    { value: false, label: "错误" },
+                  ].map((option) => (
+                    <label
+                      key={String(option.value)}
+                      className={`flex items-center gap-3 p-3.5 border rounded-xl cursor-pointer text-xs transition-all font-semibold ${
+                        answers[currentQuestion.questionId] === option.value
+                          ? "border-primary bg-primary-soft/30 text-ink ring-1 ring-primary"
+                          : "border-border bg-panel hover:bg-page text-ink"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={currentQuestion.questionId}
+                        checked={answers[currentQuestion.questionId] === option.value}
+                        onChange={() => handleAnswerChange(currentQuestion.questionId, option.value)}
+                        className="w-4 h-4 text-primary focus:ring-primary border-border bg-panel"
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* 4. Short Answer */}
               {currentQuestion.type === "short_answer" && (
                 <div className="pl-2">
                   <input
                     type="text"
                     placeholder="请输入您的简答"
-                    value={answers[currentQuestion.questionId] || ""}
+                    value={getTextAnswer(currentQuestion.questionId)}
                     onChange={(e) => handleAnswerChange(currentQuestion.questionId, e.target.value)}
                     className="w-full px-4 py-3 bg-panel border border-border focus:border-primary rounded-xl text-xs text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
               )}
 
-              {/* 4. Code Text Block */}
+              {/* 5. Code Text Block */}
               {currentQuestion.type === "code_text" && (
                 <div className="flex flex-col gap-1.5 pl-2">
                   <div className="flex items-center gap-1.5 text-[10px] text-muted font-bold font-mono">
@@ -294,7 +333,7 @@ export function DiagnosticPage() {
                   <textarea
                     rows={8}
                     placeholder="// 在此输入代码回答（只作文本保存，不执行）..."
-                    value={answers[currentQuestion.questionId] || ""}
+                    value={getTextAnswer(currentQuestion.questionId)}
                     onChange={(e) => handleAnswerChange(currentQuestion.questionId, e.target.value)}
                     className="w-full px-4 py-3 bg-page border border-border focus:border-primary rounded-xl text-xs font-mono text-ink transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y"
                   />

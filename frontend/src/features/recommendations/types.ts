@@ -22,6 +22,7 @@ export interface RecommendationModel {
   confidence: number;
   action: RecommendationAction;
   feedbackKey: string;
+  feedbackState?: "accepted" | "later";
 }
 
 // Re-export for backward compatibility

@@ -34,12 +34,12 @@ export async function submitRecommendationFeedback(
     {
       method: "POST",
       schema: RecommendationFeedbackResponseSchema,
-      body: JSON.stringify({
+      body: {
         recommendation_key: body.recommendationKey,
         recommendation_type: body.recommendationType,
         node_id: body.nodeId ?? null,
         action: body.action,
-      }),
+      },
     }
   );
   return { status: dto.status, action: dto.action };

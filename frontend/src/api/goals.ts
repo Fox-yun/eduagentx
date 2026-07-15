@@ -86,6 +86,7 @@ export async function getDiagnostic(goalId: string, signal?: AbortSignal): Promi
     method: "GET",
     schema: DiagnosticQuizDtoSchema,
     signal,
+    timeoutMs: 120000, // 120s — first access may trigger LLM question generation
   });
   return mapDiagnosticDto(dto);
 }
@@ -93,11 +94,12 @@ export async function getDiagnostic(goalId: string, signal?: AbortSignal): Promi
 export async function submitDiagnostic(
   goalId: string,
   attemptId: string,
-  answers: Array<{ question_id: string; answer: any }>
+  answers: Array<{ question_id: string; answer: string | string[] | boolean | null }>,
+  skip = false
 ): Promise<{ attemptId: string; status: string; taskId: string }> {
   const res = await apiRequest(`/learning-goals/${goalId}/diagnostic/submit`, {
     method: "POST",
-    body: { attempt_id: attemptId, answers },
+    body: { attempt_id: attemptId, answers, skip },
     schema: DiagnosticSubmitResponseSchema,
   });
 

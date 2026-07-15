@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,9 @@ class DiagnosticQuestion(Base):
     """A question within a diagnostic assessment."""
 
     __tablename__ = "diagnostic_questions"
+    __table_args__ = (
+        UniqueConstraint("diagnostic_id", "sequence", name="uq_diagnostic_question_sequence"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     diagnostic_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
@@ -46,7 +49,17 @@ class DiagnosticAttempt(Base):
     """A user's attempt at a diagnostic assessment."""
 
     __tablename__ = "diagnostic_attempts"
-    __table_args__ = (Index("ix_diagnostic_attempts_user_goal", "user_id", "goal_id"),)
+    __table_args__ = (
+        Index("ix_diagnostic_attempts_user_goal", "user_id", "goal_id"),
+        Index(
+            "uq_diagnostic_attempt_active_user_goal",
+            "user_id",
+            "goal_id",
+            unique=True,
+            postgresql_where=text("status IN ('draft', 'submitted', 'grading')"),
+            sqlite_where=text("status IN ('draft', 'submitted', 'grading')"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     diagnostic_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)

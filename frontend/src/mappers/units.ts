@@ -13,7 +13,9 @@ import {
 export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
   // If status is not ready or failed, some fields might be null/missing in raw responses
   const introduction = dto.introduction || null;
+  const prerequisites = dto.prerequisites || [];
   const objectives = dto.objectives || [];
+  const completionCriteria = dto.completion_criteria || [];
   const sections = dto.sections || [];
   const practiceTasks = dto.practice_tasks || [];
   const summary = dto.summary || null;
@@ -68,7 +70,10 @@ export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
     activeVersionId: dto.active_version_id || null,
     pendingVersionId: dto.pending_version_id || null,
     introduction,
+    prerequisites,
     objectives,
+    estimatedMinutes: dto.estimated_minutes ?? null,
+    completionCriteria,
     sections: sections.map((s: any) => ({
       sectionId: s.section_id,
       title: s.title,
@@ -81,12 +86,14 @@ export function mapUnitContent(dto: UnitContentDto): UnitContentModel {
       description: t.description,
       difficulty: t.difficulty,
     })),
+    project: dto.project ?? null,
     summary,
     references: references.map((r: any) => ({
       title: r.title,
       url: r.url || null,
       type: r.type,
     })),
+    generationMetadata: dto.generation_metadata || null,
     content: content.trim() || null,
     error: dto.error || null,
     lecture: mapLecture((dto as any).lecture),
@@ -129,6 +136,7 @@ function mapLecture(lectureData: any): LectureModel | null {
     introduction: lectureData.introduction || null,
     sections: (lectureData.sections || []).map((s: any) => ({
       sectionId: s.section_id,
+      sourceSectionId: s.source_section_id || null,
       title: s.title,
       content: s.content,
       order: s.order,

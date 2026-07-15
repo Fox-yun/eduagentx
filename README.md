@@ -1,6 +1,6 @@
 # EduAgentX — 多智能体个性化教辅系统
 
-![Version](https://img.shields.io/badge/Version-4.1-blue.svg) ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg) ![React](https://img.shields.io/badge/Frontend-React-61DAFB.svg) ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1.svg) ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D.svg) ![MinIO](https://img.shields.io/badge/Storage-MinIO-C72E49.svg) ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED.svg)
+![Version](https://img.shields.io/badge/Version-4.1.0-blue.svg) ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg) ![React](https://img.shields.io/badge/Frontend-React-61DAFB.svg) ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1.svg) ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D.svg) ![MinIO](https://img.shields.io/badge/Storage-MinIO-C72E49.svg) ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED.svg)
 
 > 2026 年"中国软件杯"大学生软件设计大赛参赛项目
 
@@ -27,7 +27,7 @@
 
 EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性化教辅系统**。系统基于大语言模型、RAG（检索增强生成）和多智能体协作技术，为学生提供从学习画像构建、知识诊断、路径规划、内容生成到通关评估的全链路个性化学习体验。
 
-系统包含 **9 个专业智能体**协同工作，通过 **八维学习画像** 驱动全链路个性化：诊断 → 路径规划 → 内容生成 → 题库生成 → 推荐。后端提供 **47+ RESTful API 端点**，前端包含 **22 个页面**，覆盖完整的学习生命周期。
+系统包含 **9 类专业智能体角色**，通过 BackgroundTask 状态机、Transactional Outbox 和共享领域产物协同工作；每次执行会记录可视化 `agent_trace`。八维学习画像驱动诊断 → 路径规划 → 内容生成 → 审核返修 → 题库生成 → 推荐的全链路个性化。
 
 ---
 
@@ -59,7 +59,7 @@ EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性�
                            │ HTTP / SSE
 ┌──────────────────────────▼──────────────────────────────────────┐
 │                      FastAPI 后端                                 │
-│  13 API 路由器 · 47+ 端点 · Cookie JWT · CSRF Double-Submit     │
+│ 13 API 路由器 · 48+ 端点 · Cookie JWT · CSRF Double-Submit     │
 ├──────────┬──────────┬──────────────┬────────────────────────────┤
 │PostgreSQL│ Redis 7  │  MinIO       │ Celery Worker / Beat       │
 │16(asyncpg│ 缓存+会话 │  对象存储     │ 异步任务 · Transactional   │
@@ -78,7 +78,7 @@ EduAgentX 是一个面向高校专业课程学习场景的**多智能体个性�
 | 数据库 | PostgreSQL 16 (asyncpg) |
 | 缓存 | Redis 7 |
 | 对象存储 | MinIO |
-| 迁移 | Alembic (27 版本) |
+| 迁移 | Alembic (31 版本) |
 | 认证 | Argon2id + JWT (Cookie-based, CSRF Double-Submit) |
 | 任务队列 | Celery + Redis Broker (生产) / Inline Runner (开发) |
 | 日志 | structlog |
@@ -110,14 +110,14 @@ cnsoftcup/
 │   │   ├── main.py                # FastAPI 应用工厂
 │   │   ├── config.py              # Pydantic Settings 配置
 │   │   ├── lifespan.py            # 启动/关闭生命周期
-│   │   ├── routers/               # 13 个 API 路由器
-│   │   ├── models/                # 30 个 SQLAlchemy ORM 模型
-│   │   ├── services/              # 16 个业务逻辑服务
+│   │   ├── routers/               # 14 个 API 路由器
+│   │   ├── models/                # 31 个 SQLAlchemy ORM 模型
+│   │   ├── services/              # 20 个业务逻辑服务
 │   │   ├── workers/               # Celery Worker + Inline Runner
 │   │   ├── core/                  # 基础设施 (DB, Redis, CSRF, Auth)
 │   │   ├── common/                # 共享工具 (枚举, Schema, 日期)
 │   │   └── prompts/               # LLM Prompt 模板
-│   ├── alembic/                   # 数据库迁移 (27 版本)
+│   ├── alembic/                   # 数据库迁移 (31 版本)
 │   ├── docker/                    # docker-compose.yml + 环境配置
 │   ├── tests/                     # 单元测试 + 集成测试 + 契约测试
 │   ├── scripts/                   # 运维脚本 (Smoke 测试, DB 初始化)
@@ -147,7 +147,7 @@ cnsoftcup/
 │   ├── reports/                   # 阶段报告
 │   └── 作品说明书.md
 │
-├── CLAUDE.md                      # AI 辅助开发架构说明
+├── CLAUDE.md                      # 项目架构说明
 └── README.md                      # 本文件
 ```
 
@@ -171,43 +171,65 @@ cnsoftcup/
 
 Docker Compose 编排了以下服务：PostgreSQL、Redis、MinIO、Mailpit（邮件测试）、后端 API、Celery Worker、Celery Beat、Outbox Publisher、前端 Nginx。
 
+提供两种部署模式：
+- **Demo 模式**：本地开发，HTTP 直连，不需要 TLS 证书
+- **Production 模式**：HTTPS + Nginx 反向代理，需要 TLS 证书
+
 #### 步骤
 
 ```bash
-# 1. 配置后端环境变量
+# 1. 生成密钥和配置
 cd backend/docker
-cp .env.docker.example .env.docker
-# 编辑 .env.docker，填入 APP_SECRET_KEY、LLM_API_KEY 等配置
+./init-production.ps1                  # Windows (自动生成随机密钥)
+./init-production.sh                   # Linux/macOS
 
-# 2. 启动全部服务
-docker-compose up -d
+# 2a. Demo 模式启动（本地开发）
+./start-stack.ps1 -Mode demo           # Windows
+./start-stack.sh demo                  # Linux/macOS
+# 或手动：
+docker compose --env-file .env.docker \
+  --profile demo \
+  -f docker-compose.yml \
+  -f docker-compose.demo.yml \
+  up -d
+
+# 2b. Production 模式启动（HTTPS）
+./init-production.ps1 -GenerateCert    # Windows: 生成自签名证书（测试用）
+./init-production.sh --generate-cert   # Linux/macOS: 生成自签名证书（测试用）
+./start-stack.ps1 -Mode production     # Windows
+./start-stack.sh production            # Linux/macOS
+# 或手动：
+docker compose --env-file .env.docker \
+  -f docker-compose.yml \
+  -f docker-compose.production.yml \
+  up -d
 
 # 3. 验证服务状态
-docker-compose ps
+./verify-stack.ps1 -Mode demo          # 或 -Mode production
 ```
 
 启动完成后：
-- 前端访问 `http://localhost:8081`
-- 后端 API 文档 `http://localhost:8000/docs`
-- MinIO Console `http://localhost:9001`（账号 `minioadmin` / `minioadmin`）
-- Mailpit 邮件查看 `http://localhost:8025`
+- **Demo 模式**：前端 `http://localhost:8081`，后端 `http://localhost:8000/docs`（Swagger UI）
+- **Production 模式**：前端 `https://服务器地址/`，API 文档在生产环境中默认关闭；如需调试请在非生产环境中访问 `http://localhost:8000/docs`
 
+> 所有 `docker compose` 命令必须使用 `--env-file .env.docker`。
 > 数据库迁移由 `migrate` 服务自动执行，无需手动运行 `alembic upgrade head`。
 
 #### Docker 服务列表
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| `postgres` | 5432 | PostgreSQL 16 Alpine |
-| `redis` | 6379 | Redis 7 Alpine |
-| `minio` | 9000 / 9001 | MinIO 对象存储（API / Console） |
-| `mailpit` | 1025 / 8025 | 邮件测试服务（SMTP / Web UI） |
-| `migrate` | — | 一次性数据库迁移服务 |
-| `backend` | 8000 | FastAPI 应用 |
-| `celery-worker` | — | Celery 异步任务执行器 |
-| `celery-beat` | — | Celery 定时任务调度器 |
-| `outbox-publisher` | — | Transactional Outbox 事件发布器 |
-| `frontend` | 8081 | Nginx 前端（反向代理至 backend） |
+| 服务 | 端口（Demo） | 端口（Prod） | 说明 |
+|------|-------------|-------------|------|
+| `postgres` | 内部 | 内部 | PostgreSQL 16 Alpine |
+| `redis` | 内部 | 内部 | Redis 7 Alpine |
+| `minio` | 内部 | 内部 | MinIO 对象存储 |
+| `mailpit` | 8025 | 内部 | 邮件测试服务（Demo 模式可访问 Web UI） |
+| `migrate` | — | — | 一次性数据库迁移服务 |
+| `backend` | 8000 | 内部 | FastAPI 应用 |
+| `celery-worker` | — | — | Celery 异步任务执行器 |
+| `celery-beat` | — | — | Celery 定时任务调度器 |
+| `outbox-publisher` | — | — | Transactional Outbox 事件发布器 |
+| `frontend` | 8081 | 内部 | Nginx 前端 |
+| `nginx` | — | 80/443 | HTTPS 反向代理（仅生产模式） |
 
 ### 方式二：本地开发部署
 
@@ -219,7 +241,7 @@ docker-compose ps
 
 ```bash
 cd backend/docker
-docker-compose up -d postgres redis minio mailpit
+docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml up -d postgres redis minio mailpit
 ```
 
 #### 2. 配置并启动后端
@@ -274,9 +296,9 @@ REDIS_URL=redis://localhost:6379/0
 
 # ── MinIO 对象存储 ──
 MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET_NAME=eduagentx-knowledge
+MINIO_ACCESS_KEY=<your-access-key>
+MINIO_SECRET_KEY=<your-secret-key>
+MINIO_BUCKET=eduagentx
 
 # ── Cookie 安全 ──
 COOKIE_SECURE=false          # 生产环境设为 true
@@ -376,11 +398,15 @@ npm run e2e:real         # E2E 测试 (真实后端)
 ```bash
 cd backend/docker
 
-docker-compose up -d              # 启动所有服务
-docker-compose down               # 停止服务
-docker-compose down -v            # 停止并清除数据卷
-docker-compose logs -f backend    # 查看后端日志
-docker-compose restart backend    # 重启后端
+# Demo 模式
+docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml up -d
+docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml down
+docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml down -v
+docker compose --env-file .env.docker --profile demo -f docker-compose.yml -f docker-compose.demo.yml logs -f backend
+
+# Production 模式
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.production.yml up -d
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.production.yml down
 ```
 
 ### 常见问题排查
@@ -406,7 +432,7 @@ docker-compose ps postgres
 
 **Q: MinIO 连接失败？**
 
-确认 Docker Compose 中 minio 服务已启动且健康。访问 `http://localhost:9001` 可打开 MinIO Console（账号 `minioadmin` / `minioadmin`）。
+确认 Docker Compose 中 minio 服务已启动且健康。MinIO Console 端口仅在 Demo 模式下映射到宿主机，生产模式下仅通过内部网络访问。
 
 **Q: LLM 相关功能不工作？**
 
@@ -415,6 +441,47 @@ docker-compose ps postgres
 **Q: 如何查看 API 文档？**
 
 启动后端后访问 `http://localhost:8000/docs`（Swagger UI）或 `http://localhost:8000/redoc`（ReDoc）。
+
+---
+
+## 桌面客户端发布说明
+
+### 代码签名状态
+
+当前版本的 Windows 安装器**未经代码签名**。安装时 Windows 会显示"未知发布者"警告，SmartScreen 可能拦截。这是比赛阶段的已知限制。
+
+- 在开发者机器上，可通过"更多信息" → "仍要运行"跳过警告
+- 企业环境可能需要 IT 管理员放行
+- 正式发布应使用可信 CA 签发的代码签名证书对 `EduAgentX.exe` 和安装器进行 Authenticode 签名
+
+### 构建安装器
+
+```bash
+cd frontend
+npm ci
+npm run build
+
+# 构建 Tauri 应用（需要 Rust 1.77.2 + MSVC）
+npx tauri build --target x86_64-pc-windows-msvc --no-bundle --config src-tauri/tauri.package.conf.json
+
+# 打包 NSIS 安装器（需要 PowerShell 7+）
+pwsh ./scripts/package-windows.ps1 -SkipAppBuild
+```
+
+构建产物：
+- `EduAgentX_<version>_x64-setup.exe` — NSIS 安装器
+- `EduAgentX_<version>_x64-setup.exe.sha256` — SHA-256 校验文件
+
+### HTTPS 证书配置
+
+桌面客户端连接 HTTPS 后端时，自签名证书需要导入 Windows 信任存储：
+
+```powershell
+cd backend/docker
+.\init-production.ps1 -GenerateCert   # 生成自签名证书
+.\import-cert.ps1                      # 导入到 Trusted Root
+.\import-cert.ps1 -Remove              # 用完后移除
+```
 
 ---
 

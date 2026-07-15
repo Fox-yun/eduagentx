@@ -43,6 +43,7 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     and the task can be retried.
     """
     from app.models.task import BackgroundTask
+    from app.workers.task_runtime import update_task_status
 
     # -------------------------------------------------------------------
     # Phase A — load data (transaction)
@@ -57,6 +58,8 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     attempt_id = db_task.target_id
     if not attempt_id:
         return {"status": "error", "message": "Task has no target_id"}
+
+    await update_task_status(db, task.id, "running", progress=10, stage="loading", message="正在加载诊断数据...")
 
     # Load attempt
     attempt_result = await db.execute(
@@ -79,25 +82,36 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     if attempt.status != "grading":
         return {"status": "error", "message": f"Attempt is {attempt.status}, expected grading"}
 
-    # Load the goal and regenerate questions to get rubric/max_score for each question
+    # Load the goal
     goal_result = await db.execute(select(LearningGoal).where(LearningGoal.id == attempt.goal_id))
     goal = goal_result.scalar_one_or_none()
     if not goal:
         return {"status": "error", "message": f"Goal {attempt.goal_id} not found"}
 
-    # Generate questions from the same bank the router uses
-    from app.routers.diagnostics import _generate_diagnostic_questions
+    # Read cached questions from DB (generated once during GET endpoint)
+    from app.routers.diagnostics import _load_stored_questions
 
-    # Phase 3.6-F: Load profile context for consistent question generation
-    profile_context = None
-    try:
-        from app.services.profile_context import load_learner_profile_context
+    await update_task_status(db, task.id, "running", progress=20, stage="loading", message="正在加载诊断题目...")
 
-        profile_context = await load_learner_profile_context(db, user_id=attempt.user_id)
-    except Exception:
-        pass
+    questions = await _load_stored_questions(db, attempt.goal_id)
+    if not questions:
+        # Fallback: generate if not in DB (shouldn't happen normally)
+        from app.routers.diagnostics import _generate_diagnostic_questions_llm, _store_questions
 
-    questions = _generate_diagnostic_questions(goal, profile_context)
+        await update_task_status(db, task.id, "running", progress=25, stage="generating", message="正在生成诊断题目...")
+
+        profile_context = None
+        try:
+            from app.services.profile_context import load_learner_profile_context
+
+            profile_context = await load_learner_profile_context(db, user_id=attempt.user_id)
+        except Exception:
+            logger.debug("profile_context_load_failed", exc_info=True)
+
+        questions = await _generate_diagnostic_questions_llm(goal, profile_context)
+        questions = await _store_questions(db, attempt.goal_id, questions)
+        await db.commit()
+
     q_map: dict[str, dict[str, Any]] = {q["question_id"]: q for q in questions}
 
     # Load existing answers
@@ -109,6 +123,7 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     # -------------------------------------------------------------------
     # Phase A.N — call LLM for short-answer questions (NO transaction)
     # -------------------------------------------------------------------
+    await update_task_status(db, task.id, "running", progress=40, stage="grading", message="智能体正在评分简答题...")
     llm_results: dict[str, dict[str, Any] | None] = {}
 
     for answer_record in db_answers:
@@ -171,137 +186,139 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
     # -------------------------------------------------------------------
     # Phase B — save results, transition states (single transaction)
     # -------------------------------------------------------------------
-    now_utc = datetime.now(UTC)
-    scored_list: list[dict[str, Any]] = []
-
-    for answer_record in db_answers:
-        q = q_map.get(answer_record.question_id, {})
-        q_type = q.get("type", "")
-        max_score = Decimal(str(q.get("max_score", 10)))
-
-        if q_type == "short_answer":
-            llm_result = llm_results.get(answer_record.question_id)
-            sa = score_short_answer(answer_record.answer or "", llm_result, max_score)
-
-            answer_record.score = float(sa.score)
-            answer_record.is_correct = sa.is_correct
-            answer_record.feedback = sa.feedback
-            answer_record.grading_source = sa.grading_source
-            answer_record.grading_status = sa.grading_status
-            answer_record.updated_at = now_utc
-        # else: objective questions already scored in the router
-
-        scored_list.append(
-            {
-                "id": answer_record.question_id,
-                "dimension": q.get("dimension", "general"),
-                "max_score": answer_record.max_score,
-            }
-        )
-
-    # Re-read all answers after updates to get latest scores
-    all_answers_result = await db.execute(select(DiagnosticAnswer).where(DiagnosticAnswer.attempt_id == attempt_id))
-    all_answers = list(all_answers_result.scalars().all())
-
-    # Build scored answers for aggregation
-    from app.services.diagnostic_scoring import ScoredAnswer
-
-    scored_answers = [
-        ScoredAnswer(
-            question_id=a.question_id,
-            score=Decimal(str(a.score)),
-            max_score=Decimal(str(a.max_score)),
-            is_correct=a.is_correct,
-            feedback=a.feedback,
-            grading_source=a.grading_source or "program",
-            grading_status=a.grading_status or "graded",
-        )
-        for a in all_answers
-    ]
-
-    # Aggregate
-    question_dicts = [
-        {
-            "id": a.question_id,
-            "dimension": q_map.get(a.question_id, {}).get("dimension", "general"),
-            "max_score": a.max_score,
-        }
-        for a in all_answers
-    ]
-    aggregated = aggregate_results(scored_answers, question_dicts)
-
-    # Determine grading quality
-    any_provisional = any(a.grading_status == "provisional" or a.grading_source == "fallback" for a in all_answers)
-    grading_quality = "provisional" if any_provisional else "final"
-
-    # Save DiagnosticResult
-    strong_areas = [dim for dim, pct in aggregated.dimension_scores.items() if pct >= 60.0]
-    weak_areas = [dim for dim, pct in aggregated.dimension_scores.items() if pct < 60.0]
-
-    diag_result = DiagnosticResult(
-        id=str(uuid.uuid4()),
+    await update_task_status(db, task.id, "running", progress=70, stage="aggregating", message="正在汇总评分结果...")
+    return await _finalize_grading_transaction(
+        db=db,
+        attempt=attempt,
+        goal=goal,
         attempt_id=attempt_id,
-        total_score=float(aggregated.total_score),
-        percentage=aggregated.percentage,
-        dimension_scores=aggregated.dimension_scores,
-        strong_areas=strong_areas,
-        weak_areas=weak_areas,
-        readiness_level=aggregated.readiness_level,
-        grading_quality=grading_quality,
-    )
-    db.add(diag_result)
-
-    # Transition attempt to completed
-    attempt.status = "completed"
-    attempt.completed_at = now_utc
-    attempt.grading_quality = grading_quality
-    attempt.updated_at = now_utc
-
-    # Transition goal from diagnosing to planning
-    goal_service = GoalService(db)
-    await goal_service.transition_goal(
-        goal.id,
-        goal.user_id,
-        "planning",
+        db_answers=db_answers,
+        q_map=q_map,
+        llm_results=llm_results,
     )
 
-    # Create path generation task + outbox (same transaction)
-    from app.services.task import TaskService
 
-    task_service = TaskService(db)
-    path_task = await task_service.create_task(
-        user_id=goal.user_id,
-        task_type="learning_path_generation",
-        target_type="goal",
-        target_id=goal.id,
-        idempotency_key=f"path-generate:{goal.id}",
-    )
-
-    # Link path task to goal
-    goal.active_task_id = path_task.id
-
-    # -------------------------------------------------------------------
-    # Phase 3.6-D: Apply diagnostic evidence to StudentProfile
-    # -------------------------------------------------------------------
+async def _finalize_grading_transaction(
+    *,
+    db: Any,
+    attempt: DiagnosticAttempt,
+    goal: LearningGoal,
+    attempt_id: str,
+    db_answers: list[DiagnosticAnswer],
+    q_map: dict[str, dict[str, Any]],
+    llm_results: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Persist grading, goal transition, and path task atomically."""
     try:
-        from app.services.profile_merge import apply_diagnostic_evidence
+        now_utc = datetime.now(UTC)
 
-        await apply_diagnostic_evidence(
-            db,
-            user_id=goal.user_id,
+        for answer_record in db_answers:
+            q = q_map.get(answer_record.question_id, {})
+            q_type = q.get("type", "")
+            max_score = Decimal(str(q.get("max_score", 10)))
+
+            if q_type == "short_answer":
+                llm_result = llm_results.get(answer_record.question_id)
+                sa = score_short_answer(answer_record.answer or "", llm_result, max_score)
+                answer_record.score = float(sa.score)
+                answer_record.is_correct = sa.is_correct
+                answer_record.feedback = sa.feedback
+                answer_record.grading_source = sa.grading_source
+                answer_record.grading_status = sa.grading_status
+                answer_record.updated_at = now_utc
+
+        all_answers_result = await db.execute(
+            select(DiagnosticAnswer).where(DiagnosticAnswer.attempt_id == attempt_id)
+        )
+        all_answers = list(all_answers_result.scalars().all())
+
+        from app.services.diagnostic_scoring import ScoredAnswer
+
+        scored_answers = [
+            ScoredAnswer(
+                question_id=a.question_id,
+                score=Decimal(str(a.score)),
+                max_score=Decimal(str(a.max_score)),
+                is_correct=a.is_correct,
+                feedback=a.feedback,
+                grading_source=a.grading_source or "program",
+                grading_status=a.grading_status or "graded",
+            )
+            for a in all_answers
+        ]
+        question_dicts = [
+            {
+                "id": a.question_id,
+                "dimension": q_map.get(a.question_id, {}).get("dimension", "general"),
+                "max_score": a.max_score,
+            }
+            for a in all_answers
+        ]
+        aggregated = aggregate_results(scored_answers, question_dicts)
+
+        any_provisional = any(
+            a.grading_status == "provisional" or a.grading_source == "fallback" for a in all_answers
+        )
+        grading_quality = "provisional" if any_provisional else "final"
+        strong_areas = [dim for dim, pct in aggregated.dimension_scores.items() if pct >= 60.0]
+        weak_areas = [dim for dim, pct in aggregated.dimension_scores.items() if pct < 60.0]
+
+        diag_result = DiagnosticResult(
+            id=str(uuid.uuid4()),
             attempt_id=attempt_id,
+            total_score=float(aggregated.total_score),
             percentage=aggregated.percentage,
+            dimension_scores=aggregated.dimension_scores,
+            strong_areas=strong_areas,
             weak_areas=weak_areas,
+            readiness_level=aggregated.readiness_level,
+            grading_quality=grading_quality,
         )
-    except Exception as e:
-        logger.warning(
-            "profile_merge_diagnostic_failed",
-            error=str(e),
-            attempt_id=attempt_id,
-        )
+        db.add(diag_result)
 
-    await db.flush()
-    await db.commit()
+        attempt.status = "completed"
+        attempt.completed_at = now_utc
+        attempt.grading_quality = grading_quality
+        attempt.updated_at = now_utc
+
+        goal_service = GoalService(db)
+        await goal_service.transition_goal(goal.id, goal.user_id, "planning", commit=False)
+
+        from app.services.task import TaskService
+
+        task_service = TaskService(db)
+        path_task = await task_service.enqueue_task(
+            user_id=goal.user_id,
+            task_type="learning_path_generation",
+            target_type="goal",
+            target_id=goal.id,
+            idempotency_key=f"path-generate:{goal.id}",
+        )
+        goal.active_task_id = path_task.id
+
+        try:
+            from app.services.profile_merge import apply_diagnostic_evidence
+
+            async with db.begin_nested():
+                await apply_diagnostic_evidence(
+                    db,
+                    user_id=goal.user_id,
+                    attempt_id=attempt_id,
+                    percentage=aggregated.percentage,
+                    weak_areas=weak_areas,
+                )
+        except Exception as e:
+            logger.warning(
+                "profile_merge_diagnostic_failed",
+                error=str(e),
+                attempt_id=attempt_id,
+            )
+
+        await db.flush()
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     logger.info(
         "diagnostic_grading_completed",
@@ -311,7 +328,6 @@ async def execute_diagnostic_grading(db: Any, task: Any) -> dict[str, Any]:
         percentage=aggregated.percentage,
         path_task_id=path_task.id,
     )
-
     return {
         "status": "completed",
         "attempt_id": attempt_id,

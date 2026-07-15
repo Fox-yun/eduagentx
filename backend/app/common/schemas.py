@@ -34,5 +34,7 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str
-    version: str = "3.0.0"
+    service: str = "eduagentx-api"
+    version: str = "4.1.0"
+    api_version: str = "4.1"
     environment: str = ""

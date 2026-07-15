@@ -45,6 +45,20 @@ async def lifespan(app: object) -> AsyncGenerator[None, None]:
     inline_task: asyncio.Task | None = None
     if settings.app_env == "development":
         try:
+            from app.core.database import get_session_factory
+            from app.workers.task_runtime import recover_stale_tasks
+
+            async with get_session_factory()() as recovery_db:
+                recovered = await recover_stale_tasks(recovery_db, finalize_cancel_requests=True)
+            if recovered:
+                logger.info("stale_tasks_recovered_on_startup", task_ids=recovered)
+
+            # Register all task handlers so the inline runner can dispatch them
+            from app.workers.task_handlers import register_builtin_task_handlers
+
+            register_builtin_task_handlers()
+            logger.info("task_handlers_registered")
+
             from app.workers.inline_runner import run_inline_outbox_poller
 
             inline_stop = asyncio.Event()

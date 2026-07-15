@@ -190,6 +190,8 @@ class TestPathServiceGetPathWithDetails:
                 return _mock_scalars(nodes)
             elif call_count == 5:  # edges
                 return _mock_scalars(edges)
+            elif call_count == 6:  # per-user progress
+                return _mock_scalars([])
             return _mock_scalar_result(None)
 
         db.execute = AsyncMock(side_effect=execute_side_effect)
@@ -398,6 +400,37 @@ class TestPathServiceCreatePathVersion:
 
 
 class TestPathServiceActivateVersion:
+    @pytest.mark.asyncio
+    async def test_activate_latest_version_delegates_to_atomic_activation(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        version = _make_version(id="ver-2", version_number=2, status="in_review")
+        path = _make_path()
+        db.execute = AsyncMock(return_value=_mock_scalar_result(version))
+        svc = PathService(db)
+        svc.activate_version = AsyncMock(return_value=path)
+
+        result_path, version_id = await svc.activate_latest_version("path-1", "user-1")
+
+        assert result_path is path
+        assert version_id == "ver-2"
+        svc.activate_version.assert_awaited_once_with("path-1", "user-1", "ver-2")
+
+    @pytest.mark.asyncio
+    async def test_activate_latest_version_requires_draft_or_review(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalar_result(None))
+        svc = PathService(db)
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.activate_latest_version("path-1", "user-1")
+
+        assert exc_info.value.code == "NO_ACTIVATABLE_VERSION"
+        assert exc_info.value.status_code == 409
+
     @pytest.mark.asyncio
     async def test_activate_version_success(self):
         from app.services.path import PathService
@@ -626,6 +659,58 @@ class TestPathServiceRevisionRequest:
         assert revision_req.revision_request == "Please revise"
         db.add.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_create_revision_request_uses_latest_draft_before_first_activation(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id=None, status="draft")
+        draft = _make_version(id="draft-ver-2", version_number=2, status="draft")
+
+        db.execute = AsyncMock(
+            side_effect=[
+                _mock_scalar_result(path),
+                _mock_scalar_result(draft),
+                _mock_scalar_result(None),
+            ]
+        )
+        task = MagicMock(id="revision-task-1")
+        with patch(
+            "app.services.task.TaskService.enqueue_task",
+            new_callable=AsyncMock,
+            return_value=task,
+        ) as enqueue:
+            revision_req, returned_task = await svc.create_revision_request(
+                "path-1", "user-1", "增加更多实践"
+            )
+
+        assert revision_req.source_version_id == "draft-ver-2"
+        assert revision_req.task_id == "revision-task-1"
+        assert returned_task is task
+        assert enqueue.await_args.kwargs["target_metadata"] == {
+            "path_id": "path-1",
+            "source_version_id": "draft-ver-2",
+        }
+
+    @pytest.mark.asyncio
+    async def test_create_revision_request_rejects_path_without_any_source_version(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        svc = PathService(db)
+        path = _make_path(active_version_id=None, status="draft")
+        db.execute = AsyncMock(
+            side_effect=[_mock_scalar_result(path), _mock_scalar_result(None)]
+        )
+
+        with pytest.raises(ApiError) as exc_info:
+            await svc.create_revision_request("path-1", "user-1", "增加更多实践")
+
+        assert exc_info.value.code == "NO_REVISION_SOURCE"
+
 
 class TestPathServiceListVersions:
     @pytest.mark.asyncio
@@ -659,6 +744,39 @@ class TestPathServiceListVersions:
 
 
 class TestPathServiceFormatPath:
+    @pytest.mark.asyncio
+    async def test_format_path_overlays_per_user_progress(self):
+        from app.services.path import PathService
+
+        db = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar.return_value = "Python path"
+        db.execute.return_value = mock_res
+        svc = PathService(db)
+        path = _make_path()
+        version = _make_version()
+        completed_node = _make_node(id="node-1", status="available", mastery=0.0)
+        next_node = _make_node(id="node-2", status="locked", mastery=0.0)
+        completed_progress = MagicMock(node_id="node-1", status="completed", mastery=92.0)
+        available_progress = MagicMock(node_id="node-2", status="available", mastery=0.0)
+
+        result = await svc._format_path(
+            path,
+            version,
+            [],
+            [completed_node, next_node],
+            [],
+            {
+                "node-1": completed_progress,
+                "node-2": available_progress,
+            },
+        )
+
+        assert result["nodes"][0]["status"] == "completed"
+        assert result["nodes"][0]["mastery"] == 92.0
+        assert result["nodes"][1]["status"] == "available"
+        assert result["current_node_id"] == "node-2"
+
     @pytest.mark.asyncio
     async def test_format_path_with_version(self):
         from app.services.path import PathService

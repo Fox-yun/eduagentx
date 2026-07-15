@@ -324,6 +324,21 @@ async def finalize_assessment_attempt(
     except Exception as e:
         logger.warning("profile_merge_assessment_failed", error=str(e), attempt_id=attempt.id)
 
+    # A path change is only proposed here. It is never applied until the
+    # learner explicitly accepts the proposal through the path API.
+    if not assessment_passed:
+        try:
+            from app.services.adaptation import ensure_failure_adaptation_proposal
+
+            await ensure_failure_adaptation_proposal(
+                db,
+                user_id=attempt.user_id,
+                path_id=assessment.path_id,
+                trigger_node_id=assessment.node_id,
+            )
+        except Exception as e:
+            logger.warning("adaptation_proposal_failed", error=str(e), attempt_id=attempt.id)
+
     # ------------------------------------------------------------------
     # 16. Mark progress as applied
     # ------------------------------------------------------------------

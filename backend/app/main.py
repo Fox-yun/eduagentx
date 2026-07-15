@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.common.schemas import HealthResponse
 from app.config import get_settings
 from app.core.csrf import CSRFMiddleware
-from app.core.database import check_database_connection
+from app.core.database import check_database_connection, get_engine
 from app.core.errors import register_error_handlers
 from app.core.redis import check_redis_connection
 from app.core.request_context import RequestIDMiddleware
@@ -21,8 +23,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="EduAgentX API",
-        version="3.0.0",
-        description="EduAgentX Backend - Phase 3",
+        version="4.1.0",
+        description="EduAgentX Backend",
         lifespan=lifespan,
         docs_url="/docs" if not settings.is_production else None,
         redoc_url="/redoc" if not settings.is_production else None,
@@ -46,16 +48,56 @@ def create_app() -> FastAPI:
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     async def health_live() -> HealthResponse:
         """Liveness probe - checks if the process is running."""
-        return HealthResponse(status="ok", environment=settings.app_env)
+        return HealthResponse(
+            status="ok",
+            service="eduagentx-api",
+            version="4.1.0",
+            api_version="4.1",
+            environment=settings.app_env,
+        )
 
     @app.get("/health/ready", tags=["health"])
-    async def health_ready() -> dict[str, str | bool]:
+    async def health_ready() -> dict[str, Any]:
         """Readiness probe - checks if the service is ready to accept requests."""
         db_ok = await check_database_connection()
         redis_ok = await check_redis_connection()
 
-        if db_ok and redis_ok:
-            return {"status": "ready", "database": True, "redis": True}
+        # Check MinIO connectivity
+        minio_ok = False
+        try:
+            from app.services.storage import get_object_storage
+
+            storage = get_object_storage()
+            minio_ok = await storage.exists("__health_check__")
+            minio_ok = True  # exists() returns False for non-existent key, which means connection works
+        except Exception:
+            minio_ok = False
+
+        # Check current Alembic migration version
+        migration_version = None
+        if db_ok:
+            try:
+                from sqlalchemy import text
+
+                engine = get_engine()
+                async with engine.connect() as conn:
+                    result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+                    row = result.fetchone()
+                    migration_version = row[0] if row else None
+            except Exception:
+                migration_version = None
+
+        if db_ok and redis_ok and minio_ok:
+            return {
+                "status": "ready",
+                "service": "eduagentx-api",
+                "version": "4.1.0",
+                "api_version": "4.1",
+                "database": True,
+                "redis": True,
+                "minio": True,
+                "migration_version": migration_version,
+            }
 
         from fastapi import HTTPException
 
@@ -63,8 +105,11 @@ def create_app() -> FastAPI:
             status_code=503,
             detail={
                 "status": "not_ready",
+                "service": "eduagentx-api",
                 "database": db_ok,
                 "redis": redis_ok,
+                "minio": minio_ok,
+                "migration_version": migration_version,
             },
         )
 
@@ -75,6 +120,7 @@ def create_app() -> FastAPI:
     from app.routers.diagnostics import router as diagnostics_router
     from app.routers.goals import router as goals_router
     from app.routers.knowledge import router as knowledge_router
+    from app.routers.learning import router as learning_router
     from app.routers.paths import router as paths_router
     from app.routers.profile import router as profile_router
     from app.routers.resume import router as resume_router
@@ -93,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(units_router, prefix="/api/learning-paths", tags=["units"])
     app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
     app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
+    app.include_router(learning_router, prefix="/api/learning", tags=["learning"])
 
     # Assessment submit uses a different prefix than other unit routes
     from app.routers.units import submit_assessment

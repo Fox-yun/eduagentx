@@ -16,12 +16,13 @@ Run with:
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.core.errors import ApiError
 from app.models.unit import LearningResource
+from app.routers.units import _parse_byte_range
 from app.services.resources import ResourceService
 
 
@@ -93,6 +94,24 @@ class TestDownloadResourceBinary:
         assert filename == "node-1-code-project.zip"
         assert content_type == "application/zip"
 
+    async def test_download_narrated_video_success(self, service):
+        """Narrated video download returns an MP4 artifact."""
+        fake_bytes = b"fake-mp4-content"
+        service.storage.get = AsyncMock(return_value=fake_bytes)
+        resource = _make_resource(
+            resource_type="narrated_video",
+            storage_key="resources/u1/n1/narrated-video/course.mp4",
+        )
+        service.db.execute = AsyncMock(return_value=_mock_scalar_result(resource))
+
+        file_bytes, filename, content_type = await service.download_resource_binary(
+            "path-1", "node-1", "user-1", "narrated_video"
+        )
+
+        assert file_bytes == fake_bytes
+        assert filename == "node-1-narrated-course.mp4"
+        assert content_type == "video/mp4"
+
     async def test_download_non_binary_type_rejected(self, service):
         """Non-binary resource types raise RESOURCE_NOT_BINARY (400)."""
         with pytest.raises(ApiError) as exc_info:
@@ -139,3 +158,19 @@ class TestDownloadResourceBinary:
             await service.download_resource_binary("path-1", "node-1", "user-1", "pptx")
         assert exc_info.value.status_code == 404
         assert exc_info.value.code == "RESOURCE_ARTIFACT_NOT_FOUND"
+
+
+class TestVideoByteRanges:
+    def test_explicit_range(self):
+        assert _parse_byte_range("bytes=100-199", 1000) == (100, 199)
+
+    def test_open_ended_range(self):
+        assert _parse_byte_range("bytes=900-", 1000) == (900, 999)
+
+    def test_suffix_range(self):
+        assert _parse_byte_range("bytes=-200", 1000) == (800, 999)
+
+    @pytest.mark.parametrize("value", ["items=0-1", "bytes=1000-", "bytes=20-10", "bytes=0-1,4-5"])
+    def test_invalid_or_multiple_ranges(self, value):
+        with pytest.raises(ValueError):
+            _parse_byte_range(value, 1000)

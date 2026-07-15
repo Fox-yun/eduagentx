@@ -5,10 +5,10 @@ Manages creation and retrieval of PPTX, Code ZIP, and Interactive resources.
 
 from __future__ import annotations
 
-import structlog
 import uuid
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ RESOURCE_TYPES = {
     "code_zip",
     "interactive_cards",
     "walkthrough",
-    "simulation",
+    "narrated_video",
 }
 
 RESOURCE_STATUSES = {
@@ -49,6 +49,8 @@ class ResourceService:
         node_id: str,
         user_id: str,
         resource_type: str,
+        *,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Get existing ready resource or start generation.
 
@@ -79,8 +81,10 @@ class ResourceService:
         )
         resource = result.scalar_one_or_none()
 
-        # If ready, return existing
-        if resource and resource.status == "ready":
+        # If ready, return existing unless an explicit regeneration was
+        # requested. Regeneration is useful when source material or prompts
+        # have been improved.
+        if resource and resource.status == "ready" and not force:
             return {
                 "resource_id": resource.id,
                 "resource_type": resource_type,
@@ -119,7 +123,8 @@ class ResourceService:
             await self.db.flush()
 
         # Enqueue generation task
-        idempotency_key = f"resource-generate:{user_id}:{node_id}:{resource_type}"
+        retry_suffix = f":retry:{uuid.uuid4()}" if resource and (resource.status == "failed" or force) else ""
+        idempotency_key = f"resource-generate:{user_id}:{node_id}:{resource_type}{retry_suffix}"
         task = await task_service.enqueue_task(
             user_id=user_id,
             task_type="interactive_resource_generation",
@@ -135,6 +140,8 @@ class ResourceService:
 
         resource.active_task_id = task.id
         resource.status = "generating"
+        resource.error_code = None
+        resource.error_message = None
         await self.db.commit()
 
         return {
@@ -178,8 +185,32 @@ class ResourceService:
                 "content": None,
             }
 
+        # A database row can outlive its binary artifact (for example after a
+        # local development restart using the old in-memory store). Mark it as
+        # failed so the UI offers one-click regeneration instead of a broken
+        # download button.
+        if resource_type in ("pptx", "code_zip", "narrated_video") and (
+            not resource.storage_key or not await self.storage.exists(resource.storage_key)
+        ):
+            resource.status = "failed"
+            resource.active_task_id = None
+            resource.error_code = "RESOURCE_ARTIFACT_NOT_FOUND"
+            resource.error_message = "生成文件已丢失，请重新生成。"
+            resource.updated_at = utc_now()
+            await self.db.commit()
+            return {
+                "resource_id": resource.id,
+                "resource_type": resource_type,
+                "status": "failed",
+                "active_task_id": None,
+                "content": {
+                    "error_code": resource.error_code,
+                    "error_message": resource.error_message,
+                },
+            }
+
         # For binary resources, return storage info
-        if resource_type in ("pptx", "code_zip"):
+        if resource_type in ("pptx", "code_zip", "narrated_video"):
             return {
                 "resource_id": resource.id,
                 "resource_type": resource_type,
@@ -236,9 +267,7 @@ class ResourceService:
         storage_provider: str | None = None,
     ) -> None:
         """Mark resource as ready with content or storage info."""
-        result = await self.db.execute(
-            select(LearningResource).where(LearningResource.id == resource_id)
-        )
+        result = await self.db.execute(select(LearningResource).where(LearningResource.id == resource_id))
         resource = result.scalar_one_or_none()
 
         if resource:
@@ -257,9 +286,7 @@ class ResourceService:
         error_message: str,
     ) -> None:
         """Mark resource as failed with error info."""
-        result = await self.db.execute(
-            select(LearningResource).where(LearningResource.id == resource_id)
-        )
+        result = await self.db.execute(select(LearningResource).where(LearningResource.id == resource_id))
         resource = result.scalar_one_or_none()
 
         if resource:
@@ -285,7 +312,7 @@ class ResourceService:
         Raises:
             ApiError: RESOURCE_NOT_FOUND, RESOURCE_NOT_READY, RESOURCE_NOT_BINARY
         """
-        if resource_type not in ("pptx", "code_zip"):
+        if resource_type not in ("pptx", "code_zip", "narrated_video"):
             raise ApiError(
                 code="RESOURCE_NOT_BINARY",
                 message=f"Resource type '{resource_type}' is not downloadable",
@@ -317,19 +344,22 @@ class ResourceService:
 
         try:
             file_bytes = await self.storage.get(resource.storage_key)
-        except Exception:
+        except Exception as exc:
             raise ApiError(
                 code="RESOURCE_ARTIFACT_NOT_FOUND",
                 message="Artifact file not found in storage",
                 status_code=404,
-            )
+            ) from exc
 
         # Safe filename
         if resource_type == "pptx":
             filename = f"{node_id}-presentation.pptx"
             content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        else:
+        elif resource_type == "code_zip":
             filename = f"{node_id}-code-project.zip"
             content_type = "application/zip"
+        else:
+            filename = f"{node_id}-narrated-course.mp4"
+            content_type = "video/mp4"
 
         return file_bytes, filename, content_type

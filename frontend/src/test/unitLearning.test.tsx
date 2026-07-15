@@ -100,13 +100,13 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
           content_version: 1,
           status: "ready",
           active_task_id: null,
-          introduction: "# 主动学习与样本筛选讲解\n\n导学部分描述了核心思想。",
+          introduction: "# 旧课程结构正文\n\n这部分不应直接展示给学习者。",
           objectives: ["掌握不确定性采样", "掌握多样性采样"],
           sections: [
             {
               section_id: "sec-1",
               title: "章节正文",
-              content: "主动学习可以极大地节省标注成本。",
+              content: "旧版结构化章节不应直接展示。",
               order: 1,
             }
           ],
@@ -114,6 +114,21 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
           summary: null,
           references: [],
           error: null,
+          lecture: {
+            introduction: "# 主动学习与样本筛选讲解\n\n这是一份连续的课程讲义。",
+            sections: [
+              {
+                section_id: "lecture-sec-1",
+                title: "章节正文",
+                content: "主动学习可以极大地节省标注成本。",
+                order: 1,
+              },
+            ],
+            key_takeaways: ["优先选择信息量高的样本"],
+            common_mistakes: [],
+            summary: "完成本节后应能解释样本筛选策略。",
+          },
+          active_lecture_task_id: null,
         });
       }),
 
@@ -220,6 +235,11 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
     // Wait for task completion and refetch content loading
     expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
     expect(screen.getByText("主动学习可以极大地节省标注成本。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "📖 课程讲义" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "📖 课程内容" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "📝 讲义" })).not.toBeInTheDocument();
+    expect(screen.queryByText("旧课程结构正文")).not.toBeInTheDocument();
+    expect(screen.queryByText("旧版结构化章节不应直接展示。")).not.toBeInTheDocument();
 
     // Click Quiz/Assessment Button — should navigate to assessment page
     const startQuizBtn = screen.getByRole("button", { name: "评估中心" });
@@ -308,10 +328,25 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
           summary: null,
           references: [],
           error: null,
+          lecture: {
+            introduction: "# 主动学习与样本筛选讲解\n\n这是一份连续的课程讲义。",
+            sections: [
+              {
+                section_id: "lecture-sec-1",
+                title: "章节正文",
+                content: "主动学习可以极大地节省标注成本。",
+                order: 1,
+              },
+            ],
+            key_takeaways: ["优先选择信息量高的样本"],
+            common_mistakes: [],
+            summary: "完成本节后应能解释样本筛选策略。",
+          },
+          active_lecture_task_id: null,
         });
       }),
 
-      http.post("/api/learning-paths/path-123/nodes/node-555/content", () => {
+      http.post("/api/learning-paths/path-123/nodes/node-555/content/regenerate", () => {
         return HttpResponse.json({
           next_step: "generating",
           active_task_id: "task-unit-999",
@@ -380,28 +415,31 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
     const textarea = screen.getByPlaceholderText(/例如：多给出一点 Python/i);
     fireEvent.change(textarea, { target: { value: "Please use Python examples" } });
 
+    FakeTaskStreamTransport.setMockEvents("task-unit-999", [
+      {
+        event_id: "evt-done",
+        task_id: "task-unit-999",
+        type: "completed",
+        status: "completed",
+        progress: 100,
+        message: "Unit sections successfully completed!",
+        stage: "编写完成",
+        result: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
     // Submit regeneration
     fireEvent.click(screen.getByRole("button", { name: "重新编写" }));
 
     // Verify task stream overlay loaded after regeneration trigger
     expect(await screen.findByText("正在启动单元编写智能体...")).toBeInTheDocument();
 
-    // Reset SSE task events mock to simulate task completion
-    FakeTaskStreamTransport.triggerEvent("task-unit-999", {
-      event_id: "evt-done",
-      task_id: "task-unit-999",
-      type: "completed",
-      status: "completed",
-      progress: 100,
-      message: "Unit sections successfully completed!",
-      stage: "编写完成",
-      result: null,
-      timestamp: new Date().toISOString(),
+    // 2. Assessment remains available while regeneration finishes.
+    await waitFor(() => {
+      expect(screen.queryByText("个性化生成偏好")).not.toBeInTheDocument();
     });
-
-    // 2. Click Quiz/Assessment Button — should navigate to assessment page
-    expect(await screen.findByText("主动学习与样本筛选讲解")).toBeInTheDocument();
-    const startQuizBtn = screen.getByRole("button", { name: "评估中心" });
+    const startQuizBtn = await screen.findByRole("button", { name: "评估中心" });
     fireEvent.click(startQuizBtn);
 
     // Verify navigation to assessment page
@@ -429,9 +467,21 @@ describe("UnitLearningPage Integration and Quiz Tests", () => {
           nodes: [
             {
               node_id: "node-555",
+              stage_id: "stage-1",
               title: "主动学习与样本筛选策略",
+              description: "研究如何挑选信息量最大的样本进行标注。",
+              node_order: 1,
+              level: 1,
+              difficulty: "advanced",
+              estimated_minutes: 90,
               status: "available",
+              mastery: 0,
               content_status: "failed",
+              learning_outcomes: ["掌握样本筛选策略"],
+              assessment_strategy: "测试评估",
+              generation_reason: "核心难点",
+              prerequisite_ids: [],
+              next_node_ids: [],
             },
           ],
           edges: [],
